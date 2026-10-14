@@ -45,6 +45,12 @@ INDEX_HTML = """<!DOCTYPE html>
             --btn-bg: #f4f4f5;
             --btn-text: #09090b;
             --badge-bg: #18181b;
+            --desk-bg: #0d0e12;
+            --paper-bg: #ffffff;
+            --paper-text: #09090b;
+            --paper-border: #e4e4e7;
+            --paper-shadow: 0 10px 30px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(255, 255, 255, 0.08);
+            --margin-line: rgba(37, 99, 235, 0.35);
             --accent: #3b82f6;
             --success: #22c55e;
             --danger: #ef4444;
@@ -63,6 +69,12 @@ INDEX_HTML = """<!DOCTYPE html>
             --btn-bg: #0f172a;
             --btn-text: #ffffff;
             --badge-bg: #f1f5f9;
+            --desk-bg: #e2e8f0;
+            --paper-bg: #ffffff;
+            --paper-text: #0f172a;
+            --paper-border: #cbd5e1;
+            --paper-shadow: 0 10px 25px rgba(0, 0, 0, 0.08), 0 0 0 1px rgba(0, 0, 0, 0.05);
+            --margin-line: rgba(37, 99, 235, 0.25);
             --accent: #2563eb;
             --success: #16a34a;
             --danger: #dc2626;
@@ -201,10 +213,10 @@ INDEX_HTML = """<!DOCTYPE html>
         /* Container Layout */
         main {
             flex: 1;
-            max-width: 1080px;
+            max-width: 1120px;
             width: 100%;
             margin: 0 auto;
-            padding: 32px 20px;
+            padding: 28px 20px 40px;
         }
 
         .tab-content {
@@ -216,12 +228,12 @@ INDEX_HTML = """<!DOCTYPE html>
 
         .grid-layout {
             display: grid;
-            grid-template-columns: 1.1fr 1fr;
+            grid-template-columns: 1.15fr 1fr;
             gap: 24px;
             align-items: start;
         }
 
-        @media (max-width: 860px) {
+        @media (max-width: 900px) {
             .grid-layout { grid-template-columns: 1fr; }
         }
 
@@ -230,7 +242,7 @@ INDEX_HTML = """<!DOCTYPE html>
             background: var(--surface);
             border: 1px solid var(--border);
             border-radius: var(--radius-lg);
-            padding: 24px;
+            padding: 22px;
             box-shadow: 0 1px 3px rgba(0,0,0,0.03);
             transition: var(--transition-theme);
         }
@@ -239,7 +251,7 @@ INDEX_HTML = """<!DOCTYPE html>
             display: flex;
             align-items: center;
             justify-content: space-between;
-            margin-bottom: 20px;
+            margin-bottom: 16px;
         }
 
         .card-heading {
@@ -279,7 +291,7 @@ INDEX_HTML = """<!DOCTYPE html>
         .dropzone {
             border: 1px dashed var(--border-hover);
             border-radius: var(--radius-md);
-            padding: 36px 20px;
+            padding: 32px 20px;
             text-align: center;
             cursor: pointer;
             background: var(--bg);
@@ -302,13 +314,13 @@ INDEX_HTML = """<!DOCTYPE html>
             color: var(--text-tertiary);
         }
 
-        /* File Preview Container */
+        /* Realistic Real-Time Paper Preview Viewer */
         .preview-box {
             display: none;
-            margin-top: 16px;
+            margin-top: 18px;
             border: 1px solid var(--border);
             border-radius: var(--radius-md);
-            background: var(--bg);
+            background: var(--surface);
             overflow: hidden;
         }
 
@@ -320,12 +332,13 @@ INDEX_HTML = """<!DOCTYPE html>
             border-bottom: 1px solid var(--border);
             font-size: 12px;
             color: var(--text-secondary);
+            background: var(--surface);
         }
 
         .preview-info {
             display: flex;
             align-items: center;
-            gap: 10px;
+            gap: 8px;
             overflow: hidden;
         }
 
@@ -335,7 +348,17 @@ INDEX_HTML = """<!DOCTYPE html>
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
-            max-width: 220px;
+            max-width: 180px;
+        }
+
+        .preview-meta-pill {
+            font-size: 11px;
+            font-family: var(--font-mono);
+            color: var(--text-tertiary);
+            background: var(--surface-elevated);
+            padding: 2px 6px;
+            border-radius: 4px;
+            border: 1px solid var(--border);
         }
 
         .btn-clear {
@@ -352,34 +375,138 @@ INDEX_HTML = """<!DOCTYPE html>
             background: var(--surface-elevated);
         }
 
-        .preview-canvas-wrap {
-            padding: 16px;
+        /* Virtual Desk Workspace */
+        .preview-viewport {
+            background: var(--desk-bg);
+            padding: 24px 16px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 380px;
+            position: relative;
+            overflow: hidden;
+            transition: var(--transition-theme);
+        }
+
+        /* Simulated Physical Paper Sheet */
+        .paper-sheet {
+            background: var(--paper-bg);
+            color: var(--paper-text);
+            box-shadow: var(--paper-shadow);
+            border-radius: 3px;
+            position: relative;
             display: flex;
             align-items: center;
             justify-content: center;
-            min-height: 220px;
-            max-height: 380px;
-            overflow: auto;
+            overflow: hidden;
+            transition: width 0.25s cubic-bezier(0.16, 1, 0.3, 1), 
+                        height 0.25s cubic-bezier(0.16, 1, 0.3, 1),
+                        filter 0.2s ease;
         }
 
-        .preview-canvas-wrap img {
+        /* Printable Margins Guide (5% inset) */
+        .printable-area {
+            position: absolute;
+            inset: 12px;
+            border: 1px dashed var(--margin-line);
+            border-radius: 2px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+            pointer-events: none;
+        }
+
+        /* Document Render Container */
+        .content-render-wrap {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            pointer-events: auto;
+        }
+
+        .content-render-wrap img {
             max-width: 100%;
-            max-height: 340px;
-            border-radius: 4px;
-            border: 1px solid var(--border);
+            max-height: 100%;
+            object-fit: contain;
+            display: block;
+        }
+
+        .content-render-wrap.scale-fill img {
+            object-fit: cover;
+            width: 100%;
+            height: 100%;
         }
 
         #pdfCanvas {
             max-width: 100%;
-            height: auto;
-            border-radius: 4px;
-            border: 1px solid var(--border);
+            max-height: 100%;
+            object-fit: contain;
+            display: block;
+        }
+
+        .text-sheet-content {
+            font-family: var(--font-mono);
+            font-size: 11px;
+            line-height: 1.4;
+            color: #1e293b;
+            padding: 8px;
+            overflow: hidden;
+            width: 100%;
+            height: 100%;
+            word-break: break-all;
+            white-space: pre-wrap;
+        }
+
+        /* Multi-page Grid (N-Up 2 or 4) */
+        .nup-grid-2 {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+            width: 100%;
+            height: 100%;
+            padding: 6px;
+        }
+
+        .nup-grid-4 {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            grid-template-rows: 1fr 1fr;
+            gap: 6px;
+            width: 100%;
+            height: 100%;
+            padding: 6px;
+        }
+
+        .nup-cell {
+            border: 1px solid rgba(0, 0, 0, 0.1);
+            background: #f8fafc;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+            font-size: 10px;
+            color: #64748b;
+        }
+
+        /* Live Preview Badge on Desk */
+        .preview-dimensions-tag {
+            margin-top: 14px;
+            font-size: 11px;
+            font-family: var(--font-mono);
+            color: var(--text-tertiary);
+            display: flex;
+            align-items: center;
+            gap: 10px;
         }
 
         .preview-pagination {
             display: flex;
             align-items: center;
-            gap: 8px;
+            gap: 6px;
             font-size: 11px;
             color: var(--text-tertiary);
         }
@@ -388,7 +515,7 @@ INDEX_HTML = """<!DOCTYPE html>
             background: var(--surface);
             border: 1px solid var(--border);
             color: var(--text-secondary);
-            padding: 2px 6px;
+            padding: 1px 6px;
             border-radius: 4px;
             cursor: pointer;
             font-size: 11px;
@@ -679,7 +806,7 @@ INDEX_HTML = """<!DOCTYPE html>
             </nav>
 
             <button type="button" class="btn-theme" onclick="toggleTheme()" title="Toggle theme">
-                <!-- Sun Icon (for Dark mode) -->
+                <!-- Sun Icon -->
                 <svg class="icon-sun" viewBox="0 0 24 24">
                     <circle cx="12" cy="12" r="5"></circle>
                     <line x1="12" y1="1" x2="12" y2="3"></line>
@@ -691,7 +818,7 @@ INDEX_HTML = """<!DOCTYPE html>
                     <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
                     <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
                 </svg>
-                <!-- Moon Icon (for Light mode) -->
+                <!-- Moon Icon -->
                 <svg class="icon-moon" viewBox="0 0 24 24">
                     <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
                 </svg>
@@ -705,10 +832,10 @@ INDEX_HTML = """<!DOCTYPE html>
             <form id="printForm">
                 <div class="grid-layout">
                     
-                    <!-- Left: File & Preview -->
+                    <!-- Left: File & Real-Time Dynamic Paper Preview -->
                     <div class="card">
                         <div class="card-header">
-                            <span class="card-heading">Document</span>
+                            <span class="card-heading">Document Preview</span>
                             <span id="fileBadge" style="font-size: 11px; color: var(--text-tertiary);">No file selected</span>
                         </div>
 
@@ -722,7 +849,7 @@ INDEX_HTML = """<!DOCTYPE html>
                             <div class="preview-head">
                                 <div class="preview-info">
                                     <span class="preview-name" id="previewName">file.pdf</span>
-                                    <span id="previewDetails" style="font-size: 11px; color: var(--text-tertiary);"></span>
+                                    <span class="preview-meta-pill" id="previewSizePill">0 KB</span>
                                 </div>
                                 <div style="display: flex; align-items: center; gap: 8px;">
                                     <div class="preview-pagination" id="previewPagination" style="display: none;">
@@ -733,10 +860,25 @@ INDEX_HTML = """<!DOCTYPE html>
                                     <button type="button" class="btn-clear" onclick="clearFile()">✕</button>
                                 </div>
                             </div>
-                            <div class="preview-canvas-wrap">
-                                <img id="imgPreview" style="display: none;" alt="Preview">
-                                <canvas id="pdfCanvas" style="display: none;"></canvas>
-                                <div id="txtPreview" style="display: none; font-family: var(--font-mono); font-size: 12px; color: var(--text-secondary); white-space: pre-wrap; width: 100%;"></div>
+
+                            <!-- Interactive Desk & Real-time Paper Sheet -->
+                            <div class="preview-viewport">
+                                <div class="paper-sheet" id="paperSheet">
+                                    <div class="printable-area" id="printableArea">
+                                        <div class="content-render-wrap" id="renderWrap">
+                                            <img id="imgPreview" style="display: none;" alt="Preview">
+                                            <canvas id="pdfCanvas" style="display: none;"></canvas>
+                                            <div id="txtPreview" class="text-sheet-content" style="display: none;"></div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="preview-dimensions-tag">
+                                    <span id="sheetFormatTag">A4 • 210 × 297 mm</span>
+                                    <span>•</span>
+                                    <span id="sheetOrientationTag">Portrait</span>
+                                    <span>•</span>
+                                    <span id="sheetColorTag">Color</span>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -773,11 +915,11 @@ INDEX_HTML = """<!DOCTYPE html>
                                 <label class="label">Color</label>
                                 <div class="radio-pills">
                                     <div class="radio-pill">
-                                        <input type="radio" id="colRGB" name="colormodel" value="RGB" checked>
+                                        <input type="radio" id="colRGB" name="colormodel" value="RGB" checked onchange="updatePreviewLayout()">
                                         <label for="colRGB">Color</label>
                                     </div>
                                     <div class="radio-pill">
-                                        <input type="radio" id="colGray" name="colormodel" value="KGray">
+                                        <input type="radio" id="colGray" name="colormodel" value="KGray" onchange="updatePreviewLayout()">
                                         <label for="colGray">B&W</label>
                                     </div>
                                 </div>
@@ -803,7 +945,7 @@ INDEX_HTML = """<!DOCTYPE html>
                             <div class="grid-2 form-row">
                                 <div>
                                     <label class="label">Paper Size</label>
-                                    <select id="advSize" name="pagesize">
+                                    <select id="advSize" name="pagesize" onchange="updatePreviewLayout()">
                                         <option value="A4" selected>A4</option>
                                         <option value="Letter">Letter</option>
                                         <option value="Legal">Legal</option>
@@ -850,7 +992,7 @@ INDEX_HTML = """<!DOCTYPE html>
                             <div class="grid-2 form-row">
                                 <div>
                                     <label class="label">Orientation</label>
-                                    <select name="orientation">
+                                    <select id="orientationSelect" name="orientation" onchange="updatePreviewLayout()">
                                         <option value="auto" selected>Auto</option>
                                         <option value="3">Portrait</option>
                                         <option value="4">Landscape</option>
@@ -858,16 +1000,26 @@ INDEX_HTML = """<!DOCTYPE html>
                                 </div>
                                 <div>
                                     <label class="label">Scaling</label>
-                                    <select name="fitpage">
+                                    <select id="scalingSelect" name="fitpage" onchange="updatePreviewLayout()">
                                         <option value="true" selected>Fit to Page</option>
-                                        <option value="false">100% Scale</option>
+                                        <option value="false">Fill Sheet</option>
                                     </select>
                                 </div>
                             </div>
 
-                            <div class="form-row">
-                                <label class="label">Page Range</label>
-                                <input type="text" name="pagerange" class="input" placeholder="e.g. 1-4, 7">
+                            <div class="grid-2 form-row">
+                                <div>
+                                    <label class="label">Pages per Sheet</label>
+                                    <select id="nupSelect" name="numberup" onchange="updatePreviewLayout()">
+                                        <option value="1" selected>1-Up (Single)</option>
+                                        <option value="2">2-Up (Side-by-side)</option>
+                                        <option value="4">4-Up (Grid)</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label class="label">Page Range</label>
+                                    <input type="text" name="pagerange" class="input" placeholder="e.g. 1-4, 7">
+                                </div>
                             </div>
                         </div>
 
@@ -953,10 +1105,24 @@ INDEX_HTML = """<!DOCTYPE html>
     <script>
         pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 
+        const PAPER_SPECS = {
+            'A4': { width: 210, height: 297, name: 'A4', desc: '210 × 297 mm' },
+            'Letter': { width: 215.9, height: 279.4, name: 'Letter', desc: '8.5 × 11 in' },
+            'Legal': { width: 215.9, height: 355.6, name: 'Legal', desc: '8.5 × 14 in' },
+            'A5': { width: 148, height: 210, name: 'A5', desc: '148 × 210 mm' },
+            'A6': { width: 105, height: 148, name: 'A6', desc: '105 × 148 mm' },
+            'B5': { width: 176, height: 250, name: 'B5', desc: '176 × 250 mm' },
+            '4x6in': { width: 101.6, height: 152.4, name: '4 × 6 in', desc: 'Photo Card' },
+            '5x7in': { width: 127, height: 177.8, name: '5 × 7 in', desc: 'Photo Card' },
+            '8x10': { width: 203.2, height: 254, name: '8 × 10 in', desc: 'Photo Print' },
+            'EnvelopeDL': { width: 110, height: 220, name: 'Envelope DL', desc: '110 × 220 mm' }
+        };
+
         let currentPdf = null;
         let pdfPage = 1;
         let pdfPagesTotal = 1;
         let mode = 'simple';
+        let docNaturalAspect = 1.414; // Default portrait aspect ratio
 
         // Theme switching
         function toggleTheme() {
@@ -970,7 +1136,7 @@ INDEX_HTML = """<!DOCTYPE html>
         const fileInput = document.getElementById('fileInput');
         const previewBox = document.getElementById('previewBox');
         const previewName = document.getElementById('previewName');
-        const previewDetails = document.getElementById('previewDetails');
+        const previewSizePill = document.getElementById('previewSizePill');
         const fileBadge = document.getElementById('fileBadge');
         const imgPreview = document.getElementById('imgPreview');
         const pdfCanvas = document.getElementById('pdfCanvas');
@@ -981,6 +1147,13 @@ INDEX_HTML = """<!DOCTYPE html>
         const btnNext = document.getElementById('btnNext');
         const toast = document.getElementById('toast');
         const btnSubmit = document.getElementById('btnSubmit');
+
+        // Paper Preview DOM elements
+        const paperSheet = document.getElementById('paperSheet');
+        const renderWrap = document.getElementById('renderWrap');
+        const sheetFormatTag = document.getElementById('sheetFormatTag');
+        const sheetOrientationTag = document.getElementById('sheetOrientationTag');
+        const sheetColorTag = document.getElementById('sheetColorTag');
 
         dropzone.addEventListener('click', () => fileInput.click());
         dropzone.addEventListener('dragover', (e) => { e.preventDefault(); dropzone.classList.add('dragover'); });
@@ -999,7 +1172,9 @@ INDEX_HTML = """<!DOCTYPE html>
             if (!fileInput.files.length) return;
             const f = fileInput.files[0];
             previewName.textContent = f.name;
-            fileBadge.textContent = formatBytes(f.size);
+            const sizeStr = formatBytes(f.size);
+            fileBadge.textContent = sizeStr;
+            previewSizePill.textContent = sizeStr;
             previewBox.style.display = 'block';
 
             imgPreview.style.display = 'none';
@@ -1014,7 +1189,8 @@ INDEX_HTML = """<!DOCTYPE html>
                     imgPreview.src = e.target.result;
                     imgPreview.style.display = 'block';
                     imgPreview.onload = () => {
-                        previewDetails.textContent = `${imgPreview.naturalWidth} × ${imgPreview.naturalHeight}px`;
+                        docNaturalAspect = imgPreview.naturalHeight / imgPreview.naturalWidth;
+                        updatePreviewLayout();
                     };
                 };
                 reader.readAsDataURL(f);
@@ -1030,12 +1206,18 @@ INDEX_HTML = """<!DOCTYPE html>
                     }).catch(() => {
                         txtPreview.style.display = 'block';
                         txtPreview.textContent = 'PDF ready to print.';
+                        updatePreviewLayout();
                     });
                 };
                 reader.readAsArrayBuffer(f);
             } else {
-                txtPreview.style.display = 'block';
-                txtPreview.textContent = 'Ready to print.';
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    txtPreview.style.display = 'block';
+                    txtPreview.textContent = e.target.result.slice(0, 1500);
+                    updatePreviewLayout();
+                };
+                reader.readAsText(f);
             }
         }
 
@@ -1043,6 +1225,7 @@ INDEX_HTML = """<!DOCTYPE html>
             if (!currentPdf) return;
             currentPdf.getPage(num).then(page => {
                 const viewport = page.getViewport({ scale: 1.0 });
+                docNaturalAspect = viewport.height / viewport.width;
                 pdfCanvas.height = viewport.height;
                 pdfCanvas.width = viewport.width;
                 pdfCanvas.style.display = 'block';
@@ -1051,6 +1234,7 @@ INDEX_HTML = """<!DOCTYPE html>
                     viewport: viewport
                 });
                 pageIndicator.textContent = `${num} / ${pdfPagesTotal}`;
+                updatePreviewLayout();
             });
         }
 
@@ -1064,16 +1248,88 @@ INDEX_HTML = """<!DOCTYPE html>
             currentPdf = null;
         }
 
+        // Real-Time Layout & Paper Size Geometry Engine
+        function updatePreviewLayout() {
+            // 1. Determine active Paper Size
+            const sizeKey = mode === 'simple' 
+                ? document.getElementById('simpleSize').value 
+                : document.getElementById('advSize').value;
+            const spec = PAPER_SPECS[sizeKey] || PAPER_SPECS['A4'];
+
+            // 2. Determine Orientation
+            let orientation = '3'; // Portrait
+            if (mode === 'advanced') {
+                orientation = document.getElementById('orientationSelect').value;
+            }
+            let isLandscape = false;
+            if (orientation === '4') {
+                isLandscape = true;
+            } else if (orientation === 'auto') {
+                isLandscape = docNaturalAspect < 0.95; // Auto detect wide format
+            }
+
+            // 3. Compute Paper Dimensions for preview viewport
+            const maxDeskWidth = 280;
+            const maxDeskHeight = 330;
+            let paperRatio = spec.height / spec.width;
+            if (isLandscape) {
+                paperRatio = spec.width / spec.height;
+            }
+
+            let sheetW, sheetH;
+            if (maxDeskWidth * paperRatio <= maxDeskHeight) {
+                sheetW = maxDeskWidth;
+                sheetH = Math.round(maxDeskWidth * paperRatio);
+            } else {
+                sheetH = maxDeskHeight;
+                sheetW = Math.round(maxDeskHeight / paperRatio);
+            }
+
+            paperSheet.style.width = sheetW + 'px';
+            paperSheet.style.height = sheetH + 'px';
+
+            // 4. Color Mode (Filter)
+            const isGray = document.getElementById('colGray').checked;
+            paperSheet.style.filter = isGray ? 'grayscale(100%)' : 'none';
+            sheetColorTag.textContent = isGray ? 'B&W' : 'Color';
+
+            // 5. Scaling mode
+            if (mode === 'advanced') {
+                const fitPage = document.getElementById('scalingSelect').value === 'true';
+                renderWrap.classList.toggle('scale-fill', !fitPage);
+            } else {
+                renderWrap.classList.remove('scale-fill');
+            }
+
+            // 6. N-Up layout simulation (Advanced Mode)
+            if (mode === 'advanced') {
+                const nup = document.getElementById('nupSelect').value;
+                if (nup === '2') {
+                    sheetFormatTag.textContent = `${spec.name} • 2-Up`;
+                } else if (nup === '4') {
+                    sheetFormatTag.textContent = `${spec.name} • 4-Up`;
+                } else {
+                    sheetFormatTag.textContent = `${spec.name} • ${spec.desc}`;
+                }
+            } else {
+                sheetFormatTag.textContent = `${spec.name} • ${spec.desc}`;
+            }
+
+            sheetOrientationTag.textContent = isLandscape ? 'Landscape' : 'Portrait';
+        }
+
         function setMode(m) {
             mode = m;
             document.getElementById('btnSimple').classList.toggle('active', m === 'simple');
             document.getElementById('btnAdv').classList.toggle('active', m === 'advanced');
             document.getElementById('secSimple').style.display = m === 'simple' ? 'block' : 'none';
             document.getElementById('secAdv').style.display = m === 'advanced' ? 'block' : 'none';
+            updatePreviewLayout();
         }
 
         function syncSize(val) {
             document.getElementById('advSize').value = val;
+            updatePreviewLayout();
         }
 
         function stepCopies(d) {
