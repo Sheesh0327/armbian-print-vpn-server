@@ -14,208 +14,148 @@ INDEX_HTML = """<!DOCTYPE html>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ApexPrint Studio - B860H Home Print Server</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <title>Print Server</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
     <style>
         :root {
-            --bg-base: #080c14;
-            --bg-surface: #0f1626;
-            --bg-card: #151e34;
-            --bg-card-hover: #1c2744;
-            --border: #233152;
-            --border-focus: #3b82f6;
-            --primary: #3b82f6;
-            --primary-hover: #2563eb;
-            --primary-glow: rgba(59, 130, 246, 0.35);
-            --accent: #06b6d4;
-            --accent-glow: rgba(6, 182, 212, 0.35);
-            --success: #10b981;
-            --warning: #f59e0b;
+            --bg: #09090b;
+            --surface: #121215;
+            --surface-elevated: #18181b;
+            --border: #27272a;
+            --border-hover: #3f3f46;
+            --text-primary: #f4f4f5;
+            --text-secondary: #a1a1aa;
+            --text-tertiary: #71717a;
+            --accent: #2563eb;
+            --accent-hover: #1d4ed8;
+            --success: #22c55e;
             --danger: #ef4444;
-            --text-main: #f8fafc;
-            --text-muted: #94a3b8;
-            --text-sub: #64748b;
-            --radius-lg: 18px;
-            --radius-md: 12px;
-            --radius-sm: 8px;
-            --shadow-card: 0 16px 36px -8px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.05);
-            --transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+            --radius-sm: 6px;
+            --radius-md: 8px;
+            --radius-lg: 12px;
+            --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
         }
 
         * { box-sizing: border-box; margin: 0; padding: 0; }
+        
         body {
-            background-color: var(--bg-base);
-            background-image: 
-                radial-gradient(at 0% 0%, rgba(59, 130, 246, 0.12) 0px, transparent 50%),
-                radial-gradient(at 100% 100%, rgba(6, 182, 212, 0.08) 0px, transparent 50%);
-            color: var(--text-main);
-            font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background-color: var(--bg);
+            color: var(--text-primary);
+            font-family: var(--font);
+            font-size: 14px;
+            line-height: 1.5;
+            -webkit-font-smoothing: antialiased;
             min-height: 100vh;
             display: flex;
             flex-direction: column;
-            overflow-x: hidden;
         }
 
-        /* Top Navigation Header */
+        /* Minimal Header */
         header {
-            background: rgba(15, 22, 38, 0.75);
-            backdrop-filter: blur(16px);
             border-bottom: 1px solid var(--border);
-            padding: 16px 28px;
-            position: sticky;
-            top: 0;
-            z-index: 50;
+            padding: 14px 24px;
             display: flex;
             align-items: center;
             justify-content: space-between;
+            background: var(--bg);
         }
 
-        .brand {
+        .header-brand {
             display: flex;
             align-items: center;
             gap: 12px;
-            text-decoration: none;
-            color: var(--text-main);
         }
 
-        .brand-icon {
-            width: 40px;
-            height: 40px;
-            background: linear-gradient(135deg, var(--primary), var(--accent));
-            border-radius: var(--radius-md);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 1.3rem;
-            box-shadow: 0 4px 14px var(--primary-glow);
-        }
-
-        .brand-text h1 {
-            font-size: 1.15rem;
-            font-weight: 800;
-            letter-spacing: -0.02em;
-            background: linear-gradient(to right, #fff, #93c5fd);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-        }
-
-        .brand-text span {
-            font-size: 0.72rem;
-            color: var(--text-muted);
-            letter-spacing: 0.05em;
-            text-transform: uppercase;
+        .header-title {
+            font-size: 15px;
             font-weight: 600;
+            color: var(--text-primary);
+            letter-spacing: -0.01em;
         }
 
-        .header-controls {
-            display: flex;
-            align-items: center;
-            gap: 16px;
-        }
-
-        .nav-tabs {
-            display: flex;
-            background: rgba(8, 12, 20, 0.6);
-            padding: 4px;
-            border-radius: var(--radius-md);
-            border: 1px solid var(--border);
-        }
-
-        .nav-tab {
-            background: transparent;
-            border: none;
-            color: var(--text-muted);
-            font-family: inherit;
-            font-size: 0.82rem;
-            font-weight: 600;
-            padding: 8px 16px;
-            border-radius: var(--radius-sm);
-            cursor: pointer;
-            transition: var(--transition);
-            display: flex;
+        .printer-status {
+            display: inline-flex;
             align-items: center;
             gap: 6px;
-        }
-
-        .nav-tab.active {
-            background: var(--primary);
-            color: #fff;
-            box-shadow: 0 2px 8px var(--primary-glow);
-        }
-
-        .status-pill {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            background: rgba(16, 185, 129, 0.1);
-            border: 1px solid rgba(16, 185, 129, 0.3);
-            color: var(--success);
-            font-size: 0.78rem;
-            font-weight: 600;
-            padding: 6px 12px;
+            font-size: 12px;
+            color: var(--text-secondary);
+            padding: 2px 8px;
+            background: var(--surface);
+            border: 1px solid var(--border);
             border-radius: 9999px;
         }
 
         .status-dot {
-            width: 8px;
-            height: 8px;
+            width: 6px;
+            height: 6px;
             background: var(--success);
             border-radius: 50%;
-            box-shadow: 0 0 10px var(--success);
-            animation: pulse 2s infinite;
         }
 
-        @keyframes pulse {
-            0%, 100% { opacity: 1; transform: scale(1); }
-            50% { opacity: 0.4; transform: scale(0.85); }
+        .header-nav {
+            display: flex;
+            gap: 4px;
+            background: var(--surface);
+            padding: 3px;
+            border-radius: var(--radius-md);
+            border: 1px solid var(--border);
         }
 
-        /* Main Workspace Container */
+        .nav-btn {
+            background: transparent;
+            border: none;
+            color: var(--text-secondary);
+            font-size: 13px;
+            font-weight: 500;
+            padding: 6px 14px;
+            border-radius: var(--radius-sm);
+            cursor: pointer;
+            transition: all 0.15s ease;
+        }
+
+        .nav-btn:hover {
+            color: var(--text-primary);
+        }
+
+        .nav-btn.active {
+            background: var(--surface-elevated);
+            color: var(--text-primary);
+        }
+
+        /* Container Layout */
         main {
             flex: 1;
-            max-width: 1320px;
+            max-width: 1080px;
             width: 100%;
             margin: 0 auto;
-            padding: 28px 24px 60px;
+            padding: 32px 20px;
         }
 
-        .tab-pane {
+        .tab-content {
             display: none;
         }
-        .tab-pane.active {
+        .tab-content.active {
             display: block;
-            animation: fadeIn 0.3s ease;
         }
 
-        @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(6px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-
-        /* Two-Column Print Studio Grid */
-        .studio-grid {
+        .grid-layout {
             display: grid;
-            grid-template-columns: 1.15fr 1fr;
-            gap: 28px;
+            grid-template-columns: 1.1fr 1fr;
+            gap: 24px;
             align-items: start;
         }
 
-        @media (max-width: 992px) {
-            .studio-grid { grid-template-columns: 1fr; }
-            .header-controls { flex-direction: column-reverse; align-items: flex-end; gap: 8px; }
+        @media (max-width: 860px) {
+            .grid-layout { grid-template-columns: 1fr; }
         }
 
-        /* Card Container Styles */
-        .glass-card {
-            background: var(--bg-card);
+        /* Card Panels */
+        .card {
+            background: var(--surface);
             border: 1px solid var(--border);
             border-radius: var(--radius-lg);
-            padding: 26px;
-            box-shadow: var(--shadow-card);
-            backdrop-filter: blur(8px);
+            padding: 24px;
         }
 
         .card-header {
@@ -223,274 +163,187 @@ INDEX_HTML = """<!DOCTYPE html>
             align-items: center;
             justify-content: space-between;
             margin-bottom: 20px;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-            padding-bottom: 14px;
         }
 
-        .card-title {
-            font-size: 1.05rem;
-            font-weight: 700;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            color: var(--text-main);
+        .card-heading {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text-primary);
         }
 
-        /* Dropzone / Upload Area */
-        .dropzone-wrapper {
-            position: relative;
+        /* Segmented Mode Switch */
+        .segmented-control {
+            display: inline-flex;
+            background: var(--bg);
+            border: 1px solid var(--border);
+            padding: 2px;
+            border-radius: var(--radius-sm);
         }
 
+        .segmented-btn {
+            background: transparent;
+            border: none;
+            color: var(--text-secondary);
+            font-size: 12px;
+            font-weight: 500;
+            padding: 4px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+
+        .segmented-btn.active {
+            background: var(--surface-elevated);
+            color: var(--text-primary);
+        }
+
+        /* Upload Dropzone */
         .dropzone {
-            border: 2px dashed var(--border);
+            border: 1px dashed var(--border-hover);
             border-radius: var(--radius-md);
-            background: rgba(8, 12, 20, 0.5);
-            padding: 44px 24px;
+            padding: 36px 20px;
             text-align: center;
             cursor: pointer;
-            transition: var(--transition);
-            position: relative;
-            overflow: hidden;
+            background: var(--bg);
+            transition: border-color 0.15s ease;
         }
 
         .dropzone:hover, .dropzone.dragover {
-            border-color: var(--primary);
-            background: rgba(59, 130, 246, 0.05);
-            transform: scale(1.005);
+            border-color: var(--text-secondary);
         }
 
-        .dropzone-icon {
-            width: 60px;
-            height: 60px;
-            background: rgba(59, 130, 246, 0.1);
-            color: var(--primary);
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 1.8rem;
-            margin: 0 auto 16px;
-            box-shadow: 0 4px 16px rgba(59, 130, 246, 0.15);
+        .dropzone-label {
+            font-size: 13px;
+            font-weight: 500;
+            color: var(--text-primary);
+            margin-bottom: 4px;
         }
 
-        .dropzone h3 {
-            font-size: 1.05rem;
-            font-weight: 700;
-            margin-bottom: 6px;
+        .dropzone-sub {
+            font-size: 12px;
+            color: var(--text-tertiary);
         }
 
-        .dropzone p {
-            color: var(--text-muted);
-            font-size: 0.85rem;
-        }
-
-        .supported-tags {
-            display: flex;
-            justify-content: center;
-            gap: 6px;
-            margin-top: 14px;
-            flex-wrap: wrap;
-        }
-
-        .tag {
-            font-family: 'JetBrains Mono', monospace;
-            font-size: 0.68rem;
-            background: rgba(255, 255, 255, 0.05);
-            border: 1px solid var(--border);
-            padding: 3px 8px;
-            border-radius: 6px;
-            color: var(--text-sub);
-        }
-
-        /* Document Preview Component */
-        .preview-container {
+        /* File Preview Container */
+        .preview-box {
             display: none;
-            margin-top: 20px;
-            border-radius: var(--radius-md);
+            margin-top: 16px;
             border: 1px solid var(--border);
-            background: #080c14;
+            border-radius: var(--radius-md);
+            background: var(--bg);
             overflow: hidden;
         }
 
-        .preview-toolbar {
-            background: var(--bg-surface);
-            padding: 10px 16px;
-            border-bottom: 1px solid var(--border);
+        .preview-head {
             display: flex;
             align-items: center;
             justify-content: space-between;
-            font-size: 0.82rem;
+            padding: 10px 14px;
+            border-bottom: 1px solid var(--border);
+            font-size: 12px;
+            color: var(--text-secondary);
         }
 
-        .preview-meta {
+        .preview-info {
             display: flex;
             align-items: center;
-            gap: 12px;
-            color: var(--text-muted);
-            font-family: 'JetBrains Mono', monospace;
-            font-size: 0.75rem;
+            gap: 10px;
+            overflow: hidden;
         }
 
-        .preview-filename {
-            color: var(--accent);
-            font-weight: 600;
-            max-width: 200px;
+        .preview-name {
+            font-weight: 500;
+            color: var(--text-primary);
+            white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
-            white-space: nowrap;
+            max-width: 220px;
         }
 
-        .preview-actions {
-            display: flex;
-            gap: 8px;
-        }
-
-        .btn-icon {
+        .btn-clear {
             background: transparent;
-            border: 1px solid var(--border);
-            color: var(--text-muted);
-            width: 28px;
-            height: 28px;
-            border-radius: 6px;
+            border: none;
+            color: var(--text-tertiary);
             cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            transition: var(--transition);
+            font-size: 13px;
+            padding: 2px 6px;
+            border-radius: 4px;
         }
-        .btn-icon:hover {
-            color: #fff;
-            border-color: var(--text-muted);
+        .btn-clear:hover {
+            color: var(--text-primary);
+            background: var(--surface);
         }
 
-        .preview-body {
-            min-height: 280px;
-            max-height: 480px;
-            overflow: auto;
-            display: flex;
-            align-items: center;
-            justify-content: center;
+        .preview-canvas-wrap {
             padding: 16px;
-            background: #060910;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 220px;
+            max-height: 380px;
+            overflow: auto;
         }
 
-        .preview-body img {
+        .preview-canvas-wrap img {
             max-width: 100%;
-            max-height: 440px;
-            border-radius: 6px;
-            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.6);
+            max-height: 340px;
+            border-radius: 4px;
+            border: 1px solid var(--border);
         }
 
         #pdfCanvas {
             max-width: 100%;
             height: auto;
             border-radius: 4px;
-            box-shadow: 0 6px 24px rgba(0, 0, 0, 0.7);
-        }
-
-        .text-preview {
-            width: 100%;
-            font-family: 'JetBrains Mono', monospace;
-            font-size: 0.8rem;
-            color: #93c5fd;
-            white-space: pre-wrap;
-            padding: 12px;
-            max-height: 380px;
-            overflow-y: auto;
-        }
-
-        /* Mode Switcher Toggle */
-        .mode-switch-container {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            background: rgba(8, 12, 20, 0.6);
             border: 1px solid var(--border);
-            border-radius: var(--radius-md);
-            padding: 6px 12px;
-            margin-bottom: 22px;
         }
 
-        .mode-label {
-            font-size: 0.84rem;
-            font-weight: 700;
-            color: var(--text-muted);
+        .preview-pagination {
             display: flex;
             align-items: center;
             gap: 8px;
+            font-size: 11px;
+            color: var(--text-tertiary);
         }
 
-        .mode-tabs {
-            display: flex;
-            gap: 4px;
-            background: #080c14;
-            padding: 3px;
-            border-radius: var(--radius-sm);
-        }
-
-        .mode-btn {
-            background: transparent;
-            border: none;
-            color: var(--text-muted);
-            padding: 6px 14px;
-            font-size: 0.8rem;
-            font-weight: 600;
-            border-radius: 6px;
+        .page-btn {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            color: var(--text-secondary);
+            padding: 2px 6px;
+            border-radius: 4px;
             cursor: pointer;
-            transition: var(--transition);
+            font-size: 11px;
         }
 
-        .mode-btn.active {
-            background: var(--bg-card);
-            color: #fff;
-            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
-        }
-
-        /* Form Controls & Grids */
-        .form-section {
-            margin-bottom: 20px;
-        }
-
-        .section-label {
-            font-size: 0.75rem;
-            font-weight: 700;
-            text-transform: uppercase;
-            letter-spacing: 0.08em;
-            color: var(--text-sub);
-            margin-bottom: 10px;
-            display: flex;
-            align-items: center;
-            gap: 6px;
-        }
-
-        .form-group {
+        /* Form Controls */
+        .form-row {
             margin-bottom: 16px;
         }
 
-        .form-label {
+        .label {
             display: block;
-            font-size: 0.82rem;
-            font-weight: 600;
-            color: var(--text-muted);
+            font-size: 12px;
+            font-weight: 500;
+            color: var(--text-secondary);
             margin-bottom: 6px;
         }
 
-        select, input[type="text"], input[type="number"] {
+        .input, select {
             width: 100%;
-            background: rgba(8, 12, 20, 0.7);
+            background: var(--bg);
             border: 1px solid var(--border);
-            color: var(--text-main);
-            padding: 10px 14px;
-            border-radius: var(--radius-sm);
+            color: var(--text-primary);
             font-family: inherit;
-            font-size: 0.9rem;
+            font-size: 13px;
+            padding: 8px 12px;
+            border-radius: var(--radius-sm);
             outline: none;
-            transition: var(--transition);
+            transition: border-color 0.15s;
         }
 
-        select:focus, input:focus {
-            border-color: var(--border-focus);
-            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+        .input:focus, select:focus {
+            border-color: var(--text-secondary);
         }
 
         .grid-2 {
@@ -499,274 +352,236 @@ INDEX_HTML = """<!DOCTYPE html>
             gap: 12px;
         }
 
-        .grid-3 {
+        /* Segmented Radios */
+        .radio-pills {
             display: grid;
-            grid-template-columns: 1fr 1fr 1fr;
-            gap: 10px;
+            grid-template-columns: 1fr 1fr;
+            gap: 6px;
         }
 
-        /* Pill Selector Buttons (Color / Duplex) */
-        .pill-group {
-            display: flex;
-            gap: 8px;
-        }
-
-        .pill-radio {
-            flex: 1;
+        .radio-pill {
             position: relative;
         }
 
-        .pill-radio input {
+        .radio-pill input {
             position: absolute;
             opacity: 0;
             width: 0;
             height: 0;
         }
 
-        .pill-label {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 6px;
-            padding: 9px 12px;
-            background: rgba(8, 12, 20, 0.6);
-            border: 1px solid var(--border);
-            border-radius: var(--radius-sm);
-            font-size: 0.82rem;
-            font-weight: 600;
-            color: var(--text-muted);
-            cursor: pointer;
-            transition: var(--transition);
+        .radio-pill label {
+            display: block;
             text-align: center;
-        }
-
-        .pill-radio input:checked + .pill-label {
-            background: rgba(59, 130, 246, 0.15);
-            border-color: var(--primary);
-            color: #fff;
-            box-shadow: 0 0 12px rgba(59, 130, 246, 0.2);
-        }
-
-        /* Number Stepper Control */
-        .stepper-control {
-            display: flex;
-            align-items: center;
-            background: rgba(8, 12, 20, 0.7);
+            padding: 8px 10px;
+            font-size: 12px;
+            font-weight: 500;
+            color: var(--text-secondary);
+            background: var(--bg);
             border: 1px solid var(--border);
             border-radius: var(--radius-sm);
-            overflow: hidden;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+
+        .radio-pill input:checked + label {
+            background: var(--surface-elevated);
+            border-color: var(--text-secondary);
+            color: var(--text-primary);
+        }
+
+        /* Copies Stepper */
+        .stepper {
+            display: flex;
+            align-items: center;
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
         }
 
         .stepper-btn {
             background: transparent;
             border: none;
-            color: var(--text-muted);
-            width: 38px;
-            height: 38px;
-            font-size: 1.1rem;
+            color: var(--text-secondary);
+            width: 34px;
+            height: 34px;
+            font-size: 14px;
             cursor: pointer;
-            transition: var(--transition);
             display: flex;
             align-items: center;
             justify-content: center;
         }
 
         .stepper-btn:hover {
-            color: #fff;
-            background: rgba(255, 255, 255, 0.05);
+            color: var(--text-primary);
         }
 
-        .stepper-input {
+        .stepper-val {
             flex: 1;
             border: none !important;
             text-align: center;
-            font-weight: 700;
+            font-size: 13px;
+            font-weight: 500;
+            padding: 0;
             background: transparent !important;
-            padding: 8px 0;
+        }
+
+        /* Divider */
+        .divider {
+            height: 1px;
+            background: var(--border);
+            margin: 18px 0;
         }
 
         /* Primary Print Button */
-        .btn-print-main {
+        .btn-submit {
             width: 100%;
-            background: linear-gradient(135deg, var(--primary), #2563eb);
-            color: #fff;
+            background: var(--text-primary);
+            color: var(--bg);
             border: none;
-            padding: 16px 24px;
-            border-radius: var(--radius-md);
-            font-size: 1.05rem;
-            font-weight: 700;
-            letter-spacing: -0.01em;
+            font-family: inherit;
+            font-size: 13px;
+            font-weight: 600;
+            padding: 10px 16px;
+            border-radius: var(--radius-sm);
             cursor: pointer;
-            box-shadow: 0 8px 24px var(--primary-glow);
-            transition: var(--transition);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 10px;
-            margin-top: 24px;
+            transition: opacity 0.15s;
+            margin-top: 20px;
         }
 
-        .btn-print-main:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 12px 28px rgba(59, 130, 246, 0.45);
+        .btn-submit:hover {
+            opacity: 0.9;
         }
 
-        .btn-print-main:disabled {
-            opacity: 0.5;
+        .btn-submit:disabled {
+            opacity: 0.4;
             cursor: not-allowed;
-            transform: none;
-            box-shadow: none;
         }
 
-        /* Floating Status Notification */
-        .toast-banner {
-            margin-top: 18px;
-            padding: 14px 18px;
-            border-radius: var(--radius-md);
-            font-size: 0.88rem;
-            line-height: 1.4;
+        /* Simple Feedback Toast */
+        .toast {
+            margin-top: 14px;
+            padding: 10px 14px;
+            border-radius: var(--radius-sm);
+            font-size: 12px;
             display: none;
-            align-items: center;
-            gap: 12px;
-            animation: slideUp 0.3s ease;
         }
 
-        @keyframes slideUp {
-            from { opacity: 0; transform: translateY(10px); }
-            to { opacity: 1; transform: translateY(0); }
+        .toast.success {
+            background: rgba(34, 197, 94, 0.1);
+            border: 1px solid rgba(34, 197, 94, 0.25);
+            color: var(--success);
         }
 
-        .toast-banner.success {
-            background: rgba(16, 185, 129, 0.12);
-            border: 1px solid rgba(16, 185, 129, 0.3);
-            color: #34d399;
+        .toast.error {
+            background: rgba(239, 68, 68, 0.1);
+            border: 1px solid rgba(239, 68, 68, 0.25);
+            color: var(--danger);
         }
 
-        .toast-banner.error {
-            background: rgba(239, 68, 68, 0.12);
-            border: 1px solid rgba(239, 68, 68, 0.3);
-            color: #f87171;
-        }
-
-        /* Queue & History Table */
-        .jobs-table {
+        /* Jobs Queue Table */
+        .table {
             width: 100%;
             border-collapse: collapse;
-            font-size: 0.88rem;
-            margin-top: 12px;
+            font-size: 13px;
         }
 
-        .jobs-table th {
+        .table th {
             text-align: left;
-            color: var(--text-sub);
-            padding: 12px 16px;
-            font-weight: 700;
-            text-transform: uppercase;
-            font-size: 0.72rem;
-            letter-spacing: 0.05em;
+            padding: 10px 12px;
+            font-size: 12px;
+            font-weight: 500;
+            color: var(--text-tertiary);
             border-bottom: 1px solid var(--border);
         }
 
-        .jobs-table td {
-            padding: 14px 16px;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.04);
-            color: var(--text-main);
+        .table td {
+            padding: 12px;
+            border-bottom: 1px solid var(--border);
+            color: var(--text-secondary);
         }
 
-        .jobs-table tr:hover td {
-            background: rgba(255, 255, 255, 0.02);
+        .table tr:last-child td {
+            border-bottom: none;
         }
 
-        .job-id {
-            font-family: 'JetBrains Mono', monospace;
-            font-weight: 600;
+        .badge-status {
+            display: inline-block;
+            font-size: 11px;
+            font-weight: 500;
+            padding: 2px 6px;
+            border-radius: 4px;
+            background: var(--bg);
+            border: 1px solid var(--border);
+        }
+
+        .badge-status.active {
             color: var(--accent);
+            border-color: rgba(37, 99, 235, 0.4);
         }
 
-        .job-state-badge {
-            font-size: 0.72rem;
-            font-weight: 700;
+        .badge-status.completed {
+            color: var(--text-tertiary);
+        }
+
+        .btn-action {
+            background: transparent;
+            border: 1px solid var(--border);
+            color: var(--text-secondary);
+            font-size: 11px;
             padding: 3px 8px;
-            border-radius: 9999px;
-            text-transform: uppercase;
-        }
-        .job-state-badge.completed {
-            background: rgba(16, 185, 129, 0.15);
-            color: var(--success);
-        }
-        .job-state-badge.active {
-            background: rgba(59, 130, 246, 0.2);
-            color: #60a5fa;
-            animation: pulse 1.5s infinite;
-        }
-
-        .btn-cancel {
-            background: rgba(239, 68, 68, 0.15);
-            border: 1px solid rgba(239, 68, 68, 0.3);
-            color: #f87171;
-            padding: 4px 10px;
-            border-radius: 6px;
+            border-radius: 4px;
             cursor: pointer;
-            font-size: 0.75rem;
-            font-weight: 600;
-            transition: var(--transition);
-        }
-        .btn-cancel:hover {
-            background: var(--danger);
-            color: #fff;
         }
 
-        /* Telemetry Cards */
-        .telemetry-grid {
+        .btn-action:hover {
+            color: var(--danger);
+            border-color: var(--danger);
+        }
+
+        /* System Telemetry List */
+        .info-list {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-            gap: 18px;
-            margin-top: 14px;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
         }
 
-        .stat-card {
-            background: rgba(8, 12, 20, 0.6);
+        .info-item {
+            background: var(--bg);
             border: 1px solid var(--border);
             border-radius: var(--radius-md);
-            padding: 20px;
+            padding: 14px;
         }
 
-        .stat-label {
-            font-size: 0.78rem;
-            font-weight: 600;
-            color: var(--text-sub);
+        .info-label {
+            font-size: 11px;
+            color: var(--text-tertiary);
             text-transform: uppercase;
-            letter-spacing: 0.05em;
-            margin-bottom: 6px;
+            letter-spacing: 0.04em;
+            margin-bottom: 4px;
         }
 
-        .stat-value {
-            font-size: 1.4rem;
-            font-weight: 800;
-            color: var(--text-main);
-            font-family: 'JetBrains Mono', monospace;
+        .info-value {
+            font-family: var(--font-mono);
+            font-size: 13px;
+            color: var(--text-primary);
         }
 
-        .stat-desc {
-            font-size: 0.78rem;
-            color: var(--text-muted);
-            margin-top: 4px;
-        }
-
-        /* Footer */
         footer {
             border-top: 1px solid var(--border);
-            padding: 20px;
-            text-align: center;
-            font-size: 0.8rem;
-            color: var(--text-sub);
-            margin-top: auto;
+            padding: 18px 24px;
+            font-size: 12px;
+            color: var(--text-tertiary);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
         }
 
         footer a {
-            color: var(--primary);
+            color: var(--text-secondary);
             text-decoration: none;
         }
+
         footer a:hover {
             text-decoration: underline;
         }
@@ -774,280 +589,224 @@ INDEX_HTML = """<!DOCTYPE html>
 </head>
 <body>
 
-    <!-- Header Navigation -->
     <header>
-        <a href="/" class="brand">
-            <div class="brand-icon">🖨️</div>
-            <div class="brand-text">
-                <h1>ApexPrint Studio</h1>
-                <span>ZTE B860H Print Server</span>
-            </div>
-        </a>
-
-        <div class="header-controls">
-            <div class="status-pill" id="printerStatusBadge">
-                <div class="status-dot"></div>
-                <span id="printerStatusText">Checking Printer...</span>
-            </div>
-
-            <div class="nav-tabs">
-                <button class="nav-tab active" onclick="switchMainTab('studio')">Print Studio</button>
-                <button class="nav-tab" onclick="switchMainTab('jobs')">Queue & History</button>
-                <button class="nav-tab" onclick="switchMainTab('telemetry')">Server Telemetry</button>
+        <div class="header-brand">
+            <span class="header-title">Print Server</span>
+            <div class="printer-status">
+                <span class="status-dot"></span>
+                <span id="headerStatusText">HP Smart Tank 520</span>
             </div>
         </div>
+
+        <nav class="header-nav">
+            <button class="nav-btn active" onclick="showTab('print')">Print</button>
+            <button class="nav-btn" onclick="showTab('queue')">Queue</button>
+            <button class="nav-btn" onclick="showTab('system')">System</button>
+        </nav>
     </header>
 
     <main>
-        <!-- TAB 1: PRINT STUDIO -->
-        <div id="tab-studio" class="tab-pane active">
+        <!-- TAB: PRINT -->
+        <div id="tab-print" class="tab-content active">
             <form id="printForm">
-                <div class="studio-grid">
+                <div class="grid-layout">
                     
-                    <!-- LEFT COLUMN: File Upload & Interactive Live Preview -->
-                    <div class="glass-card">
+                    <!-- Left: File & Preview -->
+                    <div class="card">
                         <div class="card-header">
-                            <div class="card-title">
-                                <span>📄</span> Document & Photo Source
-                            </div>
-                            <span class="tag" id="fileSizeBadge" style="display:none;">0 KB</span>
+                            <span class="card-heading">Document</span>
+                            <span id="fileBadge" style="font-size: 11px; color: var(--text-tertiary);">No file selected</span>
                         </div>
 
-                        <div class="dropzone-wrapper">
-                            <input type="file" id="fileInput" name="file" style="display: none;" accept=".pdf,.png,.jpg,.jpeg,.txt,.doc,.docx">
-                            <div class="dropzone" id="dropzone">
-                                <div class="dropzone-icon">📥</div>
-                                <h3>Drop file here or click to browse</h3>
-                                <p>Supports documents, high-res photos, receipts & labels</p>
-                                <div class="supported-tags">
-                                    <span class="tag">PDF</span>
-                                    <span class="tag">PNG</span>
-                                    <span class="tag">JPG</span>
-                                    <span class="tag">TXT</span>
-                                    <span class="tag">DOCX</span>
-                                </div>
-                            </div>
+                        <input type="file" id="fileInput" name="file" style="display: none;" accept=".pdf,.png,.jpg,.jpeg,.txt,.doc,.docx">
+                        <div class="dropzone" id="dropzone">
+                            <div class="dropzone-label">Click or drop document here</div>
+                            <div class="dropzone-sub">PDF, JPG, PNG, TXT, DOCX</div>
                         </div>
 
-                        <!-- Live Preview Panel -->
-                        <div class="preview-container" id="previewContainer">
-                            <div class="preview-toolbar">
-                                <div class="preview-meta">
-                                    <span class="preview-filename" id="previewFilename">document.pdf</span>
-                                    <span id="previewDimensions"></span>
-                                    <span id="previewPageCount"></span>
+                        <div class="preview-box" id="previewBox">
+                            <div class="preview-head">
+                                <div class="preview-info">
+                                    <span class="preview-name" id="previewName">file.pdf</span>
+                                    <span id="previewDetails" style="font-size: 11px; color: var(--text-tertiary);"></span>
                                 </div>
-                                <div class="preview-actions">
-                                    <button type="button" class="btn-icon" id="btnPrevPage" title="Previous Page" style="display:none;">◀</button>
-                                    <button type="button" class="btn-icon" id="btnNextPage" title="Next Page" style="display:none;">▶</button>
-                                    <button type="button" class="btn-icon" onclick="clearSelectedFile()" title="Remove File">✕</button>
+                                <div style="display: flex; align-items: center; gap: 8px;">
+                                    <div class="preview-pagination" id="previewPagination" style="display: none;">
+                                        <button type="button" class="page-btn" id="btnPrev">‹</button>
+                                        <span id="pageIndicator">1 / 1</span>
+                                        <button type="button" class="page-btn" id="btnNext">›</button>
+                                    </div>
+                                    <button type="button" class="btn-clear" onclick="clearFile()">✕</button>
                                 </div>
                             </div>
-                            <div class="preview-body" id="previewBody">
-                                <img id="imagePreview" style="display:none;" alt="Print Preview">
-                                <canvas id="pdfCanvas" style="display:none;"></canvas>
-                                <div id="textPreview" class="text-preview" style="display:none;"></div>
+                            <div class="preview-canvas-wrap">
+                                <img id="imgPreview" style="display: none;" alt="Preview">
+                                <canvas id="pdfCanvas" style="display: none;"></canvas>
+                                <div id="txtPreview" style="display: none; font-family: var(--font-mono); font-size: 12px; color: var(--text-secondary); white-space: pre-wrap; width: 100%;"></div>
                             </div>
                         </div>
                     </div>
 
-                    <!-- RIGHT COLUMN: Printing Options & Mode Switcher -->
-                    <div class="glass-card">
-                        <!-- Mode Switcher -->
-                        <div class="mode-switch-container">
-                            <div class="mode-label">
-                                <span>⚙️</span> Configuration Mode
-                            </div>
-                            <div class="mode-tabs">
-                                <button type="button" class="mode-btn active" id="btnModeSimple" onclick="setMode('simple')">Simple</button>
-                                <button type="button" class="mode-btn" id="btnModeAdvanced" onclick="setMode('advanced')">Advanced</button>
+                    <!-- Right: Settings -->
+                    <div class="card">
+                        <div class="card-header">
+                            <span class="card-heading">Settings</span>
+                            <div class="segmented-control">
+                                <button type="button" class="segmented-btn active" id="btnSimple" onclick="setMode('simple')">Simple</button>
+                                <button type="button" class="segmented-btn" id="btnAdv" onclick="setMode('advanced')">Advanced</button>
                             </div>
                         </div>
 
-                        <!-- Printer Selection -->
-                        <div class="form-group">
-                            <label class="form-label" for="printerSelect">Destination Device</label>
+                        <!-- Destination Printer -->
+                        <div class="form-row">
+                            <label class="label" for="printerSelect">Printer</label>
                             <select id="printerSelect" name="printer" required>
-                                <option value="" disabled selected>Detecting printers...</option>
+                                <option value="HP_Smart_Tank_520">HP Smart Tank 520</option>
                             </select>
                         </div>
 
-                        <!-- COMMON OPTIONS: Copies & Color Mode -->
-                        <div class="form-section">
-                            <div class="grid-2">
-                                <div class="form-group">
-                                    <label class="form-label">Copies</label>
-                                    <div class="stepper-control">
-                                        <button type="button" class="stepper-btn" onclick="adjustCopies(-1)">−</button>
-                                        <input type="number" id="copiesInput" name="copies" class="stepper-input" value="1" min="1" max="99">
-                                        <button type="button" class="stepper-btn" onclick="adjustCopies(1)">+</button>
-                                    </div>
+                        <!-- Copies & Color Mode -->
+                        <div class="grid-2 form-row">
+                            <div>
+                                <label class="label">Copies</label>
+                                <div class="stepper">
+                                    <button type="button" class="stepper-btn" onclick="stepCopies(-1)">−</button>
+                                    <input type="number" id="copiesInput" name="copies" class="input stepper-val" value="1" min="1" max="99">
+                                    <button type="button" class="stepper-btn" onclick="stepCopies(1)">+</button>
                                 </div>
-
-                                <div class="form-group">
-                                    <label class="form-label">Color Mode</label>
-                                    <div class="pill-group">
-                                        <label class="pill-radio">
-                                            <input type="radio" name="colormodel" value="RGB" checked>
-                                            <span class="pill-label">🎨 Color</span>
-                                        </label>
-                                        <label class="pill-radio">
-                                            <input type="radio" name="colormodel" value="KGray">
-                                            <span class="pill-label">⚫ B&W</span>
-                                        </label>
+                            </div>
+                            <div>
+                                <label class="label">Color</label>
+                                <div class="radio-pills">
+                                    <div class="radio-pill">
+                                        <input type="radio" id="colRGB" name="colormodel" value="RGB" checked>
+                                        <label for="colRGB">Color</label>
+                                    </div>
+                                    <div class="radio-pill">
+                                        <input type="radio" id="colGray" name="colormodel" value="KGray">
+                                        <label for="colGray">B&W</label>
                                     </div>
                                 </div>
                             </div>
                         </div>
 
-                        <!-- SIMPLE MODE OPTIONS: Quick Paper Size -->
-                        <div id="simpleOptions">
-                            <div class="form-group">
-                                <label class="form-label">Paper Size</label>
-                                <select id="simplePageSize" name="simple_pagesize" onchange="syncPageSize(this.value)">
-                                    <option value="A4" selected>A4 (Standard 210 × 297 mm)</option>
+                        <!-- Simple Mode: Basic Paper Size -->
+                        <div id="secSimple">
+                            <div class="form-row">
+                                <label class="label">Paper Size</label>
+                                <select id="simpleSize" onchange="syncSize(this.value)">
+                                    <option value="A4" selected>A4 (210 × 297 mm)</option>
                                     <option value="Letter">Letter (8.5 × 11 in)</option>
                                     <option value="Legal">Legal (8.5 × 14 in)</option>
-                                    <option value="4x6in">4 × 6 in (Photo Card)</option>
-                                    <option value="5x7in">5 × 7 in (Photo Card)</option>
+                                    <option value="4x6in">4 × 6 in Photo</option>
+                                    <option value="5x7in">5 × 7 in Photo</option>
                                 </select>
                             </div>
                         </div>
 
-                        <!-- ADVANCED MODE OPTIONS: Professional Fine-Tuning -->
-                        <div id="advancedOptions" style="display: none;">
-                            
-                            <!-- Media & Stock -->
-                            <div class="form-section">
-                                <div class="section-label">📋 Paper & Stock Selection</div>
-                                <div class="grid-2">
-                                    <div class="form-group">
-                                        <label class="form-label">Paper Format</label>
-                                        <select id="advPageSize" name="pagesize">
-                                            <option value="A4" selected>A4 (210 × 297 mm)</option>
-                                            <option value="Letter">Letter (8.5 × 11 in)</option>
-                                            <option value="Legal">Legal (8.5 × 14 in)</option>
-                                            <option value="A5">A5 (148 × 210 mm)</option>
-                                            <option value="A6">A6 (105 × 148 mm)</option>
-                                            <option value="B5">B5 (176 × 250 mm)</option>
-                                            <option value="4x6in">4 × 6 in Photo</option>
-                                            <option value="5x7in">5 × 7 in Photo</option>
-                                            <option value="8x10">8 × 10 in Photo</option>
-                                            <option value="EnvelopeDL">Envelope DL</option>
-                                            <option value="Envelope#10">Envelope #10</option>
-                                        </select>
-                                    </div>
-                                    <div class="form-group">
-                                        <label class="form-label">Media Type</label>
-                                        <select id="advMediaType" name="mediatype">
-                                            <option value="Plain" selected>Standard Plain Paper</option>
-                                            <option value="Glossy">HP Premium Glossy Photo</option>
-                                            <option value="FastGlossy">Everyday Photo Paper</option>
-                                            <option value="CoatedMatte">Matte Presentation Paper</option>
-                                            <option value="CoatedBrochure">Heavyweight Brochure Paper</option>
-                                            <option value="PlainPaperLight">Lightweight / Eco Paper</option>
-                                        </select>
-                                    </div>
+                        <!-- Advanced Mode: Detailed Controls -->
+                        <div id="secAdv" style="display: none;">
+                            <div class="grid-2 form-row">
+                                <div>
+                                    <label class="label">Paper Size</label>
+                                    <select id="advSize" name="pagesize">
+                                        <option value="A4" selected>A4</option>
+                                        <option value="Letter">Letter</option>
+                                        <option value="Legal">Legal</option>
+                                        <option value="A5">A5</option>
+                                        <option value="A6">A6</option>
+                                        <option value="B5">B5</option>
+                                        <option value="4x6in">4 × 6 in</option>
+                                        <option value="5x7in">5 × 7 in</option>
+                                        <option value="8x10">8 × 10 in</option>
+                                        <option value="EnvelopeDL">Envelope DL</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label class="label">Media Type</label>
+                                    <select name="mediatype">
+                                        <option value="Plain" selected>Plain Paper</option>
+                                        <option value="Glossy">Glossy Photo</option>
+                                        <option value="FastGlossy">Everyday Photo</option>
+                                        <option value="CoatedMatte">Matte Paper</option>
+                                        <option value="CoatedBrochure">Brochure</option>
+                                    </select>
                                 </div>
                             </div>
 
-                            <!-- Quality & Duplex -->
-                            <div class="form-section">
-                                <div class="section-label">⚡ Precision & Layout</div>
-                                <div class="grid-2">
-                                    <div class="form-group">
-                                        <label class="form-label">Print Quality</label>
-                                        <select id="advQuality" name="quality">
-                                            <option value="Normal" selected>Normal (Standard 600 DPI)</option>
-                                            <option value="Best">Best (High Resolution 1200 DPI)</option>
-                                            <option value="Photo">Photo (Max Quality / Deep Ink)</option>
-                                        </select>
-                                    </div>
-                                    <div class="form-group">
-                                        <label class="form-label">Double-Sided (Duplex)</label>
-                                        <select id="advDuplex" name="duplex">
-                                            <option value="None" selected>Off (1-Sided)</option>
-                                            <option value="DuplexNoTumble">2-Sided (Book Long-edge)</option>
-                                            <option value="DuplexTumble">2-Sided (Calendar Short-edge)</option>
-                                        </select>
-                                    </div>
+                            <div class="grid-2 form-row">
+                                <div>
+                                    <label class="label">Quality</label>
+                                    <select name="quality">
+                                        <option value="Normal" selected>Normal</option>
+                                        <option value="Best">Best</option>
+                                        <option value="Photo">High Resolution</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label class="label">Two-Sided</label>
+                                    <select name="duplex">
+                                        <option value="None" selected>Off (1-Sided)</option>
+                                        <option value="DuplexNoTumble">Long Edge</option>
+                                        <option value="DuplexTumble">Short Edge</option>
+                                    </select>
                                 </div>
                             </div>
 
-                            <!-- Orientation & Scaling -->
-                            <div class="form-section">
-                                <div class="grid-3">
-                                    <div class="form-group">
-                                        <label class="form-label">Orientation</label>
-                                        <select id="advOrientation" name="orientation">
-                                            <option value="auto" selected>Auto</option>
-                                            <option value="3">Portrait</option>
-                                            <option value="4">Landscape</option>
-                                        </select>
-                                    </div>
-                                    <div class="form-group">
-                                        <label class="form-label">Scaling</label>
-                                        <select id="advScaling" name="fitpage">
-                                            <option value="true" selected>Fit to Page</option>
-                                            <option value="false">Actual Size (100%)</option>
-                                        </select>
-                                    </div>
-                                    <div class="form-group">
-                                        <label class="form-label">Pages / Sheet</label>
-                                        <select id="advNumberUp" name="numberup">
-                                            <option value="1" selected>1-Up (Normal)</option>
-                                            <option value="2">2-Up (Side-by-side)</option>
-                                            <option value="4">4-Up (Grid)</option>
-                                        </select>
-                                    </div>
+                            <div class="grid-2 form-row">
+                                <div>
+                                    <label class="label">Orientation</label>
+                                    <select name="orientation">
+                                        <option value="auto" selected>Auto</option>
+                                        <option value="3">Portrait</option>
+                                        <option value="4">Landscape</option>
+                                    </select>
                                 </div>
-
-                                <div class="form-group">
-                                    <label class="form-label">Page Range <span style="font-weight: 400; color: var(--text-sub);">(e.g. 1-3, 5)</span></label>
-                                    <input type="text" id="advPageRange" name="pagerange" placeholder="Leave empty for all pages">
+                                <div>
+                                    <label class="label">Scaling</label>
+                                    <select name="fitpage">
+                                        <option value="true" selected>Fit to Page</option>
+                                        <option value="false">100% Scale</option>
+                                    </select>
                                 </div>
                             </div>
 
+                            <div class="form-row">
+                                <label class="label">Page Range</label>
+                                <input type="text" name="pagerange" class="input" placeholder="e.g. 1-4, 7">
+                            </div>
                         </div>
 
-                        <!-- Print Action Button -->
-                        <button type="submit" class="btn-print-main" id="btnSubmit">
-                            <span>🖨️</span> Print Document
-                        </button>
-
-                        <!-- Notification Banner -->
-                        <div class="toast-banner" id="statusToast"></div>
+                        <button type="submit" class="btn-submit" id="btnSubmit">Print</button>
+                        <div class="toast" id="toast"></div>
                     </div>
 
                 </div>
             </form>
         </div>
 
-        <!-- TAB 2: QUEUE & HISTORY -->
-        <div id="tab-jobs" class="tab-pane">
-            <div class="glass-card">
+        <!-- TAB: QUEUE -->
+        <div id="tab-queue" class="tab-content">
+            <div class="card">
                 <div class="card-header">
-                    <div class="card-title">
-                        <span>📋</span> Print Queue & Job History
-                    </div>
-                    <button class="nav-tab" style="background: rgba(255,255,255,0.05);" onclick="refreshJobs()">↻ Refresh</button>
+                    <span class="card-heading">Print Queue</span>
+                    <button type="button" class="btn-action" onclick="fetchJobs()">Refresh</button>
                 </div>
                 <div style="overflow-x: auto;">
-                    <table class="jobs-table">
+                    <table class="table">
                         <thead>
                             <tr>
-                                <th>Job ID</th>
-                                <th>Printer</th>
+                                <th>Job</th>
                                 <th>User</th>
-                                <th>Payload Size</th>
-                                <th>Date & Time</th>
+                                <th>Size</th>
+                                <th>Submitted</th>
                                 <th>Status</th>
-                                <th>Action</th>
+                                <th></th>
                             </tr>
                         </thead>
-                        <tbody id="jobsTableBody">
+                        <tbody id="queueBody">
                             <tr>
-                                <td colspan="7" style="text-align: center; color: var(--text-muted); padding: 30px;">Loading print queue...</td>
+                                <td colspan="6" style="text-align: center; color: var(--text-tertiary); padding: 24px;">No recent jobs.</td>
                             </tr>
                         </tbody>
                     </table>
@@ -1055,387 +814,285 @@ INDEX_HTML = """<!DOCTYPE html>
             </div>
         </div>
 
-        <!-- TAB 3: SERVER TELEMETRY -->
-        <div id="tab-telemetry" class="tab-pane">
-            <div class="glass-card">
+        <!-- TAB: SYSTEM -->
+        <div id="tab-system" class="tab-content">
+            <div class="card">
                 <div class="card-header">
-                    <div class="card-title">
-                        <span>📊</span> Server Telemetry & System Vitals
-                    </div>
-                    <span class="tag">B860H Armbian Core</span>
+                    <span class="card-heading">System Information</span>
+                    <span style="font-size: 12px; color: var(--text-tertiary);">Armbian / Debian 13</span>
                 </div>
-
-                <div class="telemetry-grid">
-                    <div class="stat-card">
-                        <div class="stat-label">System Memory</div>
-                        <div class="stat-value" id="statRam">-- MB</div>
-                        <div class="stat-desc" id="statRamDesc">Free headroom available</div>
+                <div class="info-list">
+                    <div class="info-item">
+                        <div class="info-label">Hostname</div>
+                        <div class="info-value">printserver.local</div>
                     </div>
-                    <div class="stat-card">
-                        <div class="stat-label">CPU Load Average</div>
-                        <div class="stat-value" id="statLoad">--</div>
-                        <div class="stat-desc">Ultra-low thermal footprint</div>
+                    <div class="info-item">
+                        <div class="info-label">LAN Address</div>
+                        <div class="info-value">10.0.0.95</div>
                     </div>
-                    <div class="stat-card">
-                        <div class="stat-label">System Uptime</div>
-                        <div class="stat-value" id="statUptime">--</div>
-                        <div class="stat-desc">Continuous 24/7 server state</div>
+                    <div class="info-item">
+                        <div class="info-label">Tailscale Address</div>
+                        <div class="info-value">100.104.185.40</div>
                     </div>
-                    <div class="stat-card">
-                        <div class="stat-label">mDNS Hostname</div>
-                        <div class="stat-value" style="font-size: 1.1rem; color: var(--accent);">printserver.local</div>
-                        <div class="stat-desc">Zero-config LAN Discovery</div>
+                    <div class="info-item">
+                        <div class="info-label">Memory</div>
+                        <div class="info-value" id="sysRam">--</div>
                     </div>
-                </div>
-
-                <div style="margin-top: 24px; padding: 18px; background: rgba(8, 12, 20, 0.5); border-radius: var(--radius-md); border: 1px solid var(--border);">
-                    <h4 style="font-size: 0.95rem; margin-bottom: 8px;">Hardware Connection</h4>
-                    <p style="color: var(--text-muted); font-size: 0.85rem;" id="hardwareDesc">Scanning USB connection...</p>
+                    <div class="info-item">
+                        <div class="info-label">System Load</div>
+                        <div class="info-value" id="sysLoad">--</div>
+                    </div>
+                    <div class="info-item">
+                        <div class="info-label">Uptime</div>
+                        <div class="info-value" id="sysUptime">--</div>
+                    </div>
                 </div>
             </div>
         </div>
     </main>
 
-    <!-- Footer -->
     <footer>
-        <p>ApexPrint Studio • Running on ZTE B860H (Armbian Linux) • <a href="https://printserver.local:631" target="_blank">CUPS Admin (:631)</a> • <a href="https://github.com/Sheesh0327/armbian-print-vpn-server" target="_blank">GitHub Repository</a></p>
+        <span>Print Server • ZTE B860H</span>
+        <span><a href="https://printserver.local:631" target="_blank">CUPS Admin</a> • <a href="https://github.com/Sheesh0327/armbian-print-vpn-server" target="_blank">GitHub</a></span>
     </footer>
 
-    <!-- Frontend Interactive Script -->
     <script>
         pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 
         let currentPdf = null;
-        let pdfPageNum = 1;
-        let pdfTotalPages = 1;
-        let currentMode = 'simple';
+        let pdfPage = 1;
+        let pdfPagesTotal = 1;
+        let mode = 'simple';
 
-        // DOM elements
         const dropzone = document.getElementById('dropzone');
         const fileInput = document.getElementById('fileInput');
-        const previewContainer = document.getElementById('previewContainer');
-        const previewFilename = document.getElementById('previewFilename');
-        const previewDimensions = document.getElementById('previewDimensions');
-        const previewPageCount = document.getElementById('previewPageCount');
-        const fileSizeBadge = document.getElementById('fileSizeBadge');
-        const imagePreview = document.getElementById('imagePreview');
+        const previewBox = document.getElementById('previewBox');
+        const previewName = document.getElementById('previewName');
+        const previewDetails = document.getElementById('previewDetails');
+        const fileBadge = document.getElementById('fileBadge');
+        const imgPreview = document.getElementById('imgPreview');
         const pdfCanvas = document.getElementById('pdfCanvas');
-        const textPreview = document.getElementById('textPreview');
-        const btnPrevPage = document.getElementById('btnPrevPage');
-        const btnNextPage = document.getElementById('btnNextPage');
-        const statusToast = document.getElementById('statusToast');
+        const txtPreview = document.getElementById('txtPreview');
+        const previewPagination = document.getElementById('previewPagination');
+        const pageIndicator = document.getElementById('pageIndicator');
+        const btnPrev = document.getElementById('btnPrev');
+        const btnNext = document.getElementById('btnNext');
+        const toast = document.getElementById('toast');
         const btnSubmit = document.getElementById('btnSubmit');
 
-        // Drag and drop event listeners
         dropzone.addEventListener('click', () => fileInput.click());
         dropzone.addEventListener('dragover', (e) => { e.preventDefault(); dropzone.classList.add('dragover'); });
         dropzone.addEventListener('dragleave', () => dropzone.classList.remove('dragover'));
         dropzone.addEventListener('drop', (e) => {
             e.preventDefault();
             dropzone.classList.remove('dragover');
-            if (e.dataTransfer.files.length > 0) {
+            if (e.dataTransfer.files.length) {
                 fileInput.files = e.dataTransfer.files;
-                handleFileSelect();
+                loadFile();
             }
         });
-        fileInput.addEventListener('change', handleFileSelect);
+        fileInput.addEventListener('change', loadFile);
 
-        function handleFileSelect() {
+        function loadFile() {
             if (!fileInput.files.length) return;
-            const file = fileInput.files[0];
-            
-            previewFilename.textContent = file.name;
-            fileSizeBadge.style.display = 'inline-block';
-            fileSizeBadge.textContent = formatBytes(file.size);
-            previewContainer.style.display = 'block';
+            const f = fileInput.files[0];
+            previewName.textContent = f.name;
+            fileBadge.textContent = formatBytes(f.size);
+            previewBox.style.display = 'block';
 
-            // Reset preview slots
-            imagePreview.style.display = 'none';
+            imgPreview.style.display = 'none';
             pdfCanvas.style.display = 'none';
-            textPreview.style.display = 'none';
-            btnPrevPage.style.display = 'none';
-            btnNextPage.style.display = 'none';
-            previewDimensions.textContent = '';
-            previewPageCount.textContent = '';
+            txtPreview.style.display = 'none';
+            previewPagination.style.display = 'none';
 
-            const fileExt = file.name.split('.').pop().toLowerCase();
-
-            if (['png', 'jpg', 'jpeg', 'webp', 'svg'].includes(fileExt)) {
-                // Image preview
+            const ext = f.name.split('.').pop().toLowerCase();
+            if (['png', 'jpg', 'jpeg', 'webp'].includes(ext)) {
                 const reader = new FileReader();
                 reader.onload = (e) => {
-                    imagePreview.src = e.target.result;
-                    imagePreview.style.display = 'block';
-                    imagePreview.onload = () => {
-                        previewDimensions.textContent = `${imagePreview.naturalWidth} × ${imagePreview.naturalHeight} px`;
+                    imgPreview.src = e.target.result;
+                    imgPreview.style.display = 'block';
+                    imgPreview.onload = () => {
+                        previewDetails.textContent = `${imgPreview.naturalWidth} × ${imgPreview.naturalHeight}px`;
                     };
                 };
-                reader.readAsDataURL(file);
-            } else if (fileExt === 'pdf') {
-                // PDF preview via PDF.js
+                reader.readAsDataURL(f);
+            } else if (ext === 'pdf') {
                 const reader = new FileReader();
                 reader.onload = function(e) {
-                    const typedarray = new Uint8Array(e.target.result);
-                    pdfjsLib.getDocument(typedarray).promise.then(pdf => {
+                    pdfjsLib.getDocument(new Uint8Array(e.target.result)).promise.then(pdf => {
                         currentPdf = pdf;
-                        pdfTotalPages = pdf.numPages;
-                        pdfPageNum = 1;
-                        previewPageCount.textContent = `${pdfTotalPages} ${pdfTotalPages > 1 ? 'Pages' : 'Page'}`;
-                        if (pdfTotalPages > 1) {
-                            btnPrevPage.style.display = 'inline-flex';
-                            btnNextPage.style.display = 'inline-flex';
-                        }
-                        renderPdfPage(pdfPageNum);
-                    }).catch(err => {
-                        console.warn('PDF.js render fallback:', err);
-                        textPreview.style.display = 'block';
-                        textPreview.textContent = 'PDF ready to print: ' + file.name;
+                        pdfPagesTotal = pdf.numPages;
+                        pdfPage = 1;
+                        if (pdfPagesTotal > 1) previewPagination.style.display = 'flex';
+                        renderPdf(pdfPage);
+                    }).catch(() => {
+                        txtPreview.style.display = 'block';
+                        txtPreview.textContent = 'PDF ready to print.';
                     });
                 };
-                reader.readAsArrayBuffer(file);
-            } else if (['txt', 'log', 'csv', 'md'].includes(fileExt)) {
-                // Text preview
-                const reader = new FileReader();
-                reader.onload = (e) => {
-                    textPreview.style.display = 'block';
-                    textPreview.textContent = e.target.result.slice(0, 3000);
-                };
-                reader.readAsText(file);
+                reader.readAsArrayBuffer(f);
             } else {
-                // Generic doc
-                textPreview.style.display = 'block';
-                textPreview.textContent = `Document (${fileExt.toUpperCase()}) queued for printing.`;
+                txtPreview.style.display = 'block';
+                txtPreview.textContent = 'Ready to print.';
             }
         }
 
-        function renderPdfPage(num) {
+        function renderPdf(num) {
             if (!currentPdf) return;
             currentPdf.getPage(num).then(page => {
-                const viewport = page.getViewport({ scale: 1.2 });
+                const viewport = page.getViewport({ scale: 1.0 });
                 pdfCanvas.height = viewport.height;
                 pdfCanvas.width = viewport.width;
                 pdfCanvas.style.display = 'block';
-                const renderContext = {
+                page.render({
                     canvasContext: pdfCanvas.getContext('2d'),
                     viewport: viewport
-                };
-                page.render(renderContext);
-                previewPageCount.textContent = `Page ${num} of ${pdfTotalPages}`;
+                });
+                pageIndicator.textContent = `${num} / ${pdfPagesTotal}`;
             });
         }
 
-        btnPrevPage.addEventListener('click', () => {
-            if (pdfPageNum > 1) {
-                pdfPageNum--;
-                renderPdfPage(pdfPageNum);
-            }
-        });
+        btnPrev.addEventListener('click', () => { if (pdfPage > 1) { pdfPage--; renderPdf(pdfPage); } });
+        btnNext.addEventListener('click', () => { if (pdfPage < pdfPagesTotal) { pdfPage++; renderPdf(pdfPage); } });
 
-        btnNextPage.addEventListener('click', () => {
-            if (pdfPageNum < pdfTotalPages) {
-                pdfPageNum++;
-                renderPdfPage(pdfPageNum);
-            }
-        });
-
-        function clearSelectedFile() {
+        function clearFile() {
             fileInput.value = '';
-            previewContainer.style.display = 'none';
-            fileSizeBadge.style.display = 'none';
+            previewBox.style.display = 'none';
+            fileBadge.textContent = 'No file selected';
             currentPdf = null;
         }
 
-        // Mode Switching
-        function setMode(mode) {
-            currentMode = mode;
-            const btnSimple = document.getElementById('btnModeSimple');
-            const btnAdv = document.getElementById('btnModeAdvanced');
-            const simpleOpts = document.getElementById('simpleOptions');
-            const advOpts = document.getElementById('advancedOptions');
-
-            if (mode === 'simple') {
-                btnSimple.classList.add('active');
-                btnAdv.classList.remove('active');
-                simpleOpts.style.display = 'block';
-                advOpts.style.display = 'none';
-            } else {
-                btnAdv.classList.add('active');
-                btnSimple.classList.remove('active');
-                simpleOpts.style.display = 'none';
-                advOpts.style.display = 'block';
-            }
+        function setMode(m) {
+            mode = m;
+            document.getElementById('btnSimple').classList.toggle('active', m === 'simple');
+            document.getElementById('btnAdv').classList.toggle('active', m === 'advanced');
+            document.getElementById('secSimple').style.display = m === 'simple' ? 'block' : 'none';
+            document.getElementById('secAdv').style.display = m === 'advanced' ? 'block' : 'none';
         }
 
-        function syncPageSize(val) {
-            document.getElementById('advPageSize').value = val;
+        function syncSize(val) {
+            document.getElementById('advSize').value = val;
         }
 
-        function adjustCopies(delta) {
-            const input = document.getElementById('copiesInput');
-            let val = parseInt(input.value) || 1;
-            val = Math.max(1, Math.min(99, val + delta));
-            input.value = val;
+        function stepCopies(d) {
+            const el = document.getElementById('copiesInput');
+            el.value = Math.max(1, Math.min(99, (parseInt(el.value) || 1) + d));
         }
 
-        function switchMainTab(tab) {
-            document.querySelectorAll('.tab-pane').forEach(el => el.classList.remove('active'));
-            document.querySelectorAll('.nav-tab').forEach(el => el.classList.remove('active'));
+        function showTab(t) {
+            document.querySelectorAll('.tab-content').forEach(e => e.classList.remove('active'));
+            document.querySelectorAll('.nav-btn').forEach(e => e.classList.remove('active'));
+            document.getElementById('tab-' + t).classList.add('active');
             
-            const targetPane = document.getElementById('tab-' + tab);
-            if (targetPane) targetPane.classList.add('active');
+            const btn = Array.from(document.querySelectorAll('.nav-btn')).find(b => b.textContent.toLowerCase() === t);
+            if (btn) btn.classList.add('active');
 
-            const activeBtn = Array.from(document.querySelectorAll('.nav-tab')).find(b => b.textContent.toLowerCase().includes(tab === 'studio' ? 'studio' : (tab === 'jobs' ? 'queue' : 'telemetry')));
-            if (activeBtn) activeBtn.classList.add('active');
-
-            if (tab === 'jobs') refreshJobs();
-            if (tab === 'telemetry') fetchTelemetry();
+            if (t === 'queue') fetchJobs();
+            if (t === 'system') fetchStatus();
         }
 
-        // Submit Print Job
         document.getElementById('printForm').addEventListener('submit', async (e) => {
             e.preventDefault();
             if (!fileInput.files.length) {
-                showToast('Please select a file to print first.', 'error');
+                showToast('Select a file to print.', 'error');
                 return;
             }
 
             btnSubmit.disabled = true;
-            btnSubmit.innerHTML = '<span>⏳</span> Spooling to CUPS...';
+            btnSubmit.textContent = 'Sending...';
             showToast('', '');
 
             const formData = new FormData(e.target);
-
-            // Ensure pagesize is mapped based on mode
-            if (currentMode === 'simple') {
-                formData.set('pagesize', document.getElementById('simplePageSize').value);
+            if (mode === 'simple') {
+                formData.set('pagesize', document.getElementById('simpleSize').value);
                 formData.set('mediatype', 'Plain');
                 formData.set('quality', 'Normal');
                 formData.set('duplex', 'None');
                 formData.set('orientation', 'auto');
                 formData.set('fitpage', 'true');
-                formData.set('numberup', '1');
             }
 
             try {
                 const res = await fetch('/api/print', { method: 'POST', body: formData });
-                const data = await res.json();
-                if (res.ok && data.success) {
-                    showToast(`Job submitted successfully! (ID: ${data.job_id})`, 'success');
-                    clearSelectedFile();
-                    setTimeout(refreshJobs, 1000);
+                const d = await res.json();
+                if (res.ok && d.success) {
+                    showToast(`Print job submitted (${d.job_id})`, 'success');
+                    clearFile();
                 } else {
-                    showToast('Print Error: ' + (data.error || 'Unknown error'), 'error');
+                    showToast(d.error || 'Print failed.', 'error');
                 }
             } catch (err) {
-                showToast('Communication error: ' + err.message, 'error');
+                showToast('Network error: ' + err.message, 'error');
             } finally {
                 btnSubmit.disabled = false;
-                btnSubmit.innerHTML = '<span>🖨️</span> Print Document';
+                btnSubmit.textContent = 'Print';
             }
         });
 
         function showToast(msg, type) {
-            if (!msg) { statusToast.style.display = 'none'; return; }
-            statusToast.textContent = msg;
-            statusToast.className = 'toast-banner ' + type;
-            statusToast.style.display = 'flex';
+            if (!msg) { toast.style.display = 'none'; return; }
+            toast.textContent = msg;
+            toast.className = 'toast ' + type;
+            toast.style.display = 'block';
         }
 
-        // Fetch Printers & Status
         async function fetchStatus() {
             try {
                 const res = await fetch('/api/status');
-                const data = await res.json();
-                
-                const select = document.getElementById('printerSelect');
-                if (data.printers && data.printers.length) {
-                    const currentVal = select.value;
-                    select.innerHTML = '';
-                    data.printers.forEach(p => {
-                        const opt = document.createElement('option');
-                        opt.value = p.name;
-                        opt.textContent = `${p.name} (${p.state})`;
-                        if (p.is_default) opt.selected = true;
-                        select.appendChild(opt);
-                    });
-                    if (currentVal) select.value = currentVal;
-
-                    const defaultP = data.printers.find(p => p.is_default) || data.printers[0];
-                    document.getElementById('printerStatusText').textContent = `${defaultP.name} • ${defaultP.state}`;
+                const d = await res.json();
+                if (d.printers && d.printers.length) {
+                    document.getElementById('headerStatusText').textContent = d.printers[0].name;
                 }
-
-                if (data.telemetry) {
-                    document.getElementById('statRam').textContent = data.telemetry.ram_used + ' / ' + data.telemetry.ram_total;
-                    document.getElementById('statLoad').textContent = data.telemetry.load;
-                    document.getElementById('statUptime').textContent = data.telemetry.uptime;
-                    document.getElementById('hardwareDesc').textContent = data.telemetry.usb_printer || 'Printer connected via USB';
+                if (d.telemetry) {
+                    document.getElementById('sysRam').textContent = d.telemetry.ram_used + ' / ' + d.telemetry.ram_total;
+                    document.getElementById('sysLoad').textContent = d.telemetry.load;
+                    document.getElementById('sysUptime').textContent = d.telemetry.uptime;
                 }
-            } catch (e) {
-                console.warn('Status poll failed:', e);
-            }
+            } catch (e) {}
         }
 
-        // Fetch & Populate Jobs
-        async function refreshJobs() {
+        async function fetchJobs() {
             try {
                 const res = await fetch('/api/jobs');
-                const data = await res.json();
-                const tbody = document.getElementById('jobsTableBody');
-
-                if (!data.jobs || !data.jobs.length) {
-                    tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: var(--text-muted); padding: 30px;">No recent or pending print jobs found.</td></tr>';
+                const d = await res.json();
+                const tbody = document.getElementById('queueBody');
+                if (!d.jobs || !d.jobs.length) {
+                    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; color: var(--text-tertiary); padding: 24px;">No recent jobs.</td></tr>';
                     return;
                 }
-
-                tbody.innerHTML = '';
-                data.jobs.forEach(j => {
-                    const tr = document.createElement('tr');
-                    tr.innerHTML = `
-                        <td class="job-id">${j.id}</td>
-                        <td>${j.printer}</td>
+                tbody.innerHTML = d.jobs.map(j => `
+                    <tr>
+                        <td style="font-family: var(--font-mono); color: var(--text-primary);">${j.id}</td>
                         <td>${j.user}</td>
                         <td>${formatBytes(j.bytes)}</td>
                         <td>${j.time}</td>
-                        <td><span class="job-state-badge ${j.state.toLowerCase()}">${j.state}</span></td>
-                        <td>${j.state.toLowerCase() === 'active' ? `<button class="btn-cancel" onclick="cancelJob('${j.id}')">Cancel</button>` : '—'}</td>
-                    `;
-                    tbody.appendChild(tr);
-                });
-            } catch (e) {
-                console.warn('Jobs fetch failed:', e);
-            }
+                        <td><span class="badge-status ${j.state.toLowerCase()}">${j.state}</span></td>
+                        <td>${j.state === 'Active' ? `<button type="button" class="btn-action" onclick="cancelJob('${j.id}')">Cancel</button>` : ''}</td>
+                    </tr>
+                `).join('');
+            } catch (e) {}
         }
 
-        async function cancelJob(jobId) {
-            if (!confirm(`Cancel print job ${jobId}?`)) return;
+        async function cancelJob(id) {
+            if (!confirm(`Cancel job ${id}?`)) return;
             try {
-                const res = await fetch('/api/cancel', {
+                await fetch('/api/cancel', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ job_id: jobId })
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ job_id: id })
                 });
-                const data = await res.json();
-                if (data.success) {
-                    refreshJobs();
-                } else {
-                    alert('Error cancelling job: ' + (data.error || 'Unknown error'));
-                }
-            } catch (e) {
-                alert('Connection error: ' + e.message);
-            }
+                fetchJobs();
+            } catch (e) {}
         }
 
         function formatBytes(bytes) {
-            if (!bytes || bytes === 0) return '0 B';
-            const k = 1024;
-            const sizes = ['B', 'KB', 'MB', 'GB'];
+            if (!bytes) return '0 B';
+            const k = 1024, sizes = ['B', 'KB', 'MB', 'GB'];
             const i = Math.floor(Math.log(bytes) / Math.log(k));
             return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
         }
 
-        // Initial setup
         fetchStatus();
-        setInterval(fetchStatus, 8000);
     </script>
 </body>
 </html>
@@ -1465,7 +1122,7 @@ def parse_printers():
                         'state': state,
                         'is_default': (name == default_name)
                     })
-    except Exception as e:
+    except Exception:
         printers.append({'name': 'HP_Smart_Tank_520', 'state': 'Idle', 'is_default': True})
     return printers
 
@@ -1474,8 +1131,7 @@ def get_telemetry():
         'ram_used': '--',
         'ram_total': '--',
         'load': '--',
-        'uptime': '--',
-        'usb_printer': 'HP Smart Tank 520 (USB)'
+        'uptime': '--'
     }
     try:
         mem = subprocess.check_output(['free', '-m'], text=True).split('\n')[1].split()
@@ -1487,12 +1143,6 @@ def get_telemetry():
         up_match = re.search(r'up\s+(.*?),\s+\d+\s+user', load)
         if up_match:
             telemetry['uptime'] = up_match.group(1).strip()
-            
-        usb = subprocess.check_output(['lsusb'], text=True)
-        for line in usb.split('\n'):
-            if 'HP' in line or 'Smart Tank' in line or 'Printer' in line:
-                telemetry['usb_printer'] = line.strip()
-                break
     except Exception:
         pass
     return telemetry
@@ -1500,30 +1150,26 @@ def get_telemetry():
 def parse_jobs():
     jobs = []
     try:
-        # Active jobs
-        active_raw = subprocess.check_output(['lpstat', '-o'], credentials=None, text=True)
+        active_raw = subprocess.check_output(['lpstat', '-o'], text=True)
         for line in active_raw.strip().split('\n'):
             if not line.strip(): continue
             parts = line.split()
             if len(parts) >= 4:
                 jobs.append({
                     'id': parts[0],
-                    'printer': parts[0].rsplit('-', 1)[0],
                     'user': parts[1],
                     'bytes': int(parts[2]) if parts[2].isdigit() else 0,
                     'time': ' '.join(parts[3:]),
                     'state': 'Active'
                 })
 
-        # Completed jobs
         comp_raw = subprocess.check_output(['lpstat', '-W', 'completed', '-o'], text=True)
-        for line in comp_raw.strip().split('\n')[:15]:
+        for line in comp_raw.strip().split('\n')[:10]:
             if not line.strip(): continue
             parts = line.split()
             if len(parts) >= 4:
                 jobs.append({
                     'id': parts[0],
-                    'printer': parts[0].rsplit('-', 1)[0],
                     'user': parts[1],
                     'bytes': int(parts[2]) if parts[2].isdigit() else 0,
                     'time': ' '.join(parts[3:]),
@@ -1580,7 +1226,6 @@ def api_print():
     duplex = request.form.get('duplex', 'None')
     orientation = request.form.get('orientation', 'auto')
     fitpage = request.form.get('fitpage', 'true')
-    numberup = request.form.get('numberup', '1')
     pagerange = request.form.get('pagerange', '').strip()
 
     suffix = os.path.splitext(file.filename)[1].lower()
@@ -1591,7 +1236,6 @@ def api_print():
     try:
         cmd = ['lp', '-d', printer, '-n', str(copies)]
 
-        # Media & Format options
         if pagesize:
             cmd.extend(['-o', f'PageSize={pagesize}'])
         if mediatype:
@@ -1606,8 +1250,6 @@ def api_print():
             cmd.extend(['-o', f'orientation-requested={orientation}'])
         if fitpage == 'true':
             cmd.extend(['-o', 'fit-to-page'])
-        if numberup in ['2', '4']:
-            cmd.extend(['-o', f'number-up={numberup}'])
         if pagerange:
             cmd.extend(['-o', f'page-ranges={pagerange}'])
 
