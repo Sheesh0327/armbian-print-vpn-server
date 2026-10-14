@@ -9,7 +9,7 @@ import hashlib
 import secrets
 import shutil
 from datetime import datetime
-from flask import Flask, render_template_string, request, jsonify, Response, send_file
+from flask import Flask, render_template_string, request, jsonify, Response
 
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 150 * 1024 * 1024  # 150MB file size limit
@@ -18,7 +18,6 @@ DB_PATH = "/var/lib/webprint/webprint.db"
 SPOOL_PINNED_DIR = "/var/spool/webprint/pinned"
 TEMP_DIR_BASE = "/tmp/webprint"
 
-# Active admin tokens: {token: expires_timestamp}
 ACTIVE_TOKENS = {}
 
 def get_db():
@@ -255,7 +254,7 @@ INDEX_HTML = """<!DOCTYPE html>
             --paper-text: #09090b;
             --paper-border: #e4e4e7;
             --paper-shadow: 0 16px 40px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.08);
-            --margin-line: rgba(59, 130, 246, 0.45);
+            --margin-line: rgba(59, 130, 246, 0.55);
             --accent: #3b82f6;
             --accent-hover: #2563eb;
             --success: #22c55e;
@@ -280,7 +279,7 @@ INDEX_HTML = """<!DOCTYPE html>
             --paper-text: #0f172a;
             --paper-border: #cbd5e1;
             --paper-shadow: 0 14px 30px rgba(0, 0, 0, 0.08), 0 0 0 1px rgba(0, 0, 0, 0.06);
-            --margin-line: rgba(37, 99, 235, 0.35);
+            --margin-line: rgba(37, 99, 235, 0.45);
             --accent: #2563eb;
             --accent-hover: #1d4ed8;
             --success: #16a34a;
@@ -433,7 +432,6 @@ INDEX_HTML = """<!DOCTYPE html>
         .tab-content { display: none; }
         .tab-content.active { display: block; }
 
-        /* Common Card & Grid Layouts */
         .card {
             background: var(--surface);
             border: 1px solid var(--border);
@@ -444,17 +442,16 @@ INDEX_HTML = """<!DOCTYPE html>
 
         .grid-layout {
             display: grid;
-            grid-template-columns: minmax(0, 1fr) 380px;
+            grid-template-columns: minmax(0, 1fr) 390px;
             gap: 20px;
             align-items: start;
         }
 
-        @media (max-width: 1024px) {
+        @media (max-width: 1080px) {
             .grid-layout { grid-template-columns: 1fr; }
             header { flex-wrap: wrap; }
         }
 
-        /* Forms & Inputs */
         label {
             display: block;
             font-size: 11px;
@@ -478,7 +475,17 @@ INDEX_HTML = """<!DOCTYPE html>
         }
         input:focus, select:focus { border-color: var(--accent); }
 
-        .form-group { margin-bottom: 16px; }
+        .form-group { margin-bottom: 14px; }
+        .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+        .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+
+        .margin-input-col {
+            display: flex;
+            flex-direction: column;
+            gap: 3px;
+            font-size: 11px;
+            color: var(--text-secondary);
+        }
 
         .btn-primary {
             display: inline-flex;
@@ -507,7 +514,7 @@ INDEX_HTML = """<!DOCTYPE html>
             background: var(--surface-elevated);
             color: var(--text-primary);
             border: 1px solid var(--border);
-            padding: 8px 14px;
+            padding: 7px 12px;
             font-size: 12px;
             font-weight: 500;
             border-radius: var(--radius-sm);
@@ -521,8 +528,8 @@ INDEX_HTML = """<!DOCTYPE html>
             background: var(--surface-elevated);
             border: 1px solid var(--border);
             border-radius: var(--radius-md);
-            padding: 12px 16px;
-            margin-bottom: 16px;
+            padding: 12px 14px;
+            margin-bottom: 14px;
             display: flex;
             align-items: center;
             justify-content: space-between;
@@ -534,7 +541,7 @@ INDEX_HTML = """<!DOCTYPE html>
         .dropzone {
             border: 2px dashed var(--border);
             border-radius: var(--radius-lg);
-            padding: 32px 20px;
+            padding: 24px 16px;
             text-align: center;
             background: var(--surface);
             cursor: pointer;
@@ -554,38 +561,113 @@ INDEX_HTML = """<!DOCTYPE html>
             cursor: pointer;
         }
 
-        /* Paper Preview Desk */
+        /* Large Preview Desk with Realistic Paper Sheet */
         .preview-desk {
             background: var(--desk-bg);
             border: 1px solid var(--border);
             border-radius: var(--radius-lg);
-            min-height: 580px;
+            min-height: 620px;
             display: flex;
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            padding: 24px;
+            padding: 20px;
             position: relative;
             overflow: hidden;
+            transition: var(--transition-theme);
+        }
+
+        .preview-top-toolbar {
+            width: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding-bottom: 12px;
+            margin-bottom: 12px;
+            border-bottom: 1px solid var(--border);
         }
 
         .paper-sheet {
             background: var(--paper-bg);
             color: var(--paper-text);
             box-shadow: var(--paper-shadow);
-            border-radius: 2px;
+            border-radius: 3px;
             position: relative;
             display: flex;
             align-items: center;
             justify-content: center;
-            transition: transform 0.2s ease, width 0.2s ease, height 0.2s ease;
+            overflow: hidden;
+            transition: width 0.25s cubic-bezier(0.16, 1, 0.3, 1), 
+                        height 0.25s cubic-bezier(0.16, 1, 0.3, 1),
+                        filter 0.2s ease;
         }
 
-        .canvas-container {
-            position: relative;
+        .printable-area {
+            position: absolute;
+            border: 1px dashed var(--margin-line);
+            border-radius: 2px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+            pointer-events: none;
+            transition: top 0.2s ease, bottom 0.2s ease, left 0.2s ease, right 0.2s ease;
+        }
+
+        .content-render-wrap {
             width: 100%;
             height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
         }
+        .content-render-wrap canvas, .content-render-wrap img {
+            max-width: 100%;
+            max-height: 100%;
+            object-fit: contain;
+            display: block;
+        }
+        .content-render-wrap.scale-fill canvas, .content-render-wrap.scale-fill img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .preview-dimensions-tag {
+            margin-top: 14px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 11px;
+            font-weight: 500;
+            color: var(--text-tertiary);
+            background: var(--surface-elevated);
+            padding: 4px 12px;
+            border-radius: 9999px;
+            border: 1px solid var(--border);
+        }
+
+        .pagination-controls {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        .page-btn {
+            background: var(--surface-elevated);
+            border: 1px solid var(--border);
+            color: var(--text-primary);
+            width: 26px;
+            height: 26px;
+            border-radius: var(--radius-sm);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 13px;
+        }
+        .page-btn:hover { border-color: var(--border-hover); }
 
         /* Design Studio Toolbar */
         .studio-topbar {
@@ -810,26 +892,57 @@ INDEX_HTML = """<!DOCTYPE html>
 </header>
 
 <main>
-    <!-- TAB 1: PRINT -->
+    <!-- TAB 1: ADVANCED PRINT (THE ONLY AND PERMANENT PRINT MODE) -->
     <div class="tab-content active" id="tab-print">
         <div class="grid-layout">
+            <!-- Left: Dynamic Virtual Desk & Animated Paper Sheet Preview -->
             <div class="preview-desk">
-                <div class="paper-sheet" id="paperSheet" style="width: 420px; height: 594px;">
-                    <canvas id="pdfCanvas" style="max-width:100%; max-height:100%;"></canvas>
+                <div class="preview-top-toolbar" id="previewTopToolbar" style="display: none;">
+                    <div style="font-weight: 600; font-size: 13px;" id="previewDocTitle">Document.pdf</div>
+                    <div style="display: flex; align-items: center; gap: 12px;">
+                        <div class="pagination-controls" id="previewPagination" style="display: none;">
+                            <button type="button" class="page-btn" id="btnPrev">‹</button>
+                            <span id="pageIndicator">1 / 1</span>
+                            <button type="button" class="page-btn" id="btnNext">›</button>
+                        </div>
+                        <button type="button" class="btn-secondary" id="btnClearPreview" style="padding: 3px 8px; font-size: 11px;">✕ Clear</button>
+                    </div>
                 </div>
-                <div id="previewEmptyState" style="text-align: center; color: var(--text-tertiary);">
-                    <div style="font-size: 32px; margin-bottom: 8px;">📄</div>
+
+                <div class="paper-sheet" id="paperSheet" style="width: 440px; height: 622px;">
+                    <div class="printable-area" id="printableArea">
+                        <div class="content-render-wrap" id="renderWrap">
+                            <canvas id="pdfCanvas" style="display: none;"></canvas>
+                            <img id="imgPreview" style="display: none;" alt="Preview">
+                            <div id="txtPreview" style="display: none; padding: 20px; font-size: 12px; color: #333; overflow: hidden; width:100%; height:100%; word-break: break-all;"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="previewEmptyState" style="text-align: center; color: var(--text-tertiary); margin-top: 14px;">
+                    <div style="font-size: 32px; margin-bottom: 6px;">📄</div>
                     <div style="font-weight: 500;">No document loaded</div>
-                    <div style="font-size: 12px;">Drop PDF, Office Doc, or Photo on the right to preview</div>
+                    <div style="font-size: 12px;">Drop any file on the right to inspect and preview</div>
+                </div>
+
+                <div class="preview-dimensions-tag" id="previewDimensionsTag" style="display: none;">
+                    <span id="sheetFormatTag">A4 • 210 × 297 mm</span>
+                    <span>•</span>
+                    <span id="sheetOrientationTag">Portrait</span>
+                    <span>•</span>
+                    <span id="sheetMarginTag">Printable Area</span>
+                    <span>•</span>
+                    <span id="sheetColorTag">Color</span>
                 </div>
             </div>
 
+            <!-- Right: Full Advanced Controls Panel (Permanent) -->
             <div class="card">
                 <div class="form-group">
                     <label>Document Ingestion</label>
                     <div class="dropzone" id="printDropzone">
                         <input type="file" id="printFileInput" accept=".pdf,.doc,.docx,.odt,.rtf,.txt,.csv,.xlsx,.xls,.pptx,.ppt,.png,.jpg,.jpeg,.webp,.heic,.heif,.avif,.tiff,.bmp">
-                        <div style="font-size: 24px; margin-bottom: 4px;">📂</div>
+                        <div style="font-size: 22px; margin-bottom: 4px;">📂</div>
                         <div style="font-weight: 600;" id="printFileName">Click or drop file here</div>
                         <div style="font-size: 11px; color: var(--text-tertiary); margin-top: 4px;">
                             PDF, Word, Excel, PPT, iPhone HEIC/AVIF, Images
@@ -845,40 +958,101 @@ INDEX_HTML = """<!DOCTYPE html>
                     <div class="cost-amount" id="costTotal">₱0.00</div>
                 </div>
 
-                <div class="form-group">
-                    <label>Copies</label>
-                    <input type="number" id="printCopies" min="1" max="99" value="1">
-                </div>
-
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
-                    <div class="form-group">
+                <!-- Paper & Layout Group -->
+                <div class="grid-2 form-group">
+                    <div>
                         <label>Paper Size</label>
                         <select id="printPageSize">
-                            <option value="A4" selected>A4 (210 x 297 mm)</option>
-                            <option value="Letter">US Letter</option>
-                            <option value="Legal">Legal</option>
-                            <option value="4x6in">4x6" Photo</option>
+                            <option value="A4" selected>A4 (210 × 297 mm)</option>
+                            <option value="Letter">Letter (8.5 × 11 in)</option>
+                            <option value="Legal">Legal (8.5 × 14 in)</option>
+                            <option value="A5">A5 (148 × 210 mm)</option>
+                            <option value="A6">A6 (105 × 148 mm)</option>
+                            <option value="B5">B5 (176 × 250 mm)</option>
+                            <option value="4x6in">4 × 6 in Photo</option>
+                            <option value="5x7in">5 × 7 in Photo</option>
+                            <option value="8x10">8 × 10 in Print</option>
+                            <option value="EnvelopeDL">Envelope DL</option>
                         </select>
                     </div>
-                    <div class="form-group">
-                        <label>Color Mode</label>
-                        <select id="printColorModel">
-                            <option value="RGB" selected>Full Color</option>
-                            <option value="KGray">Black & White (Grayscale)</option>
+                    <div>
+                        <label>Orientation</label>
+                        <select id="printOrientation">
+                            <option value="auto" selected>Auto-detect</option>
+                            <option value="3">Portrait</option>
+                            <option value="4">Landscape</option>
                         </select>
                     </div>
                 </div>
 
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
-                    <div class="form-group">
-                        <label>DPI / Quality</label>
-                        <select id="printDpi">
-                            <option value="150">150 DPI (Fast)</option>
-                            <option value="300" selected>300 DPI (High Quality)</option>
-                            <option value="600">600 DPI (Ultra Fine)</option>
+                <!-- Margins Controls -->
+                <div class="form-group">
+                    <label>Margins</label>
+                    <select id="printMarginMode">
+                        <option value="printable" selected>Full Printable Area (Standard)</option>
+                        <option value="none">Zero / Borderless (0 mm)</option>
+                        <option value="normal">Normal (12.7 mm / 0.5 in)</option>
+                        <option value="custom">Custom Margins (mm)...</option>
+                    </select>
+                </div>
+
+                <!-- Custom Margins Box (Appears when Custom is selected) -->
+                <div id="customMarginBox" class="form-group" style="display: none;">
+                    <label style="font-size: 11px;">Custom Margins (mm)</label>
+                    <div class="grid-4">
+                        <div class="margin-input-col">
+                            <span>Top</span>
+                            <input type="number" id="mTop" value="10" min="0" max="60">
+                        </div>
+                        <div class="margin-input-col">
+                            <span>Bottom</span>
+                            <input type="number" id="mBottom" value="10" min="0" max="60">
+                        </div>
+                        <div class="margin-input-col">
+                            <span>Left</span>
+                            <input type="number" id="mLeft" value="10" min="0" max="60">
+                        </div>
+                        <div class="margin-input-col">
+                            <span>Right</span>
+                            <input type="number" id="mRight" value="10" min="0" max="60">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Media Type & Quality -->
+                <div class="grid-2 form-group">
+                    <div>
+                        <label>Media Type</label>
+                        <select id="printMediaType">
+                            <option value="Plain" selected>Plain Paper</option>
+                            <option value="Glossy">Glossy Photo</option>
+                            <option value="FastGlossy">Everyday Photo</option>
+                            <option value="CoatedMatte">Matte Paper</option>
+                            <option value="CoatedBrochure">Brochure</option>
                         </select>
                     </div>
-                    <div class="form-group">
+                    <div>
+                        <label>Print Quality</label>
+                        <select id="printQuality">
+                            <option value="Normal" selected>Normal</option>
+                            <option value="Best">Best Quality</option>
+                            <option value="Photo">High-Res Photo</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- DPI & Duplex -->
+                <div class="grid-2 form-group">
+                    <div>
+                        <label>Resolution (DPI)</label>
+                        <select id="printDpi">
+                            <option value="150">150 DPI (Fast)</option>
+                            <option value="300" selected>300 DPI (Standard)</option>
+                            <option value="600">600 DPI (Ultra Fine)</option>
+                            <option value="1200">1200 DPI (Extreme)</option>
+                        </select>
+                    </div>
+                    <div>
                         <label>Duplex (Two-Sided)</label>
                         <select id="printDuplex">
                             <option value="None" selected>Single-Sided</option>
@@ -888,6 +1062,37 @@ INDEX_HTML = """<!DOCTYPE html>
                     </div>
                 </div>
 
+                <!-- Color Mode & Scaling -->
+                <div class="grid-2 form-group">
+                    <div>
+                        <label>Color Mode</label>
+                        <select id="printColorModel">
+                            <option value="RGB" selected>Full Color (RGB)</option>
+                            <option value="KGray">Black & White (Grayscale)</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label>Scaling</label>
+                        <select id="printScaling">
+                            <option value="true" selected>Fit to Printable Area</option>
+                            <option value="false">Fill / Crop Page</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Page Range & Copies -->
+                <div class="grid-2 form-group">
+                    <div>
+                        <label>Page Range</label>
+                        <input type="text" id="printPageRange" placeholder="e.g. 1-3, 5 (blank: all)">
+                    </div>
+                    <div>
+                        <label>Copies</label>
+                        <input type="number" id="printCopies" min="1" max="99" value="1">
+                    </div>
+                </div>
+
+                <!-- Confidential PIN Queue -->
                 <div class="form-group" style="padding-top: 6px;">
                     <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; text-transform: none; font-size: 13px;">
                         <input type="checkbox" id="chkPinHold">
@@ -1284,12 +1489,33 @@ INDEX_HTML = """<!DOCTYPE html>
 </div>
 
 <script>
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+    const PAPER_SPECS = {
+        'A4': { width: 210, height: 297, name: 'A4', desc: '210 × 297 mm' },
+        'Letter': { width: 215.9, height: 279.4, name: 'Letter', desc: '8.5 × 11 in' },
+        'Legal': { width: 215.9, height: 355.6, name: 'Legal', desc: '8.5 × 14 in' },
+        'A5': { width: 148, height: 210, name: 'A5', desc: '148 × 210 mm' },
+        'A6': { width: 105, height: 148, name: 'A6', desc: '105 × 148 mm' },
+        'B5': { width: 176, height: 250, name: 'B5', desc: '176 × 250 mm' },
+        '4x6in': { width: 101.6, height: 152.4, name: '4 × 6 in', desc: 'Photo Card' },
+        '5x7in': { width: 127, height: 177.8, name: '5 × 7 in', desc: 'Photo Card' },
+        '8x10': { width: 203.2, height: 254, name: '8 × 10 in', desc: 'Photo Print' },
+        'EnvelopeDL': { width: 110, height: 220, name: 'Envelope DL', desc: '110 × 220 mm' }
+    };
+
     let currentAdminToken = sessionStorage.getItem('admin_token') || '';
     let selectedPrinter = '';
     let fabricCanvas = null;
     let pendingReleaseJobId = '';
     let copyCopies = 1;
     let copyMode = 'Gray';
+
+    let currentPdf = null;
+    let pdfPage = 1;
+    let pdfPagesTotal = 1;
+    let docNaturalAspect = 1.414;
+    let inspectedPageCount = 1;
 
     // Toast utility
     function showToast(msg, type='info') {
@@ -1356,14 +1582,123 @@ INDEX_HTML = """<!DOCTYPE html>
         selectedPrinter = e.target.value;
     });
 
-    // Pre-flight file inspection and cost preview
+    // ==========================================
+    // ADVANCED REAL-TIME PREVIEW & MARGIN ENGINE
+    // ==========================================
+    function updatePreviewLayout() {
+        const sizeKey = document.getElementById('printPageSize').value;
+        const spec = PAPER_SPECS[sizeKey] || PAPER_SPECS['A4'];
+
+        const orientation = document.getElementById('printOrientation').value;
+        let isLandscape = false;
+        if (orientation === '4') {
+            isLandscape = true;
+        } else if (orientation === 'auto') {
+            isLandscape = docNaturalAspect < 0.95;
+        }
+
+        const maxDeskWidth = 460;
+        const maxDeskHeight = 560;
+        let paperPhysW = isLandscape ? spec.height : spec.width;
+        let paperPhysH = isLandscape ? spec.width : spec.height;
+        let paperRatio = paperPhysH / paperPhysW;
+
+        let sheetW, sheetH;
+        if (maxDeskWidth * paperRatio <= maxDeskHeight) {
+            sheetW = maxDeskWidth;
+            sheetH = Math.round(maxDeskWidth * paperRatio);
+        } else {
+            sheetH = maxDeskHeight;
+            sheetW = Math.round(maxDeskHeight / paperRatio);
+        }
+
+        const paperSheet = document.getElementById('paperSheet');
+        paperSheet.style.width = sheetW + 'px';
+        paperSheet.style.height = sheetH + 'px';
+
+        let mTopMm = 4.2, mBottomMm = 4.2, mLeftMm = 4.2, mRightMm = 4.2;
+        let marginLabel = 'Printable Area';
+
+        const mMode = document.getElementById('printMarginMode').value;
+        if (mMode === 'none') {
+            mTopMm = 0; mBottomMm = 0; mLeftMm = 0; mRightMm = 0;
+            marginLabel = 'Borderless (0mm)';
+        } else if (mMode === 'normal') {
+            mTopMm = 12.7; mBottomMm = 12.7; mLeftMm = 12.7; mRightMm = 12.7;
+            marginLabel = 'Normal (12.7mm)';
+        } else if (mMode === 'custom') {
+            mTopMm = parseFloat(document.getElementById('mTop').value) || 0;
+            mBottomMm = parseFloat(document.getElementById('mBottom').value) || 0;
+            mLeftMm = parseFloat(document.getElementById('mLeft').value) || 0;
+            mRightMm = parseFloat(document.getElementById('mRight').value) || 0;
+            marginLabel = `Custom (${mTopMm}T, ${mLeftMm}L mm)`;
+        }
+
+        const scaleX = sheetW / paperPhysW;
+        const scaleY = sheetH / paperPhysH;
+
+        const topPx = Math.round(mTopMm * scaleY);
+        const bottomPx = Math.round(mBottomMm * scaleY);
+        const leftPx = Math.round(mLeftMm * scaleX);
+        const rightPx = Math.round(mRightMm * scaleX);
+
+        const printableArea = document.getElementById('printableArea');
+        printableArea.style.top = topPx + 'px';
+        printableArea.style.bottom = bottomPx + 'px';
+        printableArea.style.left = leftPx + 'px';
+        printableArea.style.right = rightPx + 'px';
+
+        // Grayscale live preview
+        const isGray = document.getElementById('printColorModel').value === 'KGray';
+        paperSheet.style.filter = isGray ? 'grayscale(100%)' : 'none';
+
+        // Scaling class
+        const fitPage = document.getElementById('printScaling').value === 'true';
+        document.getElementById('renderWrap').classList.toggle('scale-fill', !fitPage);
+
+        // Tags
+        document.getElementById('sheetFormatTag').textContent = `${spec.name} • ${spec.desc}`;
+        document.getElementById('sheetOrientationTag').textContent = isLandscape ? 'Landscape' : 'Portrait';
+        document.getElementById('sheetMarginTag').textContent = marginLabel;
+        document.getElementById('sheetColorTag').textContent = isGray ? 'B&W' : 'Color';
+
+        updateEstimatedCost();
+    }
+
+    function updateEstimatedCost() {
+        const copies = parseInt(document.getElementById('printCopies').value) || 1;
+        const isColor = document.getElementById('printColorModel').value === 'RGB';
+        const rate = isColor ? 5.00 : 2.00;
+        const total = rate * inspectedPageCount * copies;
+        document.getElementById('costDetails').textContent = `${inspectedPageCount} page(s) × ${copies} copy(ies) @ ₱${rate.toFixed(2)}/pg`;
+        document.getElementById('costTotal').textContent = `₱${total.toFixed(2)}`;
+    }
+
+    // Attach real-time preview listeners to all advanced controls
+    ['printPageSize', 'printOrientation', 'printMarginMode', 'printColorModel', 'printScaling', 'printCopies'].forEach(id => {
+        document.getElementById(id).addEventListener('change', updatePreviewLayout);
+    });
+    ['mTop', 'mBottom', 'mLeft', 'mRight'].forEach(id => {
+        document.getElementById(id).addEventListener('input', updatePreviewLayout);
+    });
+
+    document.getElementById('printMarginMode').addEventListener('change', (e) => {
+        document.getElementById('customMarginBox').style.display = (e.target.value === 'custom') ? 'block' : 'none';
+        updatePreviewLayout();
+    });
+
+    // File Ingestion & Rendering
     const fileInput = document.getElementById('printFileInput');
     fileInput.addEventListener('change', async () => {
         if (!fileInput.files.length) return;
         const file = fileInput.files[0];
         document.getElementById('printFileName').textContent = file.name;
+        document.getElementById('previewDocTitle').textContent = file.name;
+        document.getElementById('previewTopToolbar').style.display = 'flex';
         document.getElementById('previewEmptyState').style.display = 'none';
+        document.getElementById('previewDimensionsTag').style.display = 'flex';
 
+        // Call pre-flight inspector API
         const formData = new FormData();
         formData.append('file', file);
         formData.append('copies', document.getElementById('printCopies').value);
@@ -1373,31 +1708,97 @@ INDEX_HTML = """<!DOCTYPE html>
             const res = await fetch('/api/inspect', { method: 'POST', body: formData });
             const data = await res.json();
             if (data.success) {
-                document.getElementById('costDetails').textContent = `${data.pages} page(s) × ${data.copies} copy(ies)`;
-                document.getElementById('costTotal').textContent = data.cost_formatted;
+                inspectedPageCount = data.pages;
+                updateEstimatedCost();
             }
         } catch (e) {
             console.error(e);
         }
 
-        // Render PDF preview if PDF
-        if (file.type === 'application/pdf' || file.name.endsWith('.pdf')) {
+        const ext = file.name.split('.').pop().toLowerCase();
+        const pdfCanvas = document.getElementById('pdfCanvas');
+        const imgPreview = document.getElementById('imgPreview');
+        const txtPreview = document.getElementById('txtPreview');
+
+        pdfCanvas.style.display = 'none';
+        imgPreview.style.display = 'none';
+        txtPreview.style.display = 'none';
+        document.getElementById('previewPagination').style.display = 'none';
+
+        if (['jpg', 'jpeg', 'png', 'webp', 'bmp'].includes(ext)) {
             const reader = new FileReader();
-            reader.onload = function(ev) {
-                const typedarray = new Uint8Array(ev.target.result);
-                pdfjsLib.getDocument(typedarray).promise.then(pdf => {
-                    pdf.getPage(1).then(page => {
-                        const canvas = document.getElementById('pdfCanvas');
-                        const ctx = canvas.getContext('2d');
-                        const viewport = page.getViewport({ scale: 1.2 });
-                        canvas.height = viewport.height;
-                        canvas.width = viewport.width;
-                        page.render({ canvasContext: ctx, viewport: viewport });
-                    });
+            reader.onload = function(e) {
+                imgPreview.src = e.target.result;
+                imgPreview.style.display = 'block';
+                const tmpImg = new Image();
+                tmpImg.src = e.target.result;
+                tmpImg.onload = function() {
+                    docNaturalAspect = tmpImg.naturalHeight / tmpImg.naturalWidth;
+                    updatePreviewLayout();
+                };
+            };
+            reader.readAsDataURL(file);
+        } else if (ext === 'pdf') {
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                pdfjsLib.getDocument(new Uint8Array(e.target.result)).promise.then(pdf => {
+                    currentPdf = pdf;
+                    pdfPagesTotal = pdf.numPages;
+                    pdfPage = 1;
+                    if (pdfPagesTotal > 1) document.getElementById('previewPagination').style.display = 'flex';
+                    renderPdfPage(pdfPage);
+                }).catch(() => {
+                    txtPreview.style.display = 'block';
+                    txtPreview.textContent = 'PDF ready to print.';
+                    updatePreviewLayout();
                 });
             };
             reader.readAsArrayBuffer(file);
+        } else {
+            txtPreview.style.display = 'block';
+            txtPreview.textContent = `Document (${ext.toUpperCase()}) queued and ready to print.`;
+            updatePreviewLayout();
         }
+    });
+
+    function renderPdfPage(num) {
+        if (!currentPdf) return;
+        currentPdf.getPage(num).then(page => {
+            const pdfCanvas = document.getElementById('pdfCanvas');
+            const viewport = page.getViewport({ scale: 1.5 });
+            docNaturalAspect = viewport.height / viewport.width;
+            pdfCanvas.height = viewport.height;
+            pdfCanvas.width = viewport.width;
+            pdfCanvas.style.display = 'block';
+            page.render({
+                canvasContext: pdfCanvas.getContext('2d'),
+                viewport: viewport
+            });
+            document.getElementById('pageIndicator').textContent = `${num} / ${pdfPagesTotal}`;
+            updatePreviewLayout();
+        });
+    }
+
+    document.getElementById('btnPrev').addEventListener('click', () => {
+        if (pdfPage > 1) { pdfPage--; renderPdfPage(pdfPage); }
+    });
+    document.getElementById('btnNext').addEventListener('click', () => {
+        if (pdfPage < pdfPagesTotal) { pdfPage++; renderPdfPage(pdfPage); }
+    });
+
+    document.getElementById('btnClearPreview').addEventListener('click', () => {
+        fileInput.value = '';
+        currentPdf = null;
+        inspectedPageCount = 1;
+        document.getElementById('printFileName').textContent = 'Click or drop file here';
+        document.getElementById('previewTopToolbar').style.display = 'none';
+        document.getElementById('previewEmptyState').style.display = 'block';
+        document.getElementById('previewDimensionsTag').style.display = 'none';
+        document.getElementById('pdfCanvas').style.display = 'none';
+        document.getElementById('imgPreview').style.display = 'none';
+        document.getElementById('txtPreview').style.display = 'none';
+        document.getElementById('costDetails').textContent = '0 pages';
+        document.getElementById('costTotal').textContent = '₱0.00';
     });
 
     document.getElementById('chkPinHold').addEventListener('change', (e) => {
@@ -1423,9 +1824,19 @@ INDEX_HTML = """<!DOCTYPE html>
         formData.append('printer', selectedPrinter);
         formData.append('copies', document.getElementById('printCopies').value);
         formData.append('pagesize', document.getElementById('printPageSize').value);
-        formData.append('colormodel', document.getElementById('printColorModel').value);
+        formData.append('orientation', document.getElementById('printOrientation').value);
+        formData.append('margin_mode', document.getElementById('printMarginMode').value);
+        formData.append('m_top', document.getElementById('mTop').value);
+        formData.append('m_bottom', document.getElementById('mBottom').value);
+        formData.append('m_left', document.getElementById('mLeft').value);
+        formData.append('m_right', document.getElementById('mRight').value);
+        formData.append('mediatype', document.getElementById('printMediaType').value);
+        formData.append('quality', document.getElementById('printQuality').value);
         formData.append('resolution', document.getElementById('printDpi').value);
+        formData.append('colormodel', document.getElementById('printColorModel').value);
         formData.append('duplex', document.getElementById('printDuplex').value);
+        formData.append('fitpage', document.getElementById('printScaling').value);
+        formData.append('pagerange', document.getElementById('printPageRange').value);
 
         const endpoint = isPin ? '/api/print/pin-hold' : '/api/print';
         if (isPin) formData.append('pin', pin);
@@ -1453,8 +1864,6 @@ INDEX_HTML = """<!DOCTYPE html>
             height: 680,
             backgroundColor: '#ffffff'
         });
-
-        // Responsive A4 ratio
         setStudioPreset('a4');
     }
 
@@ -1462,13 +1871,13 @@ INDEX_HTML = """<!DOCTYPE html>
         if (!fabricCanvas) return;
         if (preset === 'a4') {
             fabricCanvas.setWidth(480);
-            fabricCanvas.setHeight(680); // ~1:1.414 A4 ratio
+            fabricCanvas.setHeight(680);
         } else if (preset === 'letter') {
             fabricCanvas.setWidth(480);
             fabricCanvas.setHeight(620);
         } else if (preset === 'photo46') {
             fabricCanvas.setWidth(400);
-            fabricCanvas.setHeight(600); // 4x6 ratio
+            fabricCanvas.setHeight(600);
         } else if (preset === 'idgrid') {
             fabricCanvas.setWidth(480);
             fabricCanvas.setHeight(680);
@@ -1554,7 +1963,6 @@ INDEX_HTML = """<!DOCTYPE html>
         if (fabricCanvas && confirm('Clear entire canvas?')) fabricCanvas.clear();
     });
 
-    // Image Upload to Canvas
     document.getElementById('btnStudioUploadImg').addEventListener('click', () => {
         document.getElementById('studioImgInput').click();
     });
@@ -1572,7 +1980,6 @@ INDEX_HTML = """<!DOCTYPE html>
         reader.readAsDataURL(e.target.files[0]);
     });
 
-    // 2x2 ID Photo Grid Maker (Tiles 6x photos on sheet with cut marks)
     document.getElementById('btnStudioIdGrid').addEventListener('click', () => {
         const input = document.createElement('input');
         input.type = 'file';
@@ -1584,7 +1991,6 @@ INDEX_HTML = """<!DOCTYPE html>
                 fabric.Image.fromURL(ev.target.result, (img) => {
                     fabricCanvas.clear();
                     setStudioPreset('a4');
-                    // 2x2 inch tile size
                     const tileW = 140;
                     const tileH = 140;
                     const cols = 2;
@@ -1617,17 +2023,13 @@ INDEX_HTML = """<!DOCTYPE html>
         input.click();
     });
 
-    // Direct 300 DPI Print from Studio (Offloaded to client browser)
     document.getElementById('btnStudioDirectPrint').addEventListener('click', () => {
         if (!fabricCanvas) return;
         const dpi = parseInt(document.getElementById('studioDpi').value);
-        const multiplier = dpi / 72; // scale up to selected DPI in browser
+        const multiplier = dpi / 72;
         showToast(`Rendering ${dpi} DPI high-res canvas in browser...`, 'info');
 
-        const dataUrl = fabricCanvas.toDataURL({
-            format: 'png',
-            multiplier: multiplier
-        });
+        const dataUrl = fabricCanvas.toDataURL({ format: 'png', multiplier: multiplier });
 
         fetch(dataUrl)
             .then(res => res.blob())
@@ -1924,6 +2326,7 @@ INDEX_HTML = """<!DOCTYPE html>
 
     // Initial boot
     loadPrinters();
+    updatePreviewLayout();
 </script>
 </body>
 </html>
@@ -2040,7 +2443,10 @@ def api_print():
 
     copies = request.form.get('copies', '1')
     pagesize = request.form.get('pagesize', 'A4')
+    orientation = request.form.get('orientation', 'auto')
+    margin_mode = request.form.get('margin_mode', 'printable')
     mediatype = request.form.get('mediatype', 'Plain')
+    quality = request.form.get('quality', 'Normal')
     colormodel = request.form.get('colormodel', 'RGB')
     duplex = request.form.get('duplex', 'None')
     resolution = request.form.get('resolution', '300')
@@ -2063,11 +2469,33 @@ def api_print():
         cmd = ['lp', '-d', printer, '-n', str(copies)]
         if pagesize: cmd.extend(['-o', f'PageSize={pagesize}'])
         if mediatype: cmd.extend(['-o', f'MediaType={mediatype}'])
+        if quality: cmd.extend(['-o', f'OutputMode={quality}'])
         if colormodel: cmd.extend(['-o', f'ColorModel={colormodel}'])
         if duplex and duplex != 'None': cmd.extend(['-o', f'Duplex={duplex}'])
+        if orientation in ['3', '4']: cmd.extend(['-o', f'orientation-requested={orientation}'])
         if fitpage == 'true': cmd.extend(['-o', 'fit-to-page'])
         if pagerange: cmd.extend(['-o', f'page-ranges={pagerange}'])
         if resolution in ['150', '300', '600', '1200']: cmd.extend(['-o', f'resolution={resolution}dpi'])
+
+        if margin_mode == 'none':
+            cmd.extend(['-o', 'page-top=0', '-o', 'page-bottom=0', '-o', 'page-left=0', '-o', 'page-right=0'])
+        elif margin_mode == 'normal':
+            cmd.extend(['-o', 'page-top=36', '-o', 'page-bottom=36', '-o', 'page-left=36', '-o', 'page-right=36'])
+        elif margin_mode == 'custom':
+            try:
+                m_top = int(float(request.form.get('m_top', '10')) * 2.83465)
+                m_bottom = int(float(request.form.get('m_bottom', '10')) * 2.83465)
+                m_left = int(float(request.form.get('m_left', '10')) * 2.83465)
+                m_right = int(float(request.form.get('m_right', '10')) * 2.83465)
+                cmd.extend([
+                    '-o', f'page-top={m_top}',
+                    '-o', f'page-bottom={m_bottom}',
+                    '-o', f'page-left={m_left}',
+                    '-o', f'page-right={m_right}'
+                ])
+            except Exception:
+                pass
+
         cmd.append(conv_pdf)
 
         res = subprocess.run(cmd, capture_output=True, text=True, check=True)
@@ -2102,6 +2530,10 @@ def api_pin_hold():
 
     copies = int(request.form.get('copies', '1'))
     pagesize = request.form.get('pagesize', 'A4')
+    orientation = request.form.get('orientation', 'auto')
+    margin_mode = request.form.get('margin_mode', 'printable')
+    mediatype = request.form.get('mediatype', 'Plain')
+    quality = request.form.get('quality', 'Normal')
     colormodel = request.form.get('colormodel', 'RGB')
     duplex = request.form.get('duplex', 'None')
     resolution = request.form.get('resolution', '300')
@@ -2131,6 +2563,14 @@ def api_pin_hold():
             'printer': printer,
             'copies': copies,
             'pagesize': pagesize,
+            'orientation': orientation,
+            'margin_mode': margin_mode,
+            'm_top': request.form.get('m_top', '10'),
+            'm_bottom': request.form.get('m_bottom', '10'),
+            'm_left': request.form.get('m_left', '10'),
+            'm_right': request.form.get('m_right', '10'),
+            'mediatype': mediatype,
+            'quality': quality,
             'colormodel': colormodel,
             'duplex': duplex,
             'resolution': resolution,
@@ -2223,11 +2663,35 @@ def api_pin_release():
     try:
         cmd = ['lp', '-d', printer, '-n', str(copies)]
         if options.get('pagesize'): cmd.extend(['-o', f"PageSize={options['pagesize']}"])
+        if options.get('mediatype'): cmd.extend(['-o', f"MediaType={options['mediatype']}"])
+        if options.get('quality'): cmd.extend(['-o', f"OutputMode={options['quality']}"])
         if options.get('colormodel'): cmd.extend(['-o', f"ColorModel={options['colormodel']}"])
         if options.get('duplex') and options['duplex'] != 'None': cmd.extend(['-o', f"Duplex={options['duplex']}"])
+        if options.get('orientation') in ['3', '4']: cmd.extend(['-o', f"orientation-requested={options['orientation']}"])
         if options.get('fitpage') == 'true': cmd.extend(['-o', 'fit-to-page'])
         if options.get('pagerange'): cmd.extend(['-o', f"page-ranges={options['pagerange']}"])
         if options.get('resolution'): cmd.extend(['-o', f"resolution={options['resolution']}dpi"])
+
+        m_mode = options.get('margin_mode', 'printable')
+        if m_mode == 'none':
+            cmd.extend(['-o', 'page-top=0', '-o', 'page-bottom=0', '-o', 'page-left=0', '-o', 'page-right=0'])
+        elif m_mode == 'normal':
+            cmd.extend(['-o', 'page-top=36', '-o', 'page-bottom=36', '-o', 'page-left=36', '-o', 'page-right=36'])
+        elif m_mode == 'custom':
+            try:
+                m_top = int(float(options.get('m_top', '10')) * 2.83465)
+                m_bottom = int(float(options.get('m_bottom', '10')) * 2.83465)
+                m_left = int(float(options.get('m_left', '10')) * 2.83465)
+                m_right = int(float(options.get('m_right', '10')) * 2.83465)
+                cmd.extend([
+                    '-o', f'page-top={m_top}',
+                    '-o', f'page-bottom={m_bottom}',
+                    '-o', f'page-left={m_left}',
+                    '-o', f'page-right={m_right}'
+                ])
+            except Exception:
+                pass
+
         cmd.append(file_path)
 
         res = subprocess.run(cmd, capture_output=True, text=True, check=True)
