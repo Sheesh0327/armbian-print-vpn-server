@@ -237,7 +237,9 @@ INDEX_HTML = """<!DOCTYPE html>
                 tabs.forEach(function(c) {
                     c.classList.toggle('active', c.id === 'tab-' + tabName);
                 });
-                if (tabName === 'pin') {
+                if (tabName === 'idmaker') {
+                    if (typeof initIdStudio === 'function') initIdStudio();
+                } else if (tabName === 'pin') {
                     if (typeof loadPinList === 'function') loadPinList();
                 } else if (tabName === 'history') {
                     if (typeof loadHistory === 'function') loadHistory();
@@ -544,6 +546,12 @@ INDEX_HTML = """<!DOCTYPE html>
             transition: all 0.15s;
         }
         .btn-secondary:hover { border-color: var(--border-hover); }
+        .btn-secondary.active {
+            background: var(--accent);
+            color: #ffffff;
+            border-color: var(--accent);
+            font-weight: 600;
+        }
 
         /* Cost Badge Card */
         .cost-card {
@@ -786,6 +794,7 @@ INDEX_HTML = """<!DOCTYPE html>
 
     <nav class="header-nav">
         <button class="nav-btn active" data-tab="print" onclick="switchTab('print')">Print</button>
+        <button class="nav-btn" data-tab="idmaker" onclick="switchTab('idmaker')">ID Photo Maker</button>
         <button class="nav-btn" data-tab="pin" onclick="switchTab('pin')">PIN Release</button>
         <button class="nav-btn" data-tab="history" onclick="switchTab('history')">History</button>
         <button class="nav-btn" data-tab="settings" onclick="switchTab('settings')">Settings</button>
@@ -1017,7 +1026,157 @@ INDEX_HTML = """<!DOCTYPE html>
         </div>
     </div>
 
-    <!-- TAB 2: PIN RELEASE -->
+    <!-- TAB 2: ID PHOTO MAKER (PRINT SHOP TAILORED) -->
+    <div class="tab-content" id="tab-idmaker">
+        <div class="grid-layout">
+            <!-- Left: Virtual Desk Live Tiled Sheet Preview -->
+            <div class="preview-desk">
+                <div class="preview-top-toolbar" style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+                    <div style="font-weight: 600; font-size: 13px;" id="idSheetTitleTag">4×6" Glossy Sheet • Combo Rush (2 pcs 2×2" + 8 pcs 1×1")</div>
+                    <div style="display: flex; gap: 8px;">
+                        <button type="button" class="btn-secondary" id="btnIdDownload" style="padding: 4px 10px; font-size: 11px;">💾 Save PNG</button>
+                        <button type="button" class="btn-primary" id="btnIdDirectPrint" style="padding: 4px 12px; font-size: 11px; width: auto;">🖨️ Print ID Sheet</button>
+                    </div>
+                </div>
+
+                <div class="paper-sheet" id="idPaperSheet" style="width: 440px; height: 660px; display: flex; align-items: center; justify-content: center; background: #ffffff; box-shadow: 0 16px 40px rgba(0,0,0,0.5); border-radius: 4px; overflow: hidden; position: relative; margin: 0 auto;">
+                    <canvas id="idSheetCanvas" style="max-width: 100%; max-height: 100%; object-fit: contain; display: none;"></canvas>
+                    <div id="idEmptyState" style="text-align: center; color: var(--text-tertiary); padding: 24px;">
+                        <div style="font-size: 40px; margin-bottom: 8px;">📸</div>
+                        <div style="font-weight: 600; font-size: 14px;">Print Shop ID Studio Ready</div>
+                        <div style="font-size: 12px; margin-top: 4px;">Upload portrait photo on the right to auto-generate 1×1, 2×2, & passport packages</div>
+                    </div>
+                </div>
+
+                <div class="preview-dimensions-tag">
+                    <span id="idSheetSpecTag">4 × 6 in Photo Paper (101.6 × 152.4 mm)</span>
+                    <span>•</span>
+                    <span>300 DPI High Resolution</span>
+                    <span>•</span>
+                    <span id="idCutGuideTag">With Cutting Guides</span>
+                </div>
+            </div>
+
+            <!-- Right: ID Controls & Quick Photo Cropper -->
+            <div class="card" style="display: flex; flex-direction: column; gap: 16px;">
+                <!-- Step 1: Upload Photo -->
+                <div>
+                    <label style="font-weight: 700; font-size: 12px; text-transform: uppercase; color: var(--accent); margin-bottom: 6px; display: block;">Step 1: Portrait Photo</label>
+                    <div class="dropzone" id="idDropzone" style="padding: 18px 14px;">
+                        <input type="file" id="idFileInput" accept="image/*">
+                        <div style="font-size: 22px; margin-bottom: 4px;">📷</div>
+                        <div style="font-weight: 600; font-size: 12px;" id="idFileName">Click or drop customer portrait</div>
+                        <div style="font-size: 10px; color: var(--text-tertiary); margin-top: 2px;">Phone portrait, camera photo, JPG, PNG</div>
+                    </div>
+                </div>
+
+                <!-- Step 2: Interactive Crop & Quick Adjustments -->
+                <div id="idEditControls" style="display: none; border-top: 1px solid var(--border); padding-top: 14px;">
+                    <label style="font-weight: 700; font-size: 12px; text-transform: uppercase; color: var(--accent); margin-bottom: 6px; display: block;">Step 2: Crop & Quick Adjustments</label>
+                    
+                    <!-- Crop Aspect Ratio -->
+                    <div style="margin-bottom: 10px;">
+                        <label style="font-size: 11px;">Crop Aspect Ratio</label>
+                        <div style="display: flex; gap: 6px; margin-top: 4px;">
+                            <button type="button" class="btn-secondary id-crop-btn active" data-aspect="1:1" style="flex:1; padding: 5px; font-size: 11px;">1:1 (Square - 1x1/2x2)</button>
+                            <button type="button" class="btn-secondary id-crop-btn" data-aspect="35:45" style="flex:1; padding: 5px; font-size: 11px;">35:45 (Passport)</button>
+                            <button type="button" class="btn-secondary" id="btnIdRotate" style="padding: 5px 10px; font-size: 11px;" title="Rotate 90 degrees">↻ 90°</button>
+                        </div>
+                    </div>
+
+                    <!-- Face Zoom & Vertical Alignment -->
+                    <div class="grid-2 form-group" style="margin-bottom: 8px;">
+                        <div>
+                            <label style="font-size: 11px;">Zoom Face: <span id="lblIdZoom">100%</span></label>
+                            <input type="range" id="idZoomRange" min="50" max="300" value="100" style="width: 100%;">
+                        </div>
+                        <div>
+                            <label style="font-size: 11px;">Vertical Align</label>
+                            <input type="range" id="idOffsetYRange" min="-100" max="100" value="0" style="width: 100%;">
+                        </div>
+                    </div>
+
+                    <!-- Brightness & Contrast -->
+                    <div class="grid-2 form-group" style="margin-bottom: 8px;">
+                        <div>
+                            <label style="font-size: 11px;">Brightness: <span id="lblIdBright">0</span></label>
+                            <input type="range" id="idBrightRange" min="-50" max="50" value="0" style="width: 100%;">
+                        </div>
+                        <div>
+                            <label style="font-size: 11px;">Contrast: <span id="lblIdContrast">0</span></label>
+                            <input type="range" id="idContrastRange" min="-50" max="50" value="0" style="width: 100%;">
+                        </div>
+                    </div>
+
+                    <!-- Formal ID Background Color Tone -->
+                    <div class="form-group" style="margin-bottom: 8px;">
+                        <label style="font-size: 11px;">Background Tone</label>
+                        <div style="display: flex; gap: 6px; margin-top: 4px;">
+                            <button type="button" class="btn-secondary id-bg-btn active" data-bg="original" style="flex:1; padding: 5px; font-size:11px;">Original</button>
+                            <button type="button" class="btn-secondary id-bg-btn" data-bg="white" style="flex:1; padding: 5px; font-size:11px;">⚪ White</button>
+                            <button type="button" class="btn-secondary id-bg-btn" data-bg="blue" style="flex:1; padding: 5px; font-size:11px; color:#3b82f6;">🔵 Blue</button>
+                            <button type="button" class="btn-secondary id-bg-btn" data-bg="red" style="flex:1; padding: 5px; font-size:11px; color:#ef4444;">🔴 Red</button>
+                        </div>
+                    </div>
+
+                    <!-- Formal Name Tag Banner (School / PRC requirement) -->
+                    <div class="form-group" style="margin-bottom: 4px;">
+                        <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 12px; text-transform: none;">
+                            <input type="checkbox" id="chkIdNameTag">
+                            <span>Add Formal Name Tag Banner</span>
+                        </label>
+                        <div id="idNameTagBox" style="display: none; margin-top: 6px;">
+                            <input type="text" id="idNameTagText" placeholder="e.g. DELA CRUZ, JUAN P." style="text-transform: uppercase; font-size: 12px; letter-spacing: 0.05em; font-weight: 600;">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Step 3: Package & Layout Settings -->
+                <div style="border-top: 1px solid var(--border); padding-top: 14px;">
+                    <label style="font-weight: 700; font-size: 12px; text-transform: uppercase; color: var(--accent); margin-bottom: 6px; display: block;">Step 3: Print Package & Sheet</label>
+                    
+                    <div class="form-group">
+                        <label>Package Template</label>
+                        <select id="idPackageSelect">
+                            <option value="rush_combo_a" selected>Combo Rush: 2 pcs 2×2" + 8 pcs 1×1" (Best Seller)</option>
+                            <option value="rush_combo_b">Combo All-in-One: 2 pcs 2×2" + 4 pcs Passport + 4 pcs 1×1"</option>
+                            <option value="all_2x2">All 2 × 2 in (Passport / Visa Grid)</option>
+                            <option value="all_1x1">All 1 × 1 in Grid</option>
+                            <option value="all_passport">All Passport Size (35 × 45 mm)</option>
+                            <option value="wallet">Wallet Size (2.5 × 3.5 in)</option>
+                        </select>
+                    </div>
+
+                    <div class="grid-2 form-group">
+                        <div>
+                            <label>Paper Size</label>
+                            <select id="idSheetPaperSize">
+                                <option value="4x6in" selected>4 × 6 in Photo Card</option>
+                                <option value="A4">A4 Photo Sheet</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label>Copies</label>
+                            <input type="number" id="idCopies" min="1" max="50" value="1">
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 12px; text-transform: none;">
+                            <input type="checkbox" id="chkIdCutLines" checked>
+                            <span>Print Cutting Guides (Dashed border lines for trimming)</span>
+                        </label>
+                    </div>
+
+                    <button class="btn-primary" id="btnIdGeneratePrint" style="margin-top: 4px;">
+                        <span>🖨️ Send ID Sheet to Printer</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- TAB 3: PIN RELEASE -->
     <div class="tab-content" id="tab-pin">
         <div class="card">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
@@ -1545,6 +1704,389 @@ INDEX_HTML = """<!DOCTYPE html>
             showToast('Failed to reach print server', 'error');
         }
     });
+
+
+    // ==========================================
+    // PRINT SHOP ID PHOTO MAKER ENGINE (100% NATIVE HTML5)
+    // ==========================================
+    let idRawImage = null;
+    let idRotation = 0;
+    let idAspectMode = '1:1';
+    let idBgTint = 'original';
+
+    function initIdStudio() {
+        if (idRawImage) renderIdSheet();
+    }
+
+    function loadIdImageFile(file) {
+        if (!file || !file.type.startsWith('image/')) {
+            showToast('Please upload an image file (JPG, PNG)', 'error');
+            return;
+        }
+        document.getElementById('idFileName').textContent = file.name;
+        const reader = new FileReader();
+        reader.onload = function(ev) {
+            const img = new Image();
+            img.onload = function() {
+                idRawImage = img;
+                idRotation = 0;
+                document.getElementById('idEditControls').style.display = 'block';
+                updateIdTitleTag();
+                renderIdSheet();
+                showToast('Portrait loaded! Ready for ID package layout.', 'success');
+            };
+            img.src = ev.target.result;
+        };
+        reader.readAsDataURL(file);
+    }
+
+    function updateIdTitleTag() {
+        const pkg = document.getElementById('idPackageSelect');
+        const paper = document.getElementById('idSheetPaperSize').value;
+        const pkgName = pkg.options[pkg.selectedIndex].text;
+        document.getElementById('idSheetTitleTag').textContent = `${paper === 'A4' ? 'A4 Photo Sheet' : '4×6" Glossy Sheet'} • ${pkgName}`;
+        document.getElementById('idSheetSpecTag').textContent = paper === 'A4' ? 'A4 Photo Paper (210 × 297 mm)' : '4 × 6 in Photo Paper (101.6 × 152.4 mm)';
+    }
+
+    function getProcessedSinglePhoto() {
+        if (!idRawImage) return null;
+
+        const isPassport = idAspectMode === '35:45';
+        const photoW = isPassport ? 413 : 600;
+        const photoH = isPassport ? 531 : 600;
+
+        const off = document.createElement('canvas');
+        off.width = photoW;
+        off.height = photoH;
+        const octx = off.getContext('2d');
+
+        // Background Color Tint
+        if (idBgTint === 'white') {
+            octx.fillStyle = '#ffffff';
+            octx.fillRect(0, 0, photoW, photoH);
+        } else if (idBgTint === 'blue') {
+            octx.fillStyle = '#1d4ed8'; // Royal ID blue
+            octx.fillRect(0, 0, photoW, photoH);
+        } else if (idBgTint === 'red') {
+            octx.fillStyle = '#b91c1c'; // PRC crimson red
+            octx.fillRect(0, 0, photoW, photoH);
+        } else {
+            octx.fillStyle = '#ffffff';
+            octx.fillRect(0, 0, photoW, photoH);
+        }
+
+        // Brightness & Contrast
+        const bright = parseInt(document.getElementById('idBrightRange').value) || 0;
+        const contrast = parseInt(document.getElementById('idContrastRange').value) || 0;
+        octx.filter = `brightness(${100 + bright}%) contrast(${100 + contrast}%)`;
+
+        // Crop, Zoom, and Orientation
+        const zoom = (parseInt(document.getElementById('idZoomRange').value) || 100) / 100;
+        const offsetYPercent = (parseInt(document.getElementById('idOffsetYRange').value) || 0) / 100;
+
+        octx.save();
+        octx.translate(photoW / 2, photoH / 2);
+        octx.rotate((idRotation * Math.PI) / 180);
+
+        const isSideways = idRotation === 90 || idRotation === 270;
+        const natW = isSideways ? idRawImage.height : idRawImage.width;
+        const natH = isSideways ? idRawImage.width : idRawImage.height;
+
+        const scale = Math.max(photoW / natW, photoH / natH) * zoom;
+        const drawW = idRawImage.width * scale;
+        const drawH = idRawImage.height * scale;
+        const dy = offsetYPercent * (photoH / 2);
+
+        octx.drawImage(idRawImage, -drawW / 2, -drawH / 2 + dy, drawW, drawH);
+        octx.restore();
+
+        octx.filter = 'none';
+
+        // Optional Name Tag Banner Overlay (Bottom of Photo)
+        const hasNameTag = document.getElementById('chkIdNameTag').checked;
+        const nameText = document.getElementById('idNameTagText').value.trim().toUpperCase();
+        if (hasNameTag && nameText) {
+            const bannerH = Math.round(photoH * 0.16);
+            octx.fillStyle = '#ffffff';
+            octx.fillRect(0, photoH - bannerH, photoW, bannerH);
+            
+            octx.strokeStyle = '#000000';
+            octx.lineWidth = Math.max(2, Math.round(photoW * 0.006));
+            octx.strokeRect(0, photoH - bannerH, photoW, bannerH);
+
+            octx.fillStyle = '#000000';
+            const fontSize = Math.round(bannerH * 0.52);
+            octx.font = `bold ${fontSize}px Arial, sans-serif`;
+            octx.textAlign = 'center';
+            octx.textBaseline = 'middle';
+            octx.fillText(nameText, photoW / 2, photoH - (bannerH / 2));
+        }
+
+        return off;
+    }
+
+    function renderIdSheet() {
+        if (!idRawImage) return;
+
+        const sheetCanvas = document.getElementById('idSheetCanvas');
+        const ctx = sheetCanvas.getContext('2d');
+
+        const paperSize = document.getElementById('idSheetPaperSize').value;
+        const isA4 = paperSize === 'A4';
+
+        // 300 DPI resolutions
+        const sheetW = isA4 ? 2480 : 1200;
+        const sheetH = isA4 ? 3508 : 1800;
+
+        sheetCanvas.width = sheetW;
+        sheetCanvas.height = sheetH;
+
+        // Paper base
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, sheetW, sheetH);
+
+        const singlePhoto = getProcessedSinglePhoto();
+        if (!singlePhoto) return;
+
+        const pkg = document.getElementById('idPackageSelect').value;
+        const showCutLines = document.getElementById('chkIdCutLines').checked;
+
+        function drawPhotoItem(x, y, w, h) {
+            ctx.drawImage(singlePhoto, x, y, w, h);
+            if (showCutLines) {
+                ctx.save();
+                ctx.strokeStyle = '#94a3b8';
+                ctx.lineWidth = Math.max(2, Math.round(sheetW * 0.0015));
+                ctx.setLineDash([10, 8]);
+                ctx.strokeRect(x, y, w, h);
+                ctx.restore();
+            }
+        }
+
+        if (pkg === 'rush_combo_a') {
+            // Combo Rush: 2 pcs 2x2" + 8 pcs 1x1"
+            const size2x2 = isA4 ? 900 : 520;
+            const startX = isA4 ? 260 : 60;
+            const gap = isA4 ? 80 : 40;
+            const y1 = isA4 ? 200 : 80;
+            drawPhotoItem(startX, y1, size2x2, size2x2);
+            drawPhotoItem(startX + size2x2 + gap, y1, size2x2, size2x2);
+
+            const size1x1 = isA4 ? 430 : 250;
+            const gap1x1 = isA4 ? 40 : 26;
+            const startX1 = isA4 ? 260 : 60;
+            const y2 = y1 + size2x2 + (isA4 ? 120 : 60);
+
+            for (let i = 0; i < 4; i++) {
+                drawPhotoItem(startX1 + i * (size1x1 + gap1x1), y2, size1x1, size1x1);
+            }
+            for (let i = 0; i < 4; i++) {
+                drawPhotoItem(startX1 + i * (size1x1 + gap1x1), y2 + size1x1 + gap1x1, size1x1, size1x1);
+            }
+        } else if (pkg === 'rush_combo_b') {
+            // Combo All-in-One: 2 pcs 2x2" + 4 pcs Passport + 4 pcs 1x1"
+            const size2x2 = isA4 ? 900 : 520;
+            const startX = isA4 ? 260 : 60;
+            const gap = isA4 ? 80 : 40;
+            const y1 = isA4 ? 160 : 60;
+            drawPhotoItem(startX, y1, size2x2, size2x2);
+            drawPhotoItem(startX + size2x2 + gap, y1, size2x2, size2x2);
+
+            const pw = isA4 ? 430 : 240;
+            const ph = isA4 ? 550 : 310;
+            const pgap = isA4 ? 40 : 30;
+            const y2 = y1 + size2x2 + (isA4 ? 80 : 50);
+            for (let i = 0; i < 4; i++) {
+                drawPhotoItem(startX + i * (pw + pgap), y2, pw, ph);
+            }
+
+            const size1x1 = isA4 ? 430 : 240;
+            const y3 = y2 + ph + (isA4 ? 80 : 50);
+            for (let i = 0; i < 4; i++) {
+                drawPhotoItem(startX + i * (size1x1 + pgap), y3, size1x1, size1x1);
+            }
+        } else if (pkg === 'all_2x2') {
+            const size = isA4 ? 540 : 520;
+            const cols = isA4 ? 4 : 2;
+            const rows = isA4 ? 5 : 3;
+            const gap = isA4 ? 40 : 40;
+            const startX = Math.round((sheetW - (cols * size + (cols - 1) * gap)) / 2);
+            const startY = isA4 ? 160 : 80;
+
+            for (let r = 0; r < rows; r++) {
+                for (let c = 0; c < cols; c++) {
+                    drawPhotoItem(startX + c * (size + gap), startY + r * (size + gap), size, size);
+                }
+            }
+        } else if (pkg === 'all_1x1') {
+            const size = isA4 ? 320 : 250;
+            const cols = isA4 ? 6 : 4;
+            const rows = isA4 ? 9 : 6;
+            const gap = isA4 ? 28 : 26;
+            const startX = Math.round((sheetW - (cols * size + (cols - 1) * gap)) / 2);
+            const startY = isA4 ? 120 : 60;
+
+            for (let r = 0; r < rows; r++) {
+                for (let c = 0; c < cols; c++) {
+                    drawPhotoItem(startX + c * (size + gap), startY + r * (size + gap), size, size);
+                }
+            }
+        } else if (pkg === 'all_passport') {
+            const pw = isA4 ? 420 : 320;
+            const ph = isA4 ? 540 : 410;
+            const cols = isA4 ? 5 : 3;
+            const rows = isA4 ? 5 : 3;
+            const gap = isA4 ? 40 : 40;
+            const startX = Math.round((sheetW - (cols * pw + (cols - 1) * gap)) / 2);
+            const startY = isA4 ? 150 : 80;
+
+            for (let r = 0; r < rows; r++) {
+                for (let c = 0; c < cols; c++) {
+                    drawPhotoItem(startX + c * (pw + gap), startY + r * (ph + gap), pw, ph);
+                }
+            }
+        } else if (pkg === 'wallet') {
+            const ww = isA4 ? 750 : 520;
+            const wh = isA4 ? 1050 : 730;
+            const startX = isA4 ? 300 : 70;
+            const gap = isA4 ? 100 : 40;
+            const y1 = isA4 ? 300 : 120;
+            drawPhotoItem(startX, y1, ww, wh);
+            drawPhotoItem(startX + ww + gap, y1, ww, wh);
+        }
+
+        document.getElementById('idEmptyState').style.display = 'none';
+        sheetCanvas.style.display = 'block';
+    }
+
+    async function printIdSheetDirect() {
+        if (!idRawImage) {
+            showToast('Please upload a portrait photo first', 'error');
+            return;
+        }
+        const sheetCanvas = document.getElementById('idSheetCanvas');
+        const paperSize = document.getElementById('idSheetPaperSize').value;
+        const copies = document.getElementById('idCopies').value || '1';
+
+        const btn = document.getElementById('btnIdDirectPrint');
+        const btn2 = document.getElementById('btnIdGeneratePrint');
+        btn.disabled = true; btn.textContent = 'Preparing...';
+        btn2.disabled = true;
+
+        sheetCanvas.toBlob(async (blob) => {
+            try {
+                const formData = new FormData();
+                formData.append('file', blob, `ID_Sheet_${paperSize}.png`);
+                formData.append('printer', selectedPrinter);
+                formData.append('pagesize', paperSize);
+                formData.append('mediatype', 'Glossy');
+                formData.append('quality', 'Best');
+                formData.append('colormodel', 'RGB');
+                formData.append('orientation', '3');
+                formData.append('copies', copies);
+                formData.append('margin_mode', 'none');
+
+                const res = await fetch('/api/print', { method: 'POST', body: formData });
+                const data = await res.json();
+                if (data.success) {
+                    showToast('ID Photo Sheet sent to printer successfully!', 'success');
+                } else {
+                    showToast('Print error: ' + data.error, 'error');
+                }
+            } catch (e) {
+                showToast('Failed to reach print server', 'error');
+            } finally {
+                btn.disabled = false; btn.textContent = '🖨️ Print ID Sheet';
+                btn2.disabled = false;
+            }
+        }, 'image/png');
+    }
+
+    function downloadIdSheet() {
+        if (!idRawImage) {
+            showToast('Please upload a portrait photo first', 'error');
+            return;
+        }
+        const sheetCanvas = document.getElementById('idSheetCanvas');
+        const paperSize = document.getElementById('idSheetPaperSize').value;
+        const link = document.createElement('a');
+        link.download = `ID_Photos_${paperSize}_300DPI.png`;
+        link.href = sheetCanvas.toDataURL('image/png');
+        link.click();
+        showToast('High-resolution ID sheet downloaded!', 'success');
+    }
+
+    // Attach ID Studio Event Listeners
+    const idDropzone = document.getElementById('idDropzone');
+    const idFileInput = document.getElementById('idFileInput');
+    idDropzone.addEventListener('click', () => idFileInput.click());
+    idFileInput.addEventListener('change', (e) => {
+        if (e.target.files.length) loadIdImageFile(e.target.files[0]);
+    });
+    idDropzone.addEventListener('dragover', (e) => { e.preventDefault(); idDropzone.style.borderColor = 'var(--accent)'; });
+    idDropzone.addEventListener('dragleave', () => { idDropzone.style.borderColor = 'var(--border)'; });
+    idDropzone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        idDropzone.style.borderColor = 'var(--border)';
+        if (e.dataTransfer.files.length) loadIdImageFile(e.dataTransfer.files[0]);
+    });
+
+    document.querySelectorAll('.id-crop-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('.id-crop-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            idAspectMode = btn.getAttribute('data-aspect');
+            renderIdSheet();
+        });
+    });
+
+    document.getElementById('btnIdRotate').addEventListener('click', () => {
+        idRotation = (idRotation + 90) % 360;
+        renderIdSheet();
+    });
+
+    document.getElementById('idZoomRange').addEventListener('input', (e) => {
+        document.getElementById('lblIdZoom').textContent = e.target.value + '%';
+        renderIdSheet();
+    });
+    document.getElementById('idOffsetYRange').addEventListener('input', () => renderIdSheet());
+    document.getElementById('idBrightRange').addEventListener('input', (e) => {
+        document.getElementById('lblIdBright').textContent = (e.target.value > 0 ? '+' : '') + e.target.value;
+        renderIdSheet();
+    });
+    document.getElementById('idContrastRange').addEventListener('input', (e) => {
+        document.getElementById('lblIdContrast').textContent = (e.target.value > 0 ? '+' : '') + e.target.value;
+        renderIdSheet();
+    });
+
+    document.querySelectorAll('.id-bg-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('.id-bg-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            idBgTint = btn.getAttribute('data-bg');
+            renderIdSheet();
+        });
+    });
+
+    document.getElementById('chkIdNameTag').addEventListener('change', (e) => {
+        document.getElementById('idNameTagBox').style.display = e.target.checked ? 'block' : 'none';
+        renderIdSheet();
+    });
+    document.getElementById('idNameTagText').addEventListener('input', () => renderIdSheet());
+
+    document.getElementById('idPackageSelect').addEventListener('change', () => {
+        updateIdTitleTag();
+        renderIdSheet();
+    });
+    document.getElementById('idSheetPaperSize').addEventListener('change', () => {
+        updateIdTitleTag();
+        renderIdSheet();
+    });
+    document.getElementById('chkIdCutLines').addEventListener('change', () => renderIdSheet());
+
+    document.getElementById('btnIdDirectPrint').addEventListener('click', printIdSheetDirect);
+    document.getElementById('btnIdGeneratePrint').addEventListener('click', printIdSheetDirect);
+    document.getElementById('btnIdDownload').addEventListener('click', downloadIdSheet);
 
     // ==========================================
     // CONFIDENTIAL PIN QUEUE
