@@ -1,6 +1,6 @@
 # 🖨️ Turnkey Commercial Print Appliance & Server Gateway
 
-Turn any low-cost ARM SBC or TV box (such as the **ZTE B860H** with Amlogic S905X, 1GB RAM) running **Armbian Linux** into a commercial-grade, driverless print kiosk, document workstation, and network server.
+Turn any low-cost ARM SBC or TV box (such as the **ZTE B860H** with Amlogic S905X, 1GB RAM) running **Armbian Linux** into a commercial-grade, driverless print kiosk, full-fledged Canva design workstation, and network server.
 
 ![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)
 ![Platform: Armbian / Debian](https://img.shields.io/badge/Platform-Armbian%20%7C%20Debian-red.svg)
@@ -11,57 +11,60 @@ Turn any low-cost ARM SBC or TV box (such as the **ZTE B860H** with Amlogic S905
 
 ## 🌟 Commercial Capabilities Overview
 
-### 1. 🖨️ Universal Multi-Printer Web Portal (`Port 80`)
+### 1. 🖨️ Permanent Advanced Web Print Portal (`Port 80`)
 - **Direct Access**: Accessible at **`http://printserver.local`** or `http://10.0.0.95`.
-- **Dynamic Printer Auto-Discovery**: Automatically queries connected USB or network IPP printers (`HP`, `Canon`, `Epson`, `Brother`, label printers) with real-time status and default queue auto-selection.
+- **Dynamic Multi-Printer Auto-Discovery**: Automatically queries connected USB or network IPP printers (`HP`, `Canon`, `Epson`, `Brother`, thermal label printers) with real-time status and default queue auto-selection.
 - **Universal Document & Mobile Ingestion**:
   - **PDF & Office Suite**: Native headless conversion for `.pdf`, `.docx`, `.doc`, `.xlsx`, `.xls`, `.pptx`, `.ppt`, `.odt`, `.rtf`, `.csv`, `.txt`.
   - **Modern Smartphone Formats**: iPhone `.heic`/`.heif` and modern `.avif`, `.webp`, `.png`, `.jpg`, `.tiff`.
+- **Permanent Advanced Controls Suite**:
+  - Exact Paper Sizes (`A4`, `Letter`, `Legal`, `A5`, `A6`, `B5`, `4×6"`, `5×7"`, `8×10"`, `Envelope DL`).
+  - Dynamic Physical Paper Preview matching physical dimensions with multi-page navigation (`‹` `1 / N` `›`).
+  - Millimetric Margins Engine: `Printable Area`, `Borderless (0 mm)`, `Normal (12.7 mm)`, or `Custom mm` (Top, Bottom, Left, Right).
+  - Media types (`Plain`, `Glossy`, `Matte`, `Brochure`) & Print Quality (`Normal`, `Best`, `Photo`).
+  - Resolution / DPI (`150`, `300`, `600`, `1200 DPI`).
+  - Duplex (`Single-Sided`, `Long-Edge`, `Short-Edge`) & Orientation (`Auto`, `Portrait`, `Landscape`).
+  - Scaling (`Fit to Printable Area`, `Fill / Crop Page`) & Page Range (`1-3, 5`).
 - **Pre-Flight Accounting & Cost Estimator**:
   - Real-time page counting via `pdfinfo`.
-  - Live cost calculation configured in Philippine Pesos (`₱`) (e.g. ₱2.00/page B&W, ₱5.00/page Color).
-- **Millimetric Margins & Quality Control**:
-  - Presets: Printable area, Borderless (0mm), Normal (12.7mm), or Custom mm.
-  - DPI Selection: 150 DPI (Fast), 300 DPI (High-Quality), 600 DPI (Ultra-Fine), 1200 DPI.
+  - Live cost calculation configured in Philippine Pesos (`₱`) (default: ₱2.00/page B&W, ₱5.00/page Color).
 
-### 2. 🎨 Client-Side "Canva-Style" Design & Print Studio
-- **100% Browser-Offloaded (Zero Server Memory Overhead)**:
-  - Runs in the client's web browser using HTML5 Canvas / Fabric.js and `jsPDF`.
-  - The client's PC/smartphone GPU and RAM handle all layout rendering, dragging, scaling, and rasterization.
-- **Turnkey Kiosk Tools**:
-  - **Presets**: A4 Document (Default), US Letter, 4x6" Photo Print, 2x2" ID Photo Grid.
-  - **DPI Selector**: Choose 150 DPI (Draft), 300 DPI (Standard Print), or 600 DPI (Ultra Crisp).
-  - **Enterprise Stamps**: 1-click vector stamps (`APPROVED`, `CONFIDENTIAL`, `PAID`, `URGENT`, `Authorized Signature` lines).
-  - **Image Filters**: B&W Grayscale, High Contrast, Sepia Vintage, Brightness/Contrast.
-  - **1-Click 2x2 ID Photo Grid Maker**: Upload an ID photo $\rightarrow$ automatically tiles 6x framed 2x2" photos with cut guidelines on an A4 sheet.
-  - **1-Click Direct Print**: Browser compiles 300 DPI high-res canvas directly and spools to the printer in one tap.
+### 2. 🎨 Full-Fledged Browser-Offloaded Canva Clone Studio
+- **100% Client-Side Architecture (0 MB Added to Server RAM)**:
+  - Powered by Fabric.js, client-side HTML5 Canvas, jsPDF, and QRCode.js.
+  - All graphic compositing, layer dragging, and typography rendering execute on the client's GPU and RAM.
+- **Canva Workstation Features**:
+  - **Icon Rail & Sliding Drawer**: Quick switching between `Design / Templates`, `Shapes / Elements`, `Text / Typography`, `Uploads`, `QR Code Generator`, and `Freehand Pen Draw`.
+  - **1-Click Pre-Built Canva Templates**:
+    - Promotional Sale & Clearance Flyer (bold header, 50% badge, offer box, address footer).
+    - Corporate Memorandum & Official Notice (letterhead, date, subject line, body text, signature block).
+    - Guest Wi-Fi Sign & QR (network credentials with embedded scan-to-connect QR code).
+    - Certificate of Recognition & Achievement (ornate gold borders, award text, ribbon seal).
+    - 2×2 ID Photo Sheet (automatically tiles 6x framed passport photos with cut guides on an A4 sheet).
+  - **Vector Shapes & Enterprise Stamps**: Rectangles, circles, stars, arrows, triangles, and 1-click `APPROVED`, `CONFIDENTIAL`, `PAID`, `URGENT`, `DRAFT`, and `Authorized Signature Line` stamps.
+  - **Contextual Dynamic Toolbar**: Top toolbar automatically adapts based on the active selection (font family, font size, text color, bold/italic for text; fill/stroke for shapes; grayscale, sepia, contrast, invert filters for images).
+  - **Direct 300 DPI Spooling**: Browser renders a crisp 300 DPI canvas blob client-side and submits directly to `/api/print` in one tap. Also supports downloading as pristine PDF or PNG.
 
-### 3. 📠 Walk-Up Digital Photocopier
-- **Standalone Kiosk Mode**: Large high-contrast touch controls designed for a tablet or smartphone mounted near the printer.
-- **Instant Duplication**:
-  - One tap triggers scanner acquisition, ImageMagick contrast/brightness normalization, and direct CUPS spooling with zero manual file downloads.
-  - Controls: B&W vs Full Color, 1–99 copies stepper, Darkness slider (-20% to +20%), 150/300/600 DPI, and Paper Size (A4/Letter).
-
-### 4. 🔒 Confidential Pull-Printing (PIN-Release Queue)
+### 3. 🔒 Confidential Pull-Printing (PIN-Release Queue)
 - **Secure Staging Spool**: Jobs marked confidential are encrypted and held in `/var/spool/webprint/pinned/`. The printer stays silent until unlocked.
 - **PIN Unlock**: User walks up to the printer, enters their 4-digit PIN in the portal, and releases the job to the tray.
 - **Auto-Purge Security**: Unclaimed PIN jobs automatically expire and delete after 24 hours.
 
-### 5. 📊 Print Accounting & Audit Ledger
+### 4. 📊 Print Accounting & Audit Ledger
 - **Complete Job Audit Trail**: Tracks timestamp, document title, printer, page count, copies, color mode, cost (`₱`), and client IP.
 - **Revenue & Volume Analytics**: Real-time summary cards for total jobs, total pages, and total billed cost.
 - **Exportable Reports**: One-click download of the complete audit log in CSV format (`/api/reports/export.csv`).
 
-### 6. 🛡️ Password-Protected Appliance Administration
-- **Admin Security**: Hardware actions are protected by administrator password.
+### 5. 🛡️ Password-Protected Appliance Administration
+- **Admin Security**: Hardware actions are protected by administrator password (default: `admin`).
 - **System Controls**: Safe web-based Reboot, Shutdown, CUPS Service Restart, Cache & Temp Spool Purging, Rate Card Editor (B&W/Color pricing), and Admin Password Manager.
 
-### 7. 📁 SANE Flatbed Scanner & Network Shares
+### 6. 📁 SANE Flatbed Scanner & Network Shares
 - **Web Scanner (`/scan`)**: Scan documents to PDF, PNG, or JPEG at 75–600 DPI.
 - **Samba File Sharing**: Scans auto-saved to `\\printserver.local\Public\Scans`.
 - **Automated Daily Backups**: Daily 3:00 AM server snapshots stored in `\\printserver.local\Public\backups`.
 
-### 8. 🛡️ Network Ad-Blocking & Remote VPN
+### 7. 🛡️ Network Ad-Blocking & Remote VPN
 - **AdGuard Home**: Running on port `3000` & `53` with balanced filter lists.
 - **Tailscale Mesh VPN**: Remote printing and admin access from anywhere at `http://100.104.185.40`.
 
@@ -85,7 +88,7 @@ sudo ./setup.sh
 
 | Service | Access URL | Purpose |
 | :--- | :--- | :--- |
-| **Print Appliance Portal** | [`http://printserver.local`](http://printserver.local) | Direct print, Canva studio, photocopier, PIN queue |
+| **Print Appliance Portal** | [`http://printserver.local`](http://printserver.local) | Direct print, Canva clone studio, PIN queue, scanner |
 | **AdGuard Home** | [`http://printserver.local:3000`](http://printserver.local:3000) | Network ad-blocking dashboard |
 | **Samba File Share** | `\\printserver.local\Public` | Shared network folder & scan storage |
 | **CUPS Admin** | [`https://printserver.local:631`](https://printserver.local:631) | Raw hardware and queue administration |

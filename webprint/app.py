@@ -227,6 +227,7 @@ INDEX_HTML = """<!DOCTYPE html>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.1/fabric.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
     <style>
         :root {
             --radius-sm: 6px;
@@ -385,7 +386,7 @@ INDEX_HTML = """<!DOCTYPE html>
             color: var(--text-secondary);
             font-size: 12px;
             font-weight: 500;
-            padding: 6px 12px;
+            padding: 6px 14px;
             border-radius: var(--radius-sm);
             cursor: pointer;
             white-space: nowrap;
@@ -426,7 +427,7 @@ INDEX_HTML = """<!DOCTYPE html>
             max-width: 1600px;
             width: 100%;
             margin: 0 auto;
-            padding: 20px 24px 40px;
+            padding: 16px 20px 40px;
         }
 
         .tab-content { display: none; }
@@ -669,120 +670,186 @@ INDEX_HTML = """<!DOCTYPE html>
         }
         .page-btn:hover { border-color: var(--border-hover); }
 
-        /* Design Studio Toolbar */
-        .studio-topbar {
+        /* ========================================================
+           FULL-FLEDGED CANVA CLONE WORKSPACE STYLES
+           ======================================================== */
+        .canva-workspace {
             display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 12px;
-            flex-wrap: wrap;
-            padding-bottom: 16px;
-            border-bottom: 1px solid var(--border);
-            margin-bottom: 16px;
-        }
-        .studio-tools {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            flex-wrap: wrap;
-        }
-
-        .studio-layout {
-            display: grid;
-            grid-template-columns: 240px 1fr 280px;
-            gap: 16px;
-            align-items: start;
-        }
-        @media (max-width: 1200px) {
-            .studio-layout { grid-template-columns: 1fr; }
-        }
-
-        .studio-sidebar {
+            height: calc(100vh - 120px);
+            min-height: 680px;
             background: var(--surface);
             border: 1px solid var(--border);
             border-radius: var(--radius-lg);
-            padding: 16px;
+            overflow: hidden;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.15);
         }
 
-        .stamp-btn {
-            display: block;
-            width: 100%;
-            text-align: left;
-            padding: 8px 12px;
-            margin-bottom: 6px;
+        /* Left Dock (Icon Rail) */
+        .canva-dock {
+            width: 68px;
+            background: #0d0d10;
+            border-right: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 12px 0;
+            gap: 6px;
+            flex-shrink: 0;
+            z-index: 10;
+        }
+
+        .dock-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            width: 56px;
+            height: 52px;
+            background: transparent;
+            border: none;
+            color: #a1a1aa;
+            cursor: pointer;
+            border-radius: var(--radius-md);
+            font-size: 10px;
+            font-weight: 600;
+            gap: 4px;
+            transition: all 0.15s ease;
+        }
+        .dock-item:hover { color: #f4f4f5; background: rgba(255,255,255,0.06); }
+        .dock-item.active { color: #ffffff; background: var(--accent); }
+        .dock-item svg { width: 18px; height: 18px; fill: currentColor; }
+
+        /* Side Drawer Panel */
+        .canva-drawer {
+            width: 310px;
+            background: var(--surface);
+            border-right: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+            flex-shrink: 0;
+            overflow-y: auto;
+            padding: 16px;
+            z-index: 9;
+        }
+        .drawer-section { display: none; }
+        .drawer-section.active { display: block; }
+        .drawer-title { font-size: 14px; font-weight: 700; margin-bottom: 12px; color: var(--text-primary); }
+
+        /* Template Cards */
+        .template-card {
+            background: var(--surface-elevated);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-md);
+            padding: 12px;
+            margin-bottom: 10px;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        .template-card:hover { border-color: var(--accent); transform: translateY(-1px); }
+        .template-card-title { font-size: 13px; font-weight: 600; margin-bottom: 2px; }
+        .template-card-desc { font-size: 11px; color: var(--text-secondary); }
+
+        /* Elements Grid */
+        .elements-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 8px;
+            margin-bottom: 16px;
+        }
+        .element-btn {
             background: var(--surface-elevated);
             border: 1px solid var(--border);
             border-radius: var(--radius-sm);
+            padding: 12px 6px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
             color: var(--text-primary);
+            font-size: 11px;
+            font-weight: 500;
+            gap: 6px;
+            transition: all 0.15s;
+        }
+        .element-btn:hover { border-color: var(--accent); background: var(--surface); }
+
+        /* Central Studio Canvas & Toolbar */
+        .canva-main {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            background: var(--desk-bg);
+            overflow: hidden;
+            position: relative;
+        }
+
+        .canva-topbar {
+            height: 48px;
+            background: var(--surface);
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 16px;
+            gap: 12px;
+            flex-shrink: 0;
+            z-index: 8;
+        }
+
+        .canva-topbar-tools {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            overflow-x: auto;
+        }
+
+        .canva-btn {
+            background: var(--surface-elevated);
+            border: 1px solid var(--border);
+            color: var(--text-primary);
+            padding: 5px 10px;
+            border-radius: var(--radius-sm);
             font-size: 12px;
-            font-weight: 600;
+            font-weight: 500;
             cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
             transition: all 0.15s;
+            white-space: nowrap;
         }
-        .stamp-btn:hover { border-color: var(--accent); background: var(--surface); }
+        .canva-btn:hover { border-color: var(--border-hover); }
+        .canva-btn.active { background: var(--accent); color: #ffffff; border-color: var(--accent); }
 
-        /* Walk-Up Photocopy Touch Kiosk */
-        .kiosk-container {
-            max-width: 720px;
-            margin: 0 auto;
-            background: var(--surface);
-            border: 1px solid var(--border);
-            border-radius: var(--radius-lg);
-            padding: 32px;
-        }
-
-        .touch-stepper {
+        .canva-viewport {
+            flex: 1;
+            overflow: auto;
             display: flex;
             align-items: center;
             justify-content: center;
-            gap: 16px;
-            margin: 12px 0 24px;
-        }
-        .step-btn {
-            width: 52px;
-            height: 52px;
-            border-radius: 50%;
-            background: var(--surface-elevated);
-            border: 1px solid var(--border);
-            color: var(--text-primary);
-            font-size: 22px;
-            font-weight: 700;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            cursor: pointer;
-            transition: all 0.15s;
-        }
-        .step-btn:hover { border-color: var(--accent); color: var(--accent); }
-        .step-display {
-            font-size: 36px;
-            font-weight: 800;
-            font-family: var(--font-mono);
-            min-width: 80px;
-            text-align: center;
+            padding: 30px;
+            position: relative;
         }
 
-        .touch-modes {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 16px;
-            margin-bottom: 24px;
+        .canva-sheet-container {
+            box-shadow: 0 20px 60px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.06);
+            background: #ffffff;
+            transition: transform 0.1s ease;
         }
-        .touch-mode-btn {
-            background: var(--surface-elevated);
-            border: 2px solid var(--border);
-            border-radius: var(--radius-md);
-            padding: 20px;
-            text-align: center;
-            cursor: pointer;
-            transition: all 0.15s;
-        }
-        .touch-mode-btn.active {
-            border-color: var(--accent);
+
+        .canva-bottom-bar {
+            height: 32px;
             background: var(--surface);
+            border-top: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 16px;
+            font-size: 11px;
+            color: var(--text-secondary);
+            flex-shrink: 0;
         }
-        .touch-mode-title { font-size: 16px; font-weight: 700; margin-bottom: 4px; }
-        .touch-mode-desc { font-size: 12px; color: var(--text-secondary); }
 
         /* Tables */
         .table-wrapper {
@@ -878,7 +945,6 @@ INDEX_HTML = """<!DOCTYPE html>
     <nav class="header-nav">
         <button class="nav-btn active" data-tab="print">Print</button>
         <button class="nav-btn" data-tab="studio">Design Studio</button>
-        <button class="nav-btn" data-tab="copy">Photocopy</button>
         <button class="nav-btn" data-tab="scan">Scan</button>
         <button class="nav-btn" data-tab="pin">PIN Release</button>
         <button class="nav-btn" data-tab="history">History</button>
@@ -1111,156 +1177,258 @@ INDEX_HTML = """<!DOCTYPE html>
         </div>
     </div>
 
-    <!-- TAB 2: DESIGN STUDIO (CANVA-STYLE) -->
+    <!-- TAB 2: FULL-FLEDGED CANVA CLONE DESIGN STUDIO -->
     <div class="tab-content" id="tab-studio">
-        <div class="card" style="margin-bottom: 16px;">
-            <div class="studio-topbar">
-                <div class="studio-tools">
-                    <div>
-                        <label>Preset Canvas</label>
-                        <select id="studioPreset" style="width: auto;">
-                            <option value="a4" selected>A4 Document (Default)</option>
-                            <option value="letter">US Letter</option>
-                            <option value="photo46">4x6" Photo</option>
-                            <option value="idgrid">2x2" ID Photo Grid</option>
-                        </select>
-                    </div>
-
-                    <div>
-                        <label>Output DPI</label>
-                        <select id="studioDpi" style="width: auto;">
-                            <option value="150">150 DPI (Draft)</option>
-                            <option value="300" selected>300 DPI (High-Res Print)</option>
-                            <option value="600">600 DPI (Ultra Crisp)</option>
-                        </select>
-                    </div>
-
-                    <button class="btn-secondary" id="btnStudioAddText">+ Add Text</button>
-                    <button class="btn-secondary" id="btnStudioUploadImg">📷 Add Photo</button>
-                    <input type="file" id="studioImgInput" accept="image/*" style="display:none;">
-                    <button class="btn-secondary" id="btnStudioIdGrid">👤 2x2 ID Maker</button>
-                    <button class="btn-secondary" id="btnStudioClear">🗑️ Clear</button>
-                </div>
-
-                <div style="display: flex; gap: 10px;">
-                    <button class="btn-secondary" id="btnStudioDownloadPdf">💾 Download PDF</button>
-                    <button class="btn-primary" id="btnStudioDirectPrint" style="width: auto; padding: 8px 20px;">🖨️ Print Direct</button>
-                </div>
+        <div class="canva-workspace">
+            <!-- Left Dock Rail -->
+            <div class="canva-dock">
+                <button class="dock-item active" data-drawer="templates" title="Templates">
+                    <svg viewBox="0 0 24 24"><path d="M4 4h7v7H4V4zm9 0h7v7h-7V4zm-9 9h7v7H4v-7zm9 0h7v7h-7v-7z"/></svg>
+                    <span>Design</span>
+                </button>
+                <button class="dock-item" data-drawer="elements" title="Elements & Stamps">
+                    <svg viewBox="0 0 24 24"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+                    <span>Shapes</span>
+                </button>
+                <button class="dock-item" data-drawer="text" title="Typography">
+                    <svg viewBox="0 0 24 24"><path d="M5 4v3h5.5v12h3V7H19V4H5z"/></svg>
+                    <span>Text</span>
+                </button>
+                <button class="dock-item" data-drawer="uploads" title="Upload Photos">
+                    <svg viewBox="0 0 24 24"><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM14 13v4h-4v-4H7l5-5 5 5h-3z"/></svg>
+                    <span>Uploads</span>
+                </button>
+                <button class="dock-item" data-drawer="qrcode" title="QR Code Generator">
+                    <svg viewBox="0 0 24 24"><path d="M2 2h8v8H2V2zm2 2v4h4V4H4zm10-2h8v8h-8V2zm2 2v4h4V4h-4zM2 14h8v8H2v-8zm2 2v4h4v-4H4zm14 0h4v4h-4v-4zm-4-2h2v2h-2v-2zm0 4h2v4h-2v-4zm2-2h4v2h-4v-2zm2 4h2v2h-2v-2z"/></svg>
+                    <span>QR Code</span>
+                </button>
+                <button class="dock-item" data-drawer="draw" title="Freehand Pen">
+                    <svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>
+                    <span>Draw</span>
+                </button>
             </div>
 
-            <div class="studio-layout">
-                <div class="studio-sidebar">
-                    <label>Enterprise Stamps</label>
+            <!-- Drawer Content Panel -->
+            <div class="canva-drawer">
+                <!-- Section 1: Templates -->
+                <div class="drawer-section active" id="drawer-templates">
+                    <div class="drawer-title">Canvas Dimensions</div>
+                    <div class="form-group">
+                        <select id="studioPreset">
+                            <option value="a4" selected>A4 Document (210 × 297 mm)</option>
+                            <option value="letter">US Letter (8.5 × 11 in)</option>
+                            <option value="photo46">4 × 6 in Photo Card</option>
+                            <option value="flyer">A5 Flyer / Notice</option>
+                            <option value="square">Square 1:1 (200 × 200 mm)</option>
+                        </select>
+                    </div>
+
+                    <div class="drawer-title" style="margin-top: 16px;">1-Click Canva Templates</div>
+                    <div class="template-card" onclick="loadCanvaTemplate('sale')">
+                        <div class="template-card-title">🔥 Promotional Sale Poster</div>
+                        <div class="template-card-desc">Bold header, 50% badge, offer box, address</div>
+                    </div>
+                    <div class="template-card" onclick="loadCanvaTemplate('notice')">
+                        <div class="template-card-title">📋 Official Memo / Notice</div>
+                        <div class="template-card-desc">Corporate header, memo body, signature line</div>
+                    </div>
+                    <div class="template-card" onclick="loadCanvaTemplate('wifi')">
+                        <div class="template-card-title">📶 Guest Wi-Fi Sign & QR</div>
+                        <div class="template-card-desc">Network name, password, scan-to-connect box</div>
+                    </div>
+                    <div class="template-card" onclick="loadCanvaTemplate('certificate')">
+                        <div class="template-card-title">🏆 Certificate of Recognition</div>
+                        <div class="template-card-desc">Formal border, recipient line, gold seal</div>
+                    </div>
+                    <div class="template-card" onclick="trigger2x2IdGrid()">
+                        <div class="template-card-title">👤 2×2 ID Photo Sheet</div>
+                        <div class="template-card-desc">Tiles 6x framed passport photos with cut guides</div>
+                    </div>
+                </div>
+
+                <!-- Section 2: Elements & Stamps -->
+                <div class="drawer-section" id="drawer-elements">
+                    <div class="drawer-title">Basic Shapes</div>
+                    <div class="elements-grid">
+                        <div class="element-btn" onclick="addCanvaShape('rect')"><span>▭</span><span>Rect</span></div>
+                        <div class="element-btn" onclick="addCanvaShape('roundrect')"><span>▢</span><span>Round</span></div>
+                        <div class="element-btn" onclick="addCanvaShape('circle')"><span>◯</span><span>Circle</span></div>
+                        <div class="element-btn" onclick="addCanvaShape('triangle')"><span>△</span><span>Triangle</span></div>
+                        <div class="element-btn" onclick="addCanvaShape('line')"><span>—</span><span>Line</span></div>
+                        <div class="element-btn" onclick="addCanvaShape('star')"><span>★</span><span>Star</span></div>
+                    </div>
+
+                    <div class="drawer-title">Enterprise Stamps & Seals</div>
                     <button class="stamp-btn" data-stamp="APPROVED" style="color: var(--success); border-color: rgba(34,197,94,0.3);">✓ APPROVED</button>
                     <button class="stamp-btn" data-stamp="CONFIDENTIAL" style="color: var(--danger); border-color: rgba(239,68,68,0.3);">🔒 CONFIDENTIAL</button>
                     <button class="stamp-btn" data-stamp="PAID" style="color: var(--accent); border-color: rgba(59,130,246,0.3);">💵 PAID</button>
                     <button class="stamp-btn" data-stamp="URGENT" style="color: var(--warning); border-color: rgba(245,158,11,0.3);">⚠️ URGENT</button>
+                    <button class="stamp-btn" data-stamp="DRAFT" style="color: #94a3b8;">📝 DRAFT</button>
                     <button class="stamp-btn" data-stamp="SIGNATURE">✍ Authorized Signature</button>
+                </div>
 
-                    <div style="margin-top: 16px;">
-                        <label>Shapes & Accents</label>
-                        <button class="stamp-btn" id="btnAddRect">▭ Rectangle</button>
-                        <button class="stamp-btn" id="btnAddCircle">◯ Circle</button>
-                        <button class="stamp-btn" id="btnAddLine">— Divider Line</button>
+                <!-- Section 3: Typography & Text -->
+                <div class="drawer-section" id="drawer-text">
+                    <div class="drawer-title">Add Text Elements</div>
+                    <button class="btn-primary" id="btnAddHeading" style="margin-bottom: 8px; justify-content: flex-start; padding: 12px 14px; font-size: 16px; font-weight: 800;">
+                        + Add a Heading
+                    </button>
+                    <button class="btn-secondary" id="btnAddSubheading" style="width: 100%; margin-bottom: 8px; justify-content: flex-start; padding: 10px 14px; font-size: 13px; font-weight: 600;">
+                        + Add a Subheading
+                    </button>
+                    <button class="btn-secondary" id="btnAddBodyText" style="width: 100%; margin-bottom: 16px; justify-content: flex-start; padding: 8px 14px; font-size: 12px;">
+                        + Add Body Text
+                    </button>
+
+                    <div class="drawer-title">Font Combinations</div>
+                    <div class="template-card" onclick="addStyledText('MODERN DISPLAY', 'Impact', 32, '#09090b')">
+                        <div style="font-family: Impact; font-size: 18px; letter-spacing: 0.05em;">MODERN BOLD</div>
+                        <div class="template-card-desc">High-impact title font</div>
+                    </div>
+                    <div class="template-card" onclick="addStyledText('Classical Elegance', 'Georgia', 26, '#0f172a', true)">
+                        <div style="font-family: Georgia; font-style: italic; font-size: 16px;">Classical Elegance</div>
+                        <div class="template-card-desc">Serif document heading</div>
+                    </div>
+                    <div class="template-card" onclick="addStyledText('CODE // MONO', 'Courier New', 22, '#2563eb')">
+                        <div style="font-family: 'Courier New'; font-size: 15px; font-weight: bold;">CODE // MONO</div>
+                        <div class="template-card-desc">Monospaced tech header</div>
                     </div>
                 </div>
 
-                <div class="preview-desk" style="min-height: 620px;">
-                    <div style="box-shadow: var(--paper-shadow); background: #ffffff;">
-                        <canvas id="studioFabricCanvas"></canvas>
+                <!-- Section 4: Uploads -->
+                <div class="drawer-section" id="drawer-uploads">
+                    <div class="drawer-title">Upload Image or Photo</div>
+                    <div class="dropzone" id="studioDropzone" style="padding: 20px 12px; margin-bottom: 16px;">
+                        <input type="file" id="studioFileInput" accept="image/*">
+                        <div style="font-size: 20px;">📷</div>
+                        <div style="font-size: 12px; font-weight: 600; margin-top: 4px;">Click or drop image</div>
+                    </div>
+
+                    <div class="drawer-title">Uploaded Media</div>
+                    <div id="studioMediaThumbnails" style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+                        <!-- Dynamically populated -->
                     </div>
                 </div>
 
-                <div class="studio-sidebar">
-                    <label>Selected Layer Tools</label>
+                <!-- Section 5: QR Code Generator -->
+                <div class="drawer-section" id="drawer-qrcode">
+                    <div class="drawer-title">Live QR Code Generator</div>
+                    <p style="font-size: 12px; color: var(--text-secondary); margin-bottom: 12px;">
+                        Embed a vector QR code directly onto your flyer or sign.
+                    </p>
                     <div class="form-group">
-                        <label>Text / Color</label>
-                        <input type="color" id="studioColorPicker" value="#000000" style="height: 36px; padding: 2px; cursor: pointer;">
+                        <label>URL or Wi-Fi Text</label>
+                        <input type="text" id="qrTextInput" placeholder="https://mywebsite.com or text" value="https://printserver.local">
+                    </div>
+                    <button class="btn-primary" id="btnInsertQrCode">Generate & Insert QR</button>
+                    <div id="qrHiddenContainer" style="display: none;"></div>
+                </div>
+
+                <!-- Section 6: Freehand Draw -->
+                <div class="drawer-section" id="drawer-draw">
+                    <div class="drawer-title">Freehand Pen Tool</div>
+                    <div class="form-group">
+                        <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; text-transform: none; font-size: 13px;">
+                            <input type="checkbox" id="chkDrawMode">
+                            <span>Enable Freehand Drawing Mode</span>
+                        </label>
                     </div>
                     <div class="form-group">
-                        <label>Font Family</label>
-                        <select id="studioFontFamily">
-                            <option value="Arial">Arial (Clean Sans)</option>
-                            <option value="Georgia">Georgia (Classic Serif)</option>
-                            <option value="Courier New">Courier (Monospace)</option>
-                            <option value="Impact">Impact (Bold Title)</option>
+                        <label>Brush Color</label>
+                        <input type="color" id="drawColor" value="#000000" style="height: 36px; padding: 2px;">
+                    </div>
+                    <div class="form-group">
+                        <label>Brush Size (<span id="brushSizeVal">4px</span>)</label>
+                        <input type="range" id="drawWidth" min="1" max="30" value="4">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Central Studio Viewport & Contextual Toolbar -->
+            <div class="canva-main">
+                <!-- Contextual Toolbar -->
+                <div class="canva-topbar">
+                    <div class="canva-topbar-tools">
+                        <button class="canva-btn" id="btnStudioUndo" title="Undo (Ctrl+Z)">↶</button>
+                        <button class="canva-btn" id="btnStudioRedo" title="Redo (Ctrl+Y)">↷</button>
+                        <span style="width: 1px; height: 18px; background: var(--border); margin: 0 4px;"></span>
+
+                        <!-- Dynamic Contextual Object Controls -->
+                        <div id="contextTextControls" style="display: none; align-items: center; gap: 6px;">
+                            <select id="ctxFontFamily" style="width: auto; padding: 4px 8px; font-size: 12px;">
+                                <option value="Arial">Arial</option>
+                                <option value="Georgia">Georgia</option>
+                                <option value="Courier New">Courier</option>
+                                <option value="Impact">Impact</option>
+                                <option value="Times New Roman">Times New Roman</option>
+                            </select>
+                            <input type="number" id="ctxFontSize" value="24" min="8" max="140" style="width: 52px; padding: 4px 6px; font-size: 12px;">
+                            <input type="color" id="ctxTextColor" value="#000000" style="width: 28px; height: 28px; padding: 0; border: none; cursor: pointer;" title="Text Color">
+                            <button class="canva-btn" id="btnCtxBold" title="Bold"><b>B</b></button>
+                            <button class="canva-btn" id="btnCtxItalic" title="Italic"><i>I</i></button>
+                        </div>
+
+                        <div id="contextShapeControls" style="display: none; align-items: center; gap: 6px;">
+                            <label style="margin: 0; font-size: 11px;">Fill:</label>
+                            <input type="color" id="ctxFillColor" value="#3b82f6" style="width: 28px; height: 28px; padding: 0; border: none; cursor: pointer;">
+                            <label style="margin: 0 0 0 4px; font-size: 11px;">Border:</label>
+                            <input type="color" id="ctxStrokeColor" value="#1d4ed8" style="width: 28px; height: 28px; padding: 0; border: none; cursor: pointer;">
+                        </div>
+
+                        <div id="contextImageControls" style="display: none; align-items: center; gap: 6px;">
+                            <select id="ctxImageFilter" style="width: auto; padding: 4px 8px; font-size: 12px;">
+                                <option value="none">Original Colors</option>
+                                <option value="grayscale">Grayscale (B&W)</option>
+                                <option value="sepia">Sepia Vintage</option>
+                                <option value="contrast">High Contrast</option>
+                                <option value="invert">Invert Colors</option>
+                            </select>
+                        </div>
+
+                        <!-- Common Selection Actions -->
+                        <div id="contextCommonControls" style="display: none; align-items: center; gap: 4px;">
+                            <span style="width: 1px; height: 18px; background: var(--border); margin: 0 4px;"></span>
+                            <button class="canva-btn" id="btnCtxLayerUp" title="Bring to Front">⇧ Front</button>
+                            <button class="canva-btn" id="btnCtxLayerDown" title="Send to Back">⇩ Back</button>
+                            <button class="canva-btn" id="btnCtxDuplicate" title="Duplicate">⧉</button>
+                            <button class="canva-btn" id="btnCtxDelete" style="color: var(--danger);" title="Delete">🗑️</button>
+                        </div>
+                    </div>
+
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <select id="studioDpi" style="width: auto; padding: 4px 8px; font-size: 12px;">
+                            <option value="150">150 DPI (Draft)</option>
+                            <option value="300" selected>300 DPI (High-Res Print)</option>
+                            <option value="600">600 DPI (Ultra Crisp)</option>
                         </select>
+                        <button class="canva-btn" id="btnStudioDownloadPng">🖼️ PNG</button>
+                        <button class="canva-btn" id="btnStudioDownloadPdf">💾 PDF</button>
+                        <button class="btn-primary" id="btnStudioDirectPrint" style="width: auto; padding: 6px 16px; font-size: 12px;">
+                            🖨️ Print Direct
+                        </button>
                     </div>
-                    <div class="form-group">
-                        <label>Image Filter</label>
-                        <select id="studioImageFilter">
-                            <option value="none">Original Colors</option>
-                            <option value="grayscale">Black & White (Grayscale)</option>
-                            <option value="sepia">Sepia / Vintage</option>
-                            <option value="contrast">High Contrast</option>
-                        </select>
+                </div>
+
+                <!-- Canvas Workspace Viewport -->
+                <div class="canva-viewport" id="canvaViewport">
+                    <div class="canva-sheet-container" id="canvaSheetContainer">
+                        <canvas id="canvaStudioCanvas"></canvas>
                     </div>
-                    <div style="display: flex; gap: 6px; margin-top: 12px;">
-                        <button class="btn-secondary" id="btnLayerUp" style="flex:1;">Bring Up</button>
-                        <button class="btn-secondary" id="btnLayerDown" style="flex:1;">Send Down</button>
-                        <button class="btn-secondary" id="btnLayerDelete" style="color: var(--danger);">✕</button>
+                </div>
+
+                <!-- Bottom Status Bar -->
+                <div class="canva-bottom-bar">
+                    <div id="canvaDimensionsTag">A4 Document • 210 × 297 mm • 300 DPI (2480 × 3508 px)</div>
+                    <div style="display: flex; align-items: center; gap: 12px;">
+                        <button class="canva-btn" id="btnStudioClearAll" style="padding: 2px 8px; font-size: 11px;">Clear All</button>
+                        <div id="canvaZoomLabel">Zoom: 100%</div>
                     </div>
                 </div>
             </div>
         </div>
     </div>
 
-    <!-- TAB 3: PHOTOCOPY (WALK-UP COPIER) -->
-    <div class="tab-content" id="tab-copy">
-        <div class="kiosk-container">
-            <h2 style="font-size: 20px; font-weight: 700; margin-bottom: 4px; text-align: center;">Digital Walk-Up Photocopier</h2>
-            <p style="font-size: 13px; color: var(--text-secondary); text-align: center; margin-bottom: 24px;">Place your document on the scanner flatbed and press Start</p>
-
-            <label style="text-align: center;">Select Color Mode</label>
-            <div class="touch-modes">
-                <div class="touch-mode-btn active" id="btnCopyBw" data-mode="Gray">
-                    <div class="touch-mode-title">Black & White</div>
-                    <div class="touch-mode-desc">High-speed grayscale copy</div>
-                </div>
-                <div class="touch-mode-btn" id="btnCopyColor" data-mode="Color">
-                    <div class="touch-mode-title">Full Color</div>
-                    <div class="touch-mode-desc">Vibrant color replication</div>
-                </div>
-            </div>
-
-            <label style="text-align: center;">Number of Copies</label>
-            <div class="touch-stepper">
-                <button class="step-btn" id="btnCopyMinus">-</button>
-                <div class="step-display" id="copyCountDisplay">1</div>
-                <button class="step-btn" id="btnCopyPlus">+</button>
-            </div>
-
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 24px;">
-                <div>
-                    <label>Copy Resolution (DPI)</label>
-                    <select id="copyResolution">
-                        <option value="150">150 DPI (Fast Copy)</option>
-                        <option value="300" selected>300 DPI (Standard Copy)</option>
-                        <option value="600">600 DPI (High-Definition)</option>
-                    </select>
-                </div>
-                <div>
-                    <label>Paper Size</label>
-                    <select id="copyPageSize">
-                        <option value="A4" selected>A4 Paper</option>
-                        <option value="Letter">US Letter</option>
-                    </select>
-                </div>
-            </div>
-
-            <div class="form-group" style="margin-bottom: 24px;">
-                <label>Darkness / Contrast Adjustment (<span id="copyContrastVal">Normal</span>)</label>
-                <input type="range" id="copyContrast" min="-20" max="20" value="0" style="width: 100%;">
-            </div>
-
-            <button class="btn-primary" id="btnStartPhotocopy" style="padding: 16px; font-size: 16px;">
-                🖨️ Start Digital Photocopy
-            </button>
-            <div id="copyStatusText" style="text-align: center; margin-top: 12px; font-size: 12px; color: var(--text-secondary);"></div>
-        </div>
-    </div>
-
-    <!-- TAB 4: SCAN -->
+    <!-- TAB 3: SCAN -->
     <div class="tab-content" id="tab-scan">
         <div class="grid-layout">
             <div class="preview-desk">
@@ -1312,7 +1480,7 @@ INDEX_HTML = """<!DOCTYPE html>
         </div>
     </div>
 
-    <!-- TAB 5: PIN RELEASE -->
+    <!-- TAB 4: PIN RELEASE -->
     <div class="tab-content" id="tab-pin">
         <div class="card">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
@@ -1344,13 +1512,13 @@ INDEX_HTML = """<!DOCTYPE html>
         </div>
     </div>
 
-    <!-- TAB 6: HISTORY & ACCOUNTING -->
+    <!-- TAB 5: HISTORY & ACCOUNTING -->
     <div class="tab-content" id="tab-history">
         <div class="card" style="margin-bottom: 20px;">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
                 <div>
                     <h2 style="font-size: 16px; font-weight: 700;">Print Accounting & Audit Ledger</h2>
-                    <p style="font-size: 12px; color: var(--text-secondary);">Complete log of all print, copy, and released jobs</p>
+                    <p style="font-size: 12px; color: var(--text-secondary);">Complete log of all print and released jobs</p>
                 </div>
                 <a href="/api/reports/export.csv" class="btn-secondary" download>📥 Export CSV Ledger</a>
             </div>
@@ -1392,7 +1560,7 @@ INDEX_HTML = """<!DOCTYPE html>
         </div>
     </div>
 
-    <!-- TAB 7: SETTINGS & APPLIANCE ADMIN -->
+    <!-- TAB 6: SETTINGS & APPLIANCE ADMIN -->
     <div class="tab-content" id="tab-settings">
         <div class="grid-layout">
             <div class="card">
@@ -1506,10 +1674,7 @@ INDEX_HTML = """<!DOCTYPE html>
 
     let currentAdminToken = sessionStorage.getItem('admin_token') || '';
     let selectedPrinter = '';
-    let fabricCanvas = null;
     let pendingReleaseJobId = '';
-    let copyCopies = 1;
-    let copyMode = 'Gray';
 
     let currentPdf = null;
     let pdfPage = 1;
@@ -1542,8 +1707,8 @@ INDEX_HTML = """<!DOCTYPE html>
             const target = document.getElementById('tab-' + btn.getAttribute('data-tab'));
             if (target) target.classList.add('active');
 
-            if (btn.getAttribute('data-tab') === 'studio' && !fabricCanvas) {
-                initFabricStudio();
+            if (btn.getAttribute('data-tab') === 'studio') {
+                if (!canvaStudioCanvas) initCanvaStudio();
             } else if (btn.getAttribute('data-tab') === 'pin') {
                 loadPinList();
             } else if (btn.getAttribute('data-tab') === 'history') {
@@ -1674,7 +1839,6 @@ INDEX_HTML = """<!DOCTYPE html>
         document.getElementById('costTotal').textContent = `₱${total.toFixed(2)}`;
     }
 
-    // Attach real-time preview listeners to all advanced controls
     ['printPageSize', 'printOrientation', 'printMarginMode', 'printColorModel', 'printScaling', 'printCopies'].forEach(id => {
         document.getElementById(id).addEventListener('change', updatePreviewLayout);
     });
@@ -1698,7 +1862,6 @@ INDEX_HTML = """<!DOCTYPE html>
         document.getElementById('previewEmptyState').style.display = 'none';
         document.getElementById('previewDimensionsTag').style.display = 'flex';
 
-        // Call pre-flight inspector API
         const formData = new FormData();
         formData.append('file', file);
         formData.append('copies', document.getElementById('printCopies').value);
@@ -1855,132 +2018,475 @@ INDEX_HTML = """<!DOCTYPE html>
         }
     });
 
-    // ==========================================
-    // DESIGN STUDIO (100% Client-Side in Browser)
-    // ==========================================
-    function initFabricStudio() {
-        fabricCanvas = new fabric.Canvas('studioFabricCanvas', {
+    // ========================================================
+    // FULL-FLEDGED CANVA CLONE ENGINE (100% BROWSER OFFLOADED)
+    // ========================================================
+    let canvaStudioCanvas = null;
+    let studioHistory = [];
+    let historyIndex = -1;
+    let isHistoryUpdating = false;
+
+    function initCanvaStudio() {
+        canvaStudioCanvas = new fabric.Canvas('canvaStudioCanvas', {
             width: 480,
             height: 680,
-            backgroundColor: '#ffffff'
+            backgroundColor: '#ffffff',
+            preserveObjectStacking: true
         });
-        setStudioPreset('a4');
+
+        // Initialize dock tab switching
+        document.querySelectorAll('.dock-item').forEach(item => {
+            item.addEventListener('click', () => {
+                document.querySelectorAll('.dock-item').forEach(d => d.classList.remove('active'));
+                document.querySelectorAll('.drawer-section').forEach(s => s.classList.remove('active'));
+                item.classList.add('active');
+                const target = document.getElementById('drawer-' + item.getAttribute('data-drawer'));
+                if (target) target.classList.add('active');
+            });
+        });
+
+        // Selection listeners for contextual toolbar
+        canvaStudioCanvas.on('selection:created', updateContextualBar);
+        canvaStudioCanvas.on('selection:updated', updateContextualBar);
+        canvaStudioCanvas.on('selection:cleared', clearContextualBar);
+
+        // History recording
+        canvaStudioCanvas.on('object:added', () => recordCanvaHistory());
+        canvaStudioCanvas.on('object:modified', () => recordCanvaHistory());
+        canvaStudioCanvas.on('object:removed', () => recordCanvaHistory());
+
+        // Keyboard shortcuts
+        window.addEventListener('keydown', (e) => {
+            if (!canvaStudioCanvas) return;
+            const active = canvaStudioCanvas.getActiveObject();
+            if (active && (e.key === 'Delete' || e.key === 'Backspace')) {
+                if (active.isEditing) return;
+                canvaStudioCanvas.remove(active);
+                e.preventDefault();
+            } else if (e.ctrlKey && e.key === 'z') {
+                undoCanva();
+                e.preventDefault();
+            } else if (e.ctrlKey && e.key === 'y') {
+                redoCanva();
+                e.preventDefault();
+            } else if (e.ctrlKey && e.key === 'd' && active) {
+                cloneActiveCanvaObject();
+                e.preventDefault();
+            }
+        });
+
+        setCanvaCanvasPreset('a4');
+        recordCanvaHistory();
     }
 
-    function setStudioPreset(preset) {
-        if (!fabricCanvas) return;
-        if (preset === 'a4') {
-            fabricCanvas.setWidth(480);
-            fabricCanvas.setHeight(680);
-        } else if (preset === 'letter') {
-            fabricCanvas.setWidth(480);
-            fabricCanvas.setHeight(620);
-        } else if (preset === 'photo46') {
-            fabricCanvas.setWidth(400);
-            fabricCanvas.setHeight(600);
-        } else if (preset === 'idgrid') {
-            fabricCanvas.setWidth(480);
-            fabricCanvas.setHeight(680);
+    function recordCanvaHistory() {
+        if (isHistoryUpdating || !canvaStudioCanvas) return;
+        const json = JSON.stringify(canvaStudioCanvas.toJSON());
+        if (historyIndex < studioHistory.length - 1) {
+            studioHistory = studioHistory.slice(0, historyIndex + 1);
         }
-        fabricCanvas.renderAll();
+        studioHistory.push(json);
+        if (studioHistory.length > 25) studioHistory.shift();
+        historyIndex = studioHistory.length - 1;
+    }
+
+    function undoCanva() {
+        if (historyIndex > 0) {
+            historyIndex--;
+            isHistoryUpdating = true;
+            canvaStudioCanvas.loadFromJSON(studioHistory[historyIndex], () => {
+                canvaStudioCanvas.renderAll();
+                isHistoryUpdating = false;
+                clearContextualBar();
+            });
+        }
+    }
+
+    function redoCanva() {
+        if (historyIndex < studioHistory.length - 1) {
+            historyIndex++;
+            isHistoryUpdating = true;
+            canvaStudioCanvas.loadFromJSON(studioHistory[historyIndex], () => {
+                canvaStudioCanvas.renderAll();
+                isHistoryUpdating = false;
+                clearContextualBar();
+            });
+        }
+    }
+
+    document.getElementById('btnStudioUndo').addEventListener('click', undoCanva);
+    document.getElementById('btnStudioRedo').addEventListener('click', redoCanva);
+
+    function updateContextualBar() {
+        const obj = canvaStudioCanvas.getActiveObject();
+        if (!obj) { clearContextualBar(); return; }
+
+        document.getElementById('contextCommonControls').style.display = 'flex';
+        document.getElementById('contextTextControls').style.display = (obj.type === 'i-text' || obj.type === 'text') ? 'flex' : 'none';
+        document.getElementById('contextShapeControls').style.display = ['rect', 'circle', 'triangle', 'polygon'].includes(obj.type) ? 'flex' : 'none';
+        document.getElementById('contextImageControls').style.display = (obj.type === 'image') ? 'flex' : 'none';
+
+        if (obj.type === 'i-text' || obj.type === 'text') {
+            document.getElementById('ctxFontFamily').value = obj.fontFamily || 'Arial';
+            document.getElementById('ctxFontSize').value = obj.fontSize || 24;
+            document.getElementById('ctxTextColor').value = obj.fill || '#000000';
+        } else if (['rect', 'circle', 'triangle', 'polygon'].includes(obj.type)) {
+            document.getElementById('ctxFillColor').value = obj.fill || '#3b82f6';
+            document.getElementById('ctxStrokeColor').value = obj.stroke || '#1d4ed8';
+        }
+    }
+
+    function clearContextualBar() {
+        document.getElementById('contextTextControls').style.display = 'none';
+        document.getElementById('contextShapeControls').style.display = 'none';
+        document.getElementById('contextImageControls').style.display = 'none';
+        document.getElementById('contextCommonControls').style.display = 'none';
+    }
+
+    // Context toolbar interaction events
+    document.getElementById('ctxFontFamily').addEventListener('change', (e) => {
+        const obj = canvaStudioCanvas.getActiveObject();
+        if (obj && (obj.type === 'i-text' || obj.type === 'text')) {
+            obj.set('fontFamily', e.target.value);
+            canvaStudioCanvas.renderAll();
+            recordCanvaHistory();
+        }
+    });
+    document.getElementById('ctxFontSize').addEventListener('input', (e) => {
+        const obj = canvaStudioCanvas.getActiveObject();
+        if (obj && (obj.type === 'i-text' || obj.type === 'text')) {
+            obj.set('fontSize', parseInt(e.target.value) || 20);
+            canvaStudioCanvas.renderAll();
+            recordCanvaHistory();
+        }
+    });
+    document.getElementById('ctxTextColor').addEventListener('input', (e) => {
+        const obj = canvaStudioCanvas.getActiveObject();
+        if (obj) {
+            obj.set('fill', e.target.value);
+            canvaStudioCanvas.renderAll();
+            recordCanvaHistory();
+        }
+    });
+    document.getElementById('btnCtxBold').addEventListener('click', () => {
+        const obj = canvaStudioCanvas.getActiveObject();
+        if (obj && (obj.type === 'i-text' || obj.type === 'text')) {
+            obj.set('fontWeight', obj.fontWeight === 'bold' ? 'normal' : 'bold');
+            canvaStudioCanvas.renderAll();
+            recordCanvaHistory();
+        }
+    });
+    document.getElementById('btnCtxItalic').addEventListener('click', () => {
+        const obj = canvaStudioCanvas.getActiveObject();
+        if (obj && (obj.type === 'i-text' || obj.type === 'text')) {
+            obj.set('fontStyle', obj.fontStyle === 'italic' ? 'normal' : 'italic');
+            canvaStudioCanvas.renderAll();
+            recordCanvaHistory();
+        }
+    });
+    document.getElementById('ctxFillColor').addEventListener('input', (e) => {
+        const obj = canvaStudioCanvas.getActiveObject();
+        if (obj) {
+            obj.set('fill', e.target.value);
+            canvaStudioCanvas.renderAll();
+            recordCanvaHistory();
+        }
+    });
+    document.getElementById('ctxStrokeColor').addEventListener('input', (e) => {
+        const obj = canvaStudioCanvas.getActiveObject();
+        if (obj) {
+            obj.set('stroke', e.target.value);
+            canvaStudioCanvas.renderAll();
+            recordCanvaHistory();
+        }
+    });
+
+    document.getElementById('ctxImageFilter').addEventListener('change', (e) => {
+        const obj = canvaStudioCanvas.getActiveObject();
+        if (obj && obj.type === 'image') {
+            obj.filters = [];
+            const val = e.target.value;
+            if (val === 'grayscale') obj.filters.push(new fabric.Image.filters.Grayscale());
+            else if (val === 'sepia') obj.filters.push(new fabric.Image.filters.Sepia());
+            else if (val === 'contrast') obj.filters.push(new fabric.Image.filters.Contrast({ contrast: 0.3 }));
+            else if (val === 'invert') obj.filters.push(new fabric.Image.filters.Invert());
+            obj.applyFilters();
+            canvaStudioCanvas.renderAll();
+            recordCanvaHistory();
+        }
+    });
+
+    document.getElementById('btnCtxLayerUp').addEventListener('click', () => {
+        const obj = canvaStudioCanvas.getActiveObject();
+        if (obj) { obj.bringToFront(); canvaStudioCanvas.renderAll(); recordCanvaHistory(); }
+    });
+    document.getElementById('btnCtxLayerDown').addEventListener('click', () => {
+        const obj = canvaStudioCanvas.getActiveObject();
+        if (obj) { obj.sendToBack(); canvaStudioCanvas.renderAll(); recordCanvaHistory(); }
+    });
+    document.getElementById('btnCtxDuplicate').addEventListener('click', cloneActiveCanvaObject);
+    document.getElementById('btnCtxDelete').addEventListener('click', () => {
+        const obj = canvaStudioCanvas.getActiveObject();
+        if (obj) { canvaStudioCanvas.remove(obj); recordCanvaHistory(); }
+    });
+
+    function cloneActiveCanvaObject() {
+        const obj = canvaStudioCanvas.getActiveObject();
+        if (!obj) return;
+        obj.clone((cloned) => {
+            cloned.set({ left: obj.left + 20, top: obj.top + 20 });
+            canvaStudioCanvas.add(cloned);
+            canvaStudioCanvas.setActiveObject(cloned);
+            canvaStudioCanvas.renderAll();
+            recordCanvaHistory();
+        });
+    }
+
+    // Canvas Presets & Dimensions
+    function setCanvaCanvasPreset(preset) {
+        if (!canvaStudioCanvas) return;
+        let w = 480, h = 680, desc = 'A4 Document • 210 × 297 mm';
+        if (preset === 'letter') { w = 480; h = 620; desc = 'US Letter • 8.5 × 11 in'; }
+        else if (preset === 'photo46') { w = 400; h = 600; desc = '4 × 6 in Photo Card'; }
+        else if (preset === 'flyer') { w = 420; h = 594; desc = 'A5 Flyer / Notice'; }
+        else if (preset === 'square') { w = 500; h = 500; desc = 'Square 1:1 • 200 × 200 mm'; }
+
+        canvaStudioCanvas.setWidth(w);
+        canvaStudioCanvas.setHeight(h);
+        canvaStudioCanvas.renderAll();
+        document.getElementById('canvaDimensionsTag').textContent = `${desc} • 300 DPI`;
     }
 
     document.getElementById('studioPreset').addEventListener('change', (e) => {
-        setStudioPreset(e.target.value);
+        setCanvaCanvasPreset(e.target.value);
     });
 
-    document.getElementById('btnStudioAddText').addEventListener('click', () => {
-        if (!fabricCanvas) return;
-        const text = new fabric.IText('Double click to edit', {
-            left: 50,
-            top: 50,
-            fontFamily: document.getElementById('studioFontFamily').value,
-            fill: document.getElementById('studioColorPicker').value,
-            fontSize: 24
+    // Typography additions
+    document.getElementById('btnAddHeading').addEventListener('click', () => {
+        addStyledText('Heading Title', 'Arial', 32, '#09090b', false, true);
+    });
+    document.getElementById('btnAddSubheading').addEventListener('click', () => {
+        addStyledText('Subheading Text', 'Arial', 20, '#475569');
+    });
+    document.getElementById('btnAddBodyText').addEventListener('click', () => {
+        addStyledText('Write your paragraph or body text here. Double-click to edit.', 'Arial', 14, '#18181b');
+    });
+
+    function addStyledText(text, font='Arial', size=24, color='#000000', italic=false, bold=false) {
+        if (!canvaStudioCanvas) return;
+        const t = new fabric.IText(text, {
+            left: 60,
+            top: 100,
+            fontFamily: font,
+            fontSize: size,
+            fill: color,
+            fontStyle: italic ? 'italic' : 'normal',
+            fontWeight: bold ? 'bold' : 'normal'
         });
-        fabricCanvas.add(text);
-        fabricCanvas.setActiveObject(text);
-    });
+        canvaStudioCanvas.add(t);
+        canvaStudioCanvas.setActiveObject(t);
+        canvaStudioCanvas.renderAll();
+    }
 
+    // Elements & Shapes addition
+    window.addCanvaShape = function(type) {
+        if (!canvaStudioCanvas) return;
+        let shape;
+        if (type === 'rect') {
+            shape = new fabric.Rect({ left: 80, top: 80, width: 140, height: 90, fill: '#3b82f6', stroke: '#1d4ed8', strokeWidth: 2, rx: 0 });
+        } else if (type === 'roundrect') {
+            shape = new fabric.Rect({ left: 80, top: 80, width: 140, height: 90, fill: '#10b981', stroke: '#047857', strokeWidth: 2, rx: 12, ry: 12 });
+        } else if (type === 'circle') {
+            shape = new fabric.Circle({ left: 80, top: 80, radius: 50, fill: '#f59e0b', stroke: '#b45309', strokeWidth: 2 });
+        } else if (type === 'triangle') {
+            shape = new fabric.Triangle({ left: 80, top: 80, width: 100, height: 90, fill: '#8b5cf6', stroke: '#6d28d9', strokeWidth: 2 });
+        } else if (type === 'line') {
+            shape = new fabric.Line([50, 100, 350, 100], { stroke: '#09090b', strokeWidth: 3 });
+        } else if (type === 'star') {
+            shape = new fabric.Polygon([
+                {x: 50, y: 0}, {x: 65, y: 35}, {x: 100, y: 35}, {x: 72, y: 57},
+                {x: 82, y: 91}, {x: 50, y: 70}, {x: 18, y: 91}, {x: 28, y: 57},
+                {x: 0, y: 35}, {x: 35, y: 35}
+            ], { left: 80, top: 80, fill: '#eab308', stroke: '#ca8a04', strokeWidth: 2 });
+        }
+        if (shape) {
+            canvaStudioCanvas.add(shape);
+            canvaStudioCanvas.setActiveObject(shape);
+            canvaStudioCanvas.renderAll();
+        }
+    };
+
+    // Stamps
     document.querySelectorAll('.stamp-btn[data-stamp]').forEach(btn => {
         btn.addEventListener('click', () => {
-            if (!fabricCanvas) return;
+            if (!canvaStudioCanvas) return;
             const type = btn.getAttribute('data-stamp');
             let color = '#22c55e';
             if (type === 'CONFIDENTIAL') color = '#ef4444';
             if (type === 'PAID') color = '#3b82f6';
             if (type === 'URGENT') color = '#f59e0b';
+            if (type === 'DRAFT') color = '#64748b';
             if (type === 'SIGNATURE') {
-                const line = new fabric.Line([50, 100, 250, 100], { stroke: '#000000', strokeWidth: 2 });
-                const lbl = new fabric.Text('Authorized Signature', { left: 50, top: 106, fontSize: 12, fill: '#666' });
-                const grp = new fabric.Group([line, lbl], { left: 80, top: 150 });
-                fabricCanvas.add(grp);
-                fabricCanvas.setActiveObject(grp);
+                const line = new fabric.Line([0, 0, 220, 0], { stroke: '#000000', strokeWidth: 2 });
+                const lbl = new fabric.Text('Authorized Signature', { left: 0, top: 6, fontSize: 12, fill: '#64748b' });
+                const grp = new fabric.Group([line, lbl], { left: 80, top: 200 });
+                canvaStudioCanvas.add(grp);
+                canvaStudioCanvas.setActiveObject(grp);
+                canvaStudioCanvas.renderAll();
                 return;
             }
 
-            const stampRect = new fabric.Rect({
-                width: 180,
-                height: 48,
-                fill: 'transparent',
-                stroke: color,
-                strokeWidth: 4,
-                rx: 6, ry: 6
-            });
-            const stampText = new fabric.Text(type, {
-                fontSize: 22,
-                fontWeight: 'bold',
-                fill: color,
-                originX: 'center',
-                originY: 'center',
-                left: 90, top: 24
-            });
-            const stampGroup = new fabric.Group([stampRect, stampText], {
-                left: 100, top: 100, angle: -10
-            });
-            fabricCanvas.add(stampGroup);
-            fabricCanvas.setActiveObject(stampGroup);
+            const stampRect = new fabric.Rect({ width: 180, height: 48, fill: 'transparent', stroke: color, strokeWidth: 4, rx: 6, ry: 6 });
+            const stampText = new fabric.Text(type, { fontSize: 22, fontWeight: 'bold', fill: color, originX: 'center', originY: 'center', left: 90, top: 24 });
+            const stampGroup = new fabric.Group([stampRect, stampText], { left: 100, top: 120, angle: -8 });
+            canvaStudioCanvas.add(stampGroup);
+            canvaStudioCanvas.setActiveObject(stampGroup);
+            canvaStudioCanvas.renderAll();
         });
     });
 
-    document.getElementById('btnAddRect').addEventListener('click', () => {
-        if (!fabricCanvas) return;
-        const rect = new fabric.Rect({ left: 60, top: 60, width: 120, height: 80, fill: '#e2e8f0', stroke: '#94a3b8', strokeWidth: 1 });
-        fabricCanvas.add(rect);
+    // Freehand Drawing Tool
+    document.getElementById('chkDrawMode').addEventListener('change', (e) => {
+        if (!canvaStudioCanvas) return;
+        canvaStudioCanvas.isDrawingMode = e.target.checked;
+        if (e.target.checked) {
+            canvaStudioCanvas.freeDrawingBrush.color = document.getElementById('drawColor').value;
+            canvaStudioCanvas.freeDrawingBrush.width = parseInt(document.getElementById('drawWidth').value);
+        }
     });
-    document.getElementById('btnAddCircle').addEventListener('click', () => {
-        if (!fabricCanvas) return;
-        const circle = new fabric.Circle({ left: 60, top: 60, radius: 45, fill: '#e2e8f0', stroke: '#94a3b8', strokeWidth: 1 });
-        fabricCanvas.add(circle);
+    document.getElementById('drawColor').addEventListener('input', (e) => {
+        if (canvaStudioCanvas && canvaStudioCanvas.freeDrawingBrush) canvaStudioCanvas.freeDrawingBrush.color = e.target.value;
     });
-    document.getElementById('btnAddLine').addEventListener('click', () => {
-        if (!fabricCanvas) return;
-        const line = new fabric.Line([50, 50, 350, 50], { stroke: '#000000', strokeWidth: 2 });
-        fabricCanvas.add(line);
-    });
-
-    document.getElementById('btnStudioClear').addEventListener('click', () => {
-        if (fabricCanvas && confirm('Clear entire canvas?')) fabricCanvas.clear();
+    document.getElementById('drawWidth').addEventListener('input', (e) => {
+        document.getElementById('brushSizeVal').textContent = e.target.value + 'px';
+        if (canvaStudioCanvas && canvaStudioCanvas.freeDrawingBrush) canvaStudioCanvas.freeDrawingBrush.width = parseInt(e.target.value);
     });
 
-    document.getElementById('btnStudioUploadImg').addEventListener('click', () => {
-        document.getElementById('studioImgInput').click();
-    });
-    document.getElementById('studioImgInput').addEventListener('change', (e) => {
-        if (!e.target.files.length || !fabricCanvas) return;
+    // Image Uploads into Canva Studio
+    const studioFileInput = document.getElementById('studioFileInput');
+    studioFileInput.addEventListener('change', (e) => {
+        if (!e.target.files.length || !canvaStudioCanvas) return;
+        const file = e.target.files[0];
         const reader = new FileReader();
-        reader.onload = function(f) {
-            fabric.Image.fromURL(f.target.result, (img) => {
-                img.scaleToWidth(250);
-                fabricCanvas.add(img);
-                fabricCanvas.centerObject(img);
-                fabricCanvas.setActiveObject(img);
+        reader.onload = function(ev) {
+            fabric.Image.fromURL(ev.target.result, (img) => {
+                img.scaleToWidth(260);
+                canvaStudioCanvas.add(img);
+                canvaStudioCanvas.centerObject(img);
+                canvaStudioCanvas.setActiveObject(img);
+                canvaStudioCanvas.renderAll();
+
+                // Add to uploaded media gallery
+                const thumb = document.createElement('img');
+                thumb.src = ev.target.result;
+                thumb.style.width = '100%';
+                thumb.style.height = '70px';
+                thumb.style.objectFit = 'cover';
+                thumb.style.borderRadius = '4px';
+                thumb.style.cursor = 'pointer';
+                thumb.onclick = () => {
+                    fabric.Image.fromURL(ev.target.result, (newImg) => {
+                        newImg.scaleToWidth(240);
+                        canvaStudioCanvas.add(newImg);
+                        canvaStudioCanvas.centerObject(newImg);
+                        canvaStudioCanvas.setActiveObject(newImg);
+                    });
+                };
+                document.getElementById('studioMediaThumbnails').appendChild(thumb);
             });
         };
-        reader.readAsDataURL(e.target.files[0]);
+        reader.readAsDataURL(file);
     });
 
-    document.getElementById('btnStudioIdGrid').addEventListener('click', () => {
+    // Live QR Code Generator
+    document.getElementById('btnInsertQrCode').addEventListener('click', () => {
+        const text = document.getElementById('qrTextInput').value.trim();
+        if (!text) { showToast('Enter text or URL for the QR code', 'error'); return; }
+
+        const container = document.getElementById('qrHiddenContainer');
+        container.innerHTML = '';
+        new QRCode(container, {
+            text: text,
+            width: 256,
+            height: 256,
+            correctLevel: QRCode.CorrectLevel.H
+        });
+
+        setTimeout(() => {
+            const img = container.querySelector('img');
+            const canvas = container.querySelector('canvas');
+            const dataUrl = img ? img.src : (canvas ? canvas.toDataURL() : null);
+            if (dataUrl) {
+                fabric.Image.fromURL(dataUrl, (qrImg) => {
+                    qrImg.scaleToWidth(130);
+                    canvaStudioCanvas.add(qrImg);
+                    canvaStudioCanvas.centerObject(qrImg);
+                    canvaStudioCanvas.setActiveObject(qrImg);
+                    canvaStudioCanvas.renderAll();
+                    showToast('QR Code added to canvas!', 'success');
+                });
+            }
+        }, 80);
+    });
+
+    // 1-Click Canva Templates
+    window.loadCanvaTemplate = function(type) {
+        if (!canvaStudioCanvas) return;
+        canvaStudioCanvas.clear();
+        setCanvaCanvasPreset('a4');
+
+        if (type === 'sale') {
+            const bg = new fabric.Rect({ left: 0, top: 0, width: 480, height: 680, fill: '#fffdfa', selectable: false });
+            const banner = new fabric.Rect({ left: 0, top: 0, width: 480, height: 110, fill: '#dc2626', selectable: false });
+            const title = new fabric.Text('SPECIAL PROMO', { left: 240, top: 38, originX: 'center', fontSize: 32, fontWeight: 'bold', fill: '#ffffff', fontFamily: 'Impact' });
+            const bigOff = new fabric.Text('50% OFF', { left: 240, top: 220, originX: 'center', fontSize: 72, fontWeight: 'bold', fill: '#dc2626', fontFamily: 'Impact' });
+            const sub = new fabric.Text('ALL ITEMS ON SALE THIS WEEKEND', { left: 240, top: 310, originX: 'center', fontSize: 16, fontWeight: 'bold', fill: '#1e293b' });
+            const desc = new fabric.Text('Show this flyer in-store or use voucher code online at checkout.', { left: 240, top: 370, originX: 'center', fontSize: 13, fill: '#64748b' });
+            const footer = new fabric.Rect({ left: 0, top: 620, width: 480, height: 60, fill: '#1e293b', selectable: false });
+            const footText = new fabric.Text('123 Commercial Center • Open Daily 8AM - 8PM', { left: 240, top: 638, originX: 'center', fontSize: 12, fill: '#f8fafc' });
+
+            canvaStudioCanvas.add(bg, banner, title, bigOff, sub, desc, footer, footText);
+        } else if (type === 'notice') {
+            const topBar = new fabric.Rect({ left: 40, top: 40, width: 400, height: 4, fill: '#2563eb' });
+            const title = new fabric.Text('OFFICIAL NOTICE', { left: 40, top: 56, fontSize: 26, fontWeight: 'bold', fill: '#0f172a', fontFamily: 'Arial' });
+            const date = new fabric.Text(`Date: ${new Date().toLocaleDateString()}`, { left: 40, top: 96, fontSize: 12, fill: '#64748b' });
+            const sub = new fabric.Text('SUBJECT: System Upgrade & Maintenance Window', { left: 40, top: 130, fontSize: 14, fontWeight: 'bold', fill: '#1e293b' });
+            const body = new fabric.IText('Please be advised that scheduled maintenance will take place this Sunday.\nAll server services will operate in read-only mode during this interval.\n\nFor questions or support, please contact your systems administrator.', { left: 40, top: 180, fontSize: 13, fill: '#334155', lineHeight: 1.5 });
+            const line = new fabric.Line([40, 520, 240, 520], { stroke: '#09090b', strokeWidth: 1.5 });
+            const sign = new fabric.Text('Authorized Signature', { left: 40, top: 526, fontSize: 11, fill: '#64748b' });
+
+            canvaStudioCanvas.add(topBar, title, date, sub, body, line, sign);
+        } else if (type === 'wifi') {
+            const title = new fabric.Text('GUEST WI-FI', { left: 240, top: 60, originX: 'center', fontSize: 36, fontWeight: 'bold', fill: '#2563eb', fontFamily: 'Arial' });
+            const desc = new fabric.Text('Connect your device to our complimentary network', { left: 240, top: 110, originX: 'center', fontSize: 13, fill: '#64748b' });
+            const box = new fabric.Rect({ left: 60, top: 150, width: 360, height: 160, fill: '#f1f5f9', stroke: '#cbd5e1', strokeWidth: 2, rx: 8 });
+            const ssid = new fabric.Text('Network: Free_Guest_WiFi', { left: 90, top: 190, fontSize: 18, fontWeight: 'bold', fill: '#0f172a' });
+            const pass = new fabric.Text('Password: WelcomeGuest2026', { left: 90, top: 240, fontSize: 18, fontWeight: 'bold', fill: '#2563eb' });
+            const scanLbl = new fabric.Text('Or point your camera to scan & connect:', { left: 240, top: 350, originX: 'center', fontSize: 13, fill: '#475569' });
+
+            canvaStudioCanvas.add(title, desc, box, ssid, pass, scanLbl);
+            // Insert QR
+            document.getElementById('qrTextInput').value = 'WIFI:S:Free_Guest_WiFi;T:WPA;P:WelcomeGuest2026;;';
+            document.getElementById('btnInsertQrCode').click();
+        } else if (type === 'certificate') {
+            const borderOut = new fabric.Rect({ left: 20, top: 20, width: 440, height: 640, fill: 'transparent', stroke: '#ca8a04', strokeWidth: 4 });
+            const borderIn = new fabric.Rect({ left: 26, top: 26, width: 428, height: 628, fill: 'transparent', stroke: '#ca8a04', strokeWidth: 1 });
+            const title = new fabric.Text('CERTIFICATE', { left: 240, top: 80, originX: 'center', fontSize: 34, fontWeight: 'bold', fill: '#854d0e', fontFamily: 'Georgia' });
+            const sub = new fabric.Text('OF ACHIEVEMENT', { left: 240, top: 126, originX: 'center', fontSize: 16, letterSpacing: 0.1, fill: '#a16207', fontFamily: 'Georgia' });
+            const pres = new fabric.Text('This certificate is proudly awarded to', { left: 240, top: 200, originX: 'center', fontSize: 14, fill: '#475569', fontStyle: 'italic', fontFamily: 'Georgia' });
+            const name = new fabric.IText('[Recipient Full Name]', { left: 240, top: 240, originX: 'center', fontSize: 26, fontWeight: 'bold', fill: '#0f172a', fontFamily: 'Georgia' });
+            const reason = new fabric.Text('For outstanding dedication, performance, and excellence.', { left: 240, top: 310, originX: 'center', fontSize: 13, fill: '#475569', fontFamily: 'Georgia' });
+            const line = new fabric.Line([60, 520, 200, 520], { stroke: '#09090b', strokeWidth: 1.5 });
+            const signLbl = new fabric.Text('Program Director', { left: 130, top: 526, originX: 'center', fontSize: 11, fill: '#64748b' });
+
+            canvaStudioCanvas.add(borderOut, borderIn, title, sub, pres, name, reason, line, signLbl);
+        }
+        canvaStudioCanvas.renderAll();
+        recordCanvaHistory();
+    };
+
+    // 2x2 ID Photo Grid Maker
+    window.trigger2x2IdGrid = function() {
         const input = document.createElement('input');
         input.type = 'file';
         input.accept = 'image/*';
@@ -1989,8 +2495,8 @@ INDEX_HTML = """<!DOCTYPE html>
             const r = new FileReader();
             r.onload = function(ev) {
                 fabric.Image.fromURL(ev.target.result, (img) => {
-                    fabricCanvas.clear();
-                    setStudioPreset('a4');
+                    canvaStudioCanvas.clear();
+                    setCanvaCanvasPreset('a4');
                     const tileW = 140;
                     const tileH = 140;
                     const cols = 2;
@@ -2008,34 +2514,35 @@ INDEX_HTML = """<!DOCTYPE html>
                                 cloned.set({
                                     left: startX + col * (tileW + gapX),
                                     top: startY + row * (tileH + gapY),
-                                    stroke: '#cbd5e1',
+                                    stroke: '#94a3b8',
                                     strokeWidth: 1
                                 });
-                                fabricCanvas.add(cloned);
+                                canvaStudioCanvas.add(cloned);
                             });
                         }
                     }
-                    showToast('Generated 2x2 ID photo grid with cut guides', 'success');
+                    showToast('Generated 2×2 ID photo grid with cut guides', 'success');
+                    recordCanvaHistory();
                 });
             };
             r.readAsDataURL(e.target.files[0]);
         };
         input.click();
-    });
+    };
 
+    // Export & Print from Canva Studio
     document.getElementById('btnStudioDirectPrint').addEventListener('click', () => {
-        if (!fabricCanvas) return;
+        if (!canvaStudioCanvas) return;
         const dpi = parseInt(document.getElementById('studioDpi').value);
         const multiplier = dpi / 72;
-        showToast(`Rendering ${dpi} DPI high-res canvas in browser...`, 'info');
+        showToast(`Compiling ${dpi} DPI high-res canvas in browser...`, 'info');
 
-        const dataUrl = fabricCanvas.toDataURL({ format: 'png', multiplier: multiplier });
-
+        const dataUrl = canvaStudioCanvas.toDataURL({ format: 'png', multiplier: multiplier });
         fetch(dataUrl)
             .then(res => res.blob())
             .then(blob => {
                 const formData = new FormData();
-                formData.append('file', blob, 'studio_design.png');
+                formData.append('file', blob, 'canva_studio_print.png');
                 formData.append('printer', selectedPrinter);
                 formData.append('copies', '1');
                 formData.append('pagesize', document.getElementById('studioPreset').value === 'letter' ? 'Letter' : 'A4');
@@ -2046,80 +2553,37 @@ INDEX_HTML = """<!DOCTYPE html>
                 fetch('/api/print', { method: 'POST', body: formData })
                     .then(r => r.json())
                     .then(d => {
-                        if (d.success) showToast('Canvas spooled directly to printer!', 'success');
+                        if (d.success) showToast('Canva design spooled directly to printer!', 'success');
                         else showToast('Error: ' + d.error, 'error');
                     });
             });
     });
 
+    document.getElementById('btnStudioDownloadPng').addEventListener('click', () => {
+        if (!canvaStudioCanvas) return;
+        const dpi = parseInt(document.getElementById('studioDpi').value);
+        const dataUrl = canvaStudioCanvas.toDataURL({ format: 'png', multiplier: dpi / 72 });
+        const a = document.createElement('a');
+        a.href = dataUrl;
+        a.download = 'canva_design.png';
+        a.click();
+    });
+
     document.getElementById('btnStudioDownloadPdf').addEventListener('click', () => {
-        if (!fabricCanvas) return;
+        if (!canvaStudioCanvas) return;
         const { jsPDF } = window.jspdf;
-        const doc = new jsPDF('p', 'mm', 'a4');
-        const imgData = fabricCanvas.toDataURL({ format: 'png', multiplier: 2 });
-        doc.addImage(imgData, 'PNG', 10, 10, 190, 260);
-        doc.save('design.pdf');
+        const isLetter = document.getElementById('studioPreset').value === 'letter';
+        const doc = new jsPDF('p', 'mm', isLetter ? 'letter' : 'a4');
+        const imgData = canvaStudioCanvas.toDataURL({ format: 'png', multiplier: 2.5 });
+        doc.addImage(imgData, 'PNG', 10, 10, isLetter ? 195 : 190, isLetter ? 260 : 277);
+        doc.save('canva_design.pdf');
     });
 
-    // ==========================================
-    // WALK-UP PHOTOCOPIER
-    // ==========================================
-    document.getElementById('btnCopyMinus').addEventListener('click', () => {
-        if (copyCopies > 1) {
-            copyCopies--;
-            document.getElementById('copyCountDisplay').textContent = copyCopies;
-        }
-    });
-    document.getElementById('btnCopyPlus').addEventListener('click', () => {
-        if (copyCopies < 99) {
-            copyCopies++;
-            document.getElementById('copyCountDisplay').textContent = copyCopies;
-        }
-    });
-    document.getElementById('btnCopyBw').addEventListener('click', () => {
-        copyMode = 'Gray';
-        document.getElementById('btnCopyBw').classList.add('active');
-        document.getElementById('btnCopyColor').classList.remove('active');
-    });
-    document.getElementById('btnCopyColor').addEventListener('click', () => {
-        copyMode = 'Color';
-        document.getElementById('btnCopyColor').classList.add('active');
-        document.getElementById('btnCopyBw').classList.remove('active');
-    });
-    document.getElementById('copyContrast').addEventListener('input', (e) => {
-        const v = parseInt(e.target.value);
-        document.getElementById('copyContrastVal').textContent = v === 0 ? 'Normal' : (v > 0 ? `+${v} (Darker)` : `${v} (Lighter)`);
-    });
-
-    document.getElementById('btnStartPhotocopy').addEventListener('click', async () => {
-        const btn = document.getElementById('btnStartPhotocopy');
-        const statusText = document.getElementById('copyStatusText');
-        btn.disabled = true;
-        statusText.textContent = 'Scanning flatbed... Please wait...';
-
-        const formData = new FormData();
-        formData.append('printer', selectedPrinter);
-        formData.append('copies', copyCopies);
-        formData.append('mode', copyMode);
-        formData.append('contrast', document.getElementById('copyContrast').value);
-        formData.append('resolution', document.getElementById('copyResolution').value);
-        formData.append('pagesize', document.getElementById('copyPageSize').value);
-
-        try {
-            const res = await fetch('/api/photocopy', { method: 'POST', body: formData });
-            const data = await res.json();
-            if (data.success) {
-                showToast(`Photocopy complete! Spooled ${data.copies} copy(ies).`, 'success');
-                statusText.textContent = `Completed job #${data.job_id}`;
-            } else {
-                showToast('Photocopy error: ' + data.error, 'error');
-                statusText.textContent = 'Error: ' + data.error;
-            }
-        } catch (e) {
-            showToast('Photocopy failed', 'error');
-            statusText.textContent = 'Connection failure';
-        } finally {
-            btn.disabled = false;
+    document.getElementById('btnStudioClearAll').addEventListener('click', () => {
+        if (canvaStudioCanvas && confirm('Clear entire canvas design?')) {
+            canvaStudioCanvas.clear();
+            canvaStudioCanvas.setBackgroundColor('#ffffff', () => canvaStudioCanvas.renderAll());
+            recordCanvaHistory();
         }
     });
 
@@ -2709,65 +3173,6 @@ def api_pin_release():
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
-@app.route('/api/photocopy', methods=['POST'])
-def api_photocopy():
-    printer = request.form.get('printer', '')
-    if not printer:
-        _, def_p = get_printers()
-        printer = def_p or 'HP_Smart_Tank_520'
-    copies = int(request.form.get('copies', '1'))
-    mode = request.form.get('mode', 'Gray')
-    contrast = int(request.form.get('contrast', '0'))
-    resolution = request.form.get('resolution', '300')
-    pagesize = request.form.get('pagesize', 'A4')
-
-    temp_dir = tempfile.mkdtemp(prefix="copy_")
-    raw_pnm = os.path.join(temp_dir, 'raw.pnm')
-    proc_pdf = os.path.join(temp_dir, 'copy.pdf')
-
-    try:
-        scan_cmd = ['scanimage', f'--resolution={resolution}', f'--mode={mode}']
-        with open(raw_pnm, 'wb') as f_out:
-            p = subprocess.run(scan_cmd, stdout=f_out, stderr=subprocess.PIPE, timeout=90)
-            if p.returncode != 0:
-                err_msg = p.stderr.decode('utf-8', errors='ignore').strip()
-                if 'no SANE devices found' in err_msg or not err_msg:
-                    err_msg = 'Scanner not detected. Verify USB connection and power.'
-                return jsonify({'success': False, 'error': err_msg}), 500
-
-        conv_cmd = ['convert', raw_pnm, '-auto-orient']
-        if contrast != 0:
-            conv_cmd.extend(['-brightness-contrast', f'0x{contrast}'])
-        conv_cmd.append(proc_pdf)
-        subprocess.run(conv_cmd, check=True, timeout=60)
-
-        print_cmd = [
-            'lp', '-d', printer, '-n', str(copies),
-            '-o', f'PageSize={pagesize}',
-            '-o', 'fit-to-page'
-        ]
-        if mode == 'Gray':
-            print_cmd.extend(['-o', 'ColorModel=KGray'])
-        else:
-            print_cmd.extend(['-o', 'ColorModel=RGB'])
-
-        if resolution in ['150', '300', '600']:
-            print_cmd.extend(['-o', f'resolution={resolution}dpi'])
-
-        print_cmd.append(proc_pdf)
-        p_res = subprocess.run(print_cmd, capture_output=True, text=True, check=True)
-        job_id = p_res.stdout.strip()
-
-        rate = get_rate(mode == 'Color')
-        cost = rate * copies
-        record_ledger(f"Digital Copy ({copies}x {mode})", printer, 1, copies, copies, mode, cost, request.remote_addr, "COPIED")
-
-        return jsonify({'success': True, 'job_id': job_id, 'copies': copies, 'mode': mode, 'cost': cost})
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
-    finally:
-        shutil.rmtree(temp_dir, ignore_errors=True)
-
 @app.route('/api/scan', methods=['POST'])
 def api_scan():
     resolution = request.form.get('resolution', '150')
@@ -2908,7 +3313,7 @@ def api_admin_action():
         subprocess.run(['systemctl', 'restart', 'cups'], check=True)
         return jsonify({'success': True, 'message': 'CUPS print spooler restarted successfully.'})
     elif action == 'purge_cache':
-        subprocess.run('rm -rf /tmp/webprint* /tmp/conv_* /tmp/copy_* /tmp/scan_*', shell=True)
+        subprocess.run('rm -rf /tmp/webprint* /tmp/conv_* /tmp/scan_*', shell=True)
         return jsonify({'success': True, 'message': 'Temporary spool cache purged.'})
     elif action == 'update_rates':
         rate_bw = request.form.get('rate_bw', '2.00')
