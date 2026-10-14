@@ -45,12 +45,12 @@ INDEX_HTML = """<!DOCTYPE html>
             --btn-bg: #f4f4f5;
             --btn-text: #09090b;
             --badge-bg: #18181b;
-            --desk-bg: #0d0e12;
+            --desk-bg: #08080a;
             --paper-bg: #ffffff;
             --paper-text: #09090b;
             --paper-border: #e4e4e7;
-            --paper-shadow: 0 10px 30px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(255, 255, 255, 0.08);
-            --margin-line: rgba(37, 99, 235, 0.35);
+            --paper-shadow: 0 16px 40px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.08);
+            --margin-line: rgba(59, 130, 246, 0.45);
             --accent: #3b82f6;
             --success: #22c55e;
             --danger: #ef4444;
@@ -73,8 +73,8 @@ INDEX_HTML = """<!DOCTYPE html>
             --paper-bg: #ffffff;
             --paper-text: #0f172a;
             --paper-border: #cbd5e1;
-            --paper-shadow: 0 10px 25px rgba(0, 0, 0, 0.08), 0 0 0 1px rgba(0, 0, 0, 0.05);
-            --margin-line: rgba(37, 99, 235, 0.25);
+            --paper-shadow: 0 14px 30px rgba(0, 0, 0, 0.08), 0 0 0 1px rgba(0, 0, 0, 0.06);
+            --margin-line: rgba(37, 99, 235, 0.35);
             --accent: #2563eb;
             --success: #16a34a;
             --danger: #dc2626;
@@ -98,12 +98,15 @@ INDEX_HTML = """<!DOCTYPE html>
         /* Header */
         header {
             border-bottom: 1px solid var(--border);
-            padding: 14px 24px;
+            padding: 12px 28px;
             display: flex;
             align-items: center;
             justify-content: space-between;
             background: var(--surface);
             transition: var(--transition-theme);
+            position: sticky;
+            top: 0;
+            z-index: 40;
         }
 
         .header-brand {
@@ -210,13 +213,13 @@ INDEX_HTML = """<!DOCTYPE html>
         html[data-theme="light"] .icon-sun { display: none; }
         html[data-theme="light"] .icon-moon { display: block; }
 
-        /* Container Layout */
+        /* Wide Main Container (Preview Dominant Layout) */
         main {
             flex: 1;
-            max-width: 1120px;
+            max-width: 1600px;
             width: 100%;
             margin: 0 auto;
-            padding: 28px 20px 40px;
+            padding: 24px 28px 40px;
         }
 
         .tab-content {
@@ -226,14 +229,15 @@ INDEX_HTML = """<!DOCTYPE html>
             display: block;
         }
 
+        /* Large Preview + Slim Settings Sidebar Grid */
         .grid-layout {
             display: grid;
-            grid-template-columns: 1.15fr 1fr;
+            grid-template-columns: minmax(0, 1fr) 370px;
             gap: 24px;
             align-items: start;
         }
 
-        @media (max-width: 900px) {
+        @media (max-width: 1024px) {
             .grid-layout { grid-template-columns: 1fr; }
         }
 
@@ -242,16 +246,21 @@ INDEX_HTML = """<!DOCTYPE html>
             background: var(--surface);
             border: 1px solid var(--border);
             border-radius: var(--radius-lg);
-            padding: 22px;
+            padding: 20px;
             box-shadow: 0 1px 3px rgba(0,0,0,0.03);
             transition: var(--transition-theme);
+        }
+
+        .settings-sidebar {
+            position: sticky;
+            top: 76px;
         }
 
         .card-header {
             display: flex;
             align-items: center;
             justify-content: space-between;
-            margin-bottom: 16px;
+            margin-bottom: 14px;
         }
 
         .card-heading {
@@ -287,15 +296,16 @@ INDEX_HTML = """<!DOCTYPE html>
             box-shadow: 0 1px 2px rgba(0,0,0,0.05);
         }
 
-        /* Upload Dropzone */
+        /* Upload Dropzone (Compact in Preview Header) */
         .dropzone {
             border: 1px dashed var(--border-hover);
             border-radius: var(--radius-md);
-            padding: 32px 20px;
+            padding: 20px;
             text-align: center;
             cursor: pointer;
             background: var(--bg);
             transition: border-color 0.15s ease, background-color 0.2s ease;
+            margin-bottom: 16px;
         }
 
         .dropzone:hover, .dropzone.dragover {
@@ -306,7 +316,7 @@ INDEX_HTML = """<!DOCTYPE html>
             font-size: 13px;
             font-weight: 500;
             color: var(--text-primary);
-            margin-bottom: 4px;
+            margin-bottom: 2px;
         }
 
         .dropzone-sub {
@@ -314,10 +324,8 @@ INDEX_HTML = """<!DOCTYPE html>
             color: var(--text-tertiary);
         }
 
-        /* Realistic Real-Time Paper Preview Viewer */
+        /* High-Impact Real-Time Paper Preview */
         .preview-box {
-            display: none;
-            margin-top: 18px;
             border: 1px solid var(--border);
             border-radius: var(--radius-md);
             background: var(--surface);
@@ -328,7 +336,7 @@ INDEX_HTML = """<!DOCTYPE html>
             display: flex;
             align-items: center;
             justify-content: space-between;
-            padding: 10px 14px;
+            padding: 10px 16px;
             border-bottom: 1px solid var(--border);
             font-size: 12px;
             color: var(--text-secondary);
@@ -348,7 +356,7 @@ INDEX_HTML = """<!DOCTYPE html>
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
-            max-width: 180px;
+            max-width: 260px;
         }
 
         .preview-meta-pill {
@@ -375,21 +383,21 @@ INDEX_HTML = """<!DOCTYPE html>
             background: var(--surface-elevated);
         }
 
-        /* Virtual Desk Workspace */
+        /* Large Virtual Workspace Viewport */
         .preview-viewport {
             background: var(--desk-bg);
-            padding: 24px 16px;
+            padding: 36px 20px;
             display: flex;
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            min-height: 380px;
+            min-height: 600px;
             position: relative;
             overflow: hidden;
             transition: var(--transition-theme);
         }
 
-        /* Simulated Physical Paper Sheet */
+        /* Simulated Physical Paper Sheet with Smooth Animation */
         .paper-sheet {
             background: var(--paper-bg);
             color: var(--paper-text);
@@ -405,10 +413,9 @@ INDEX_HTML = """<!DOCTYPE html>
                         filter 0.2s ease;
         }
 
-        /* Printable Margins Guide (5% inset) */
+        /* Dynamic Printable Margins Box */
         .printable-area {
             position: absolute;
-            inset: 12px;
             border: 1px dashed var(--margin-line);
             border-radius: 2px;
             display: flex;
@@ -416,9 +423,10 @@ INDEX_HTML = """<!DOCTYPE html>
             justify-content: center;
             overflow: hidden;
             pointer-events: none;
+            transition: top 0.2s ease, bottom 0.2s ease, left 0.2s ease, right 0.2s ease;
         }
 
-        /* Document Render Container */
+        /* Document Render Inside Margins */
         .content-render-wrap {
             width: 100%;
             height: 100%;
@@ -461,46 +469,19 @@ INDEX_HTML = """<!DOCTYPE html>
             white-space: pre-wrap;
         }
 
-        /* Multi-page Grid (N-Up 2 or 4) */
-        .nup-grid-2 {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 8px;
-            width: 100%;
-            height: 100%;
-            padding: 6px;
-        }
-
-        .nup-grid-4 {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            grid-template-rows: 1fr 1fr;
-            gap: 6px;
-            width: 100%;
-            height: 100%;
-            padding: 6px;
-        }
-
-        .nup-cell {
-            border: 1px solid rgba(0, 0, 0, 0.1);
-            background: #f8fafc;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            overflow: hidden;
-            font-size: 10px;
-            color: #64748b;
-        }
-
-        /* Live Preview Badge on Desk */
+        /* Live Preview Metadata Tag */
         .preview-dimensions-tag {
-            margin-top: 14px;
+            margin-top: 18px;
             font-size: 11px;
             font-family: var(--font-mono);
             color: var(--text-tertiary);
             display: flex;
             align-items: center;
             gap: 10px;
+            background: var(--surface);
+            padding: 4px 12px;
+            border-radius: 9999px;
+            border: 1px solid var(--border);
         }
 
         .preview-pagination {
@@ -523,7 +504,7 @@ INDEX_HTML = """<!DOCTYPE html>
 
         /* Form Controls */
         .form-row {
-            margin-bottom: 16px;
+            margin-bottom: 14px;
         }
 
         .label {
@@ -531,7 +512,7 @@ INDEX_HTML = """<!DOCTYPE html>
             font-size: 12px;
             font-weight: 500;
             color: var(--text-secondary);
-            margin-bottom: 6px;
+            margin-bottom: 5px;
         }
 
         .input, select {
@@ -541,7 +522,7 @@ INDEX_HTML = """<!DOCTYPE html>
             color: var(--text-primary);
             font-family: inherit;
             font-size: 13px;
-            padding: 8px 12px;
+            padding: 7px 10px;
             border-radius: var(--radius-sm);
             outline: none;
             transition: border-color 0.15s;
@@ -554,7 +535,32 @@ INDEX_HTML = """<!DOCTYPE html>
         .grid-2 {
             display: grid;
             grid-template-columns: 1fr 1fr;
-            gap: 12px;
+            gap: 10px;
+        }
+
+        .grid-4 {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr 1fr;
+            gap: 6px;
+        }
+
+        .margin-input-col {
+            text-align: center;
+        }
+
+        .margin-input-col span {
+            display: block;
+            font-size: 10px;
+            color: var(--text-tertiary);
+            margin-bottom: 2px;
+            font-family: var(--font-mono);
+        }
+
+        .margin-input-col input {
+            text-align: center;
+            padding: 5px 2px;
+            font-size: 12px;
+            font-family: var(--font-mono);
         }
 
         /* Segmented Radios */
@@ -578,7 +584,7 @@ INDEX_HTML = """<!DOCTYPE html>
         .radio-pill label {
             display: block;
             text-align: center;
-            padding: 8px 10px;
+            padding: 7px 8px;
             font-size: 12px;
             font-weight: 500;
             color: var(--text-secondary);
@@ -608,8 +614,8 @@ INDEX_HTML = """<!DOCTYPE html>
             background: transparent;
             border: none;
             color: var(--text-secondary);
-            width: 34px;
-            height: 34px;
+            width: 30px;
+            height: 32px;
             font-size: 14px;
             cursor: pointer;
             display: flex;
@@ -644,7 +650,7 @@ INDEX_HTML = """<!DOCTYPE html>
             border-radius: var(--radius-sm);
             cursor: pointer;
             transition: opacity 0.15s;
-            margin-top: 20px;
+            margin-top: 18px;
         }
 
         .btn-submit:hover {
@@ -767,7 +773,7 @@ INDEX_HTML = """<!DOCTYPE html>
 
         footer {
             border-top: 1px solid var(--border);
-            padding: 18px 24px;
+            padding: 18px 28px;
             font-size: 12px;
             color: var(--text-tertiary);
             display: flex;
@@ -827,12 +833,12 @@ INDEX_HTML = """<!DOCTYPE html>
     </header>
 
     <main>
-        <!-- TAB: PRINT -->
+        <!-- TAB: PRINT (Preview Dominant Split) -->
         <div id="tab-print" class="tab-content active">
             <form id="printForm">
                 <div class="grid-layout">
                     
-                    <!-- Left: File & Real-Time Dynamic Paper Preview -->
+                    <!-- Left Column: Large Dynamic Preview (Dominant Share) -->
                     <div class="card">
                         <div class="card-header">
                             <span class="card-heading">Document Preview</span>
@@ -841,11 +847,11 @@ INDEX_HTML = """<!DOCTYPE html>
 
                         <input type="file" id="fileInput" name="file" style="display: none;" accept=".pdf,.png,.jpg,.jpeg,.txt,.doc,.docx">
                         <div class="dropzone" id="dropzone">
-                            <div class="dropzone-label">Click or drop document here</div>
-                            <div class="dropzone-sub">PDF, JPG, PNG, TXT, DOCX</div>
+                            <div class="dropzone-label">Click or drop document to preview & print</div>
+                            <div class="dropzone-sub">Supports PDF, JPG, PNG, TXT, DOCX</div>
                         </div>
 
-                        <div class="preview-box" id="previewBox">
+                        <div class="preview-box" id="previewBox" style="display: none;">
                             <div class="preview-head">
                                 <div class="preview-info">
                                     <span class="preview-name" id="previewName">file.pdf</span>
@@ -861,7 +867,7 @@ INDEX_HTML = """<!DOCTYPE html>
                                 </div>
                             </div>
 
-                            <!-- Interactive Desk & Real-time Paper Sheet -->
+                            <!-- Large Virtual Desk with Realistic Paper Sheet -->
                             <div class="preview-viewport">
                                 <div class="paper-sheet" id="paperSheet">
                                     <div class="printable-area" id="printableArea">
@@ -877,14 +883,16 @@ INDEX_HTML = """<!DOCTYPE html>
                                     <span>•</span>
                                     <span id="sheetOrientationTag">Portrait</span>
                                     <span>•</span>
+                                    <span id="sheetMarginTag">Printable Area</span>
+                                    <span>•</span>
                                     <span id="sheetColorTag">Color</span>
                                 </div>
                             </div>
                         </div>
                     </div>
 
-                    <!-- Right: Settings -->
-                    <div class="card">
+                    <!-- Right Column: Settings Panel (Slim Sidebar) -->
+                    <div class="card settings-sidebar">
                         <div class="card-header">
                             <span class="card-heading">Settings</span>
                             <div class="segmented-control">
@@ -970,6 +978,40 @@ INDEX_HTML = """<!DOCTYPE html>
                                 </div>
                             </div>
 
+                            <!-- Margin Controls with Custom Inputs -->
+                            <div class="form-row">
+                                <label class="label">Margins</label>
+                                <select id="marginSelect" name="margin_mode" onchange="handleMarginChange(this.value)">
+                                    <option value="printable" selected>Full Printable Area (Standard)</option>
+                                    <option value="none">Zero / Borderless (0 mm)</option>
+                                    <option value="normal">Normal (12.7 mm / 0.5 in)</option>
+                                    <option value="custom">Custom Margins...</option>
+                                </select>
+                            </div>
+
+                            <!-- Custom Margin mm Inputs (Hidden unless Custom is selected) -->
+                            <div id="customMarginBox" class="form-row" style="display: none;">
+                                <label class="label" style="font-size: 11px;">Custom Margins (mm)</label>
+                                <div class="grid-4">
+                                    <div class="margin-input-col">
+                                        <span>Top</span>
+                                        <input type="number" id="mTop" name="m_top" class="input" value="10" min="0" max="60" oninput="updatePreviewLayout()">
+                                    </div>
+                                    <div class="margin-input-col">
+                                        <span>Bottom</span>
+                                        <input type="number" id="mBottom" name="m_bottom" class="input" value="10" min="0" max="60" oninput="updatePreviewLayout()">
+                                    </div>
+                                    <div class="margin-input-col">
+                                        <span>Left</span>
+                                        <input type="number" id="mLeft" name="m_left" class="input" value="10" min="0" max="60" oninput="updatePreviewLayout()">
+                                    </div>
+                                    <div class="margin-input-col">
+                                        <span>Right</span>
+                                        <input type="number" id="mRight" name="m_right" class="input" value="10" min="0" max="60" oninput="updatePreviewLayout()">
+                                    </div>
+                                </div>
+                            </div>
+
                             <div class="grid-2 form-row">
                                 <div>
                                     <label class="label">Quality</label>
@@ -1007,19 +1049,9 @@ INDEX_HTML = """<!DOCTYPE html>
                                 </div>
                             </div>
 
-                            <div class="grid-2 form-row">
-                                <div>
-                                    <label class="label">Pages per Sheet</label>
-                                    <select id="nupSelect" name="numberup" onchange="updatePreviewLayout()">
-                                        <option value="1" selected>1-Up (Single)</option>
-                                        <option value="2">2-Up (Side-by-side)</option>
-                                        <option value="4">4-Up (Grid)</option>
-                                    </select>
-                                </div>
-                                <div>
-                                    <label class="label">Page Range</label>
-                                    <input type="text" name="pagerange" class="input" placeholder="e.g. 1-4, 7">
-                                </div>
+                            <div class="form-row">
+                                <label class="label">Page Range</label>
+                                <input type="text" name="pagerange" class="input" placeholder="e.g. 1-4, 7">
                             </div>
                         </div>
 
@@ -1122,7 +1154,7 @@ INDEX_HTML = """<!DOCTYPE html>
         let pdfPage = 1;
         let pdfPagesTotal = 1;
         let mode = 'simple';
-        let docNaturalAspect = 1.414; // Default portrait aspect ratio
+        let docNaturalAspect = 1.414;
 
         // Theme switching
         function toggleTheme() {
@@ -1148,12 +1180,15 @@ INDEX_HTML = """<!DOCTYPE html>
         const toast = document.getElementById('toast');
         const btnSubmit = document.getElementById('btnSubmit');
 
-        // Paper Preview DOM elements
+        // Paper & Margin Preview DOM elements
         const paperSheet = document.getElementById('paperSheet');
+        const printableArea = document.getElementById('printableArea');
         const renderWrap = document.getElementById('renderWrap');
         const sheetFormatTag = document.getElementById('sheetFormatTag');
         const sheetOrientationTag = document.getElementById('sheetOrientationTag');
+        const sheetMarginTag = document.getElementById('sheetMarginTag');
         const sheetColorTag = document.getElementById('sheetColorTag');
+        const customMarginBox = document.getElementById('customMarginBox');
 
         dropzone.addEventListener('click', () => fileInput.click());
         dropzone.addEventListener('dragover', (e) => { e.preventDefault(); dropzone.classList.add('dragover'); });
@@ -1224,7 +1259,7 @@ INDEX_HTML = """<!DOCTYPE html>
         function renderPdf(num) {
             if (!currentPdf) return;
             currentPdf.getPage(num).then(page => {
-                const viewport = page.getViewport({ scale: 1.0 });
+                const viewport = page.getViewport({ scale: 1.5 });
                 docNaturalAspect = viewport.height / viewport.width;
                 pdfCanvas.height = viewport.height;
                 pdfCanvas.width = viewport.width;
@@ -1248,7 +1283,12 @@ INDEX_HTML = """<!DOCTYPE html>
             currentPdf = null;
         }
 
-        // Real-Time Layout & Paper Size Geometry Engine
+        function handleMarginChange(val) {
+            customMarginBox.style.display = (val === 'custom') ? 'block' : 'none';
+            updatePreviewLayout();
+        }
+
+        // Real-Time Layout, Paper Size & Margins Geometry Engine
         function updatePreviewLayout() {
             // 1. Determine active Paper Size
             const sizeKey = mode === 'simple' 
@@ -1265,16 +1305,16 @@ INDEX_HTML = """<!DOCTYPE html>
             if (orientation === '4') {
                 isLandscape = true;
             } else if (orientation === 'auto') {
-                isLandscape = docNaturalAspect < 0.95; // Auto detect wide format
+                isLandscape = docNaturalAspect < 0.95;
             }
 
-            // 3. Compute Paper Dimensions for preview viewport
-            const maxDeskWidth = 280;
-            const maxDeskHeight = 330;
-            let paperRatio = spec.height / spec.width;
-            if (isLandscape) {
-                paperRatio = spec.width / spec.height;
-            }
+            // 3. Compute Paper Dimensions to fill the large preview area
+            // Viewport max bounds: e.g. 520px width x 560px height
+            const maxDeskWidth = 460;
+            const maxDeskHeight = 540;
+            let paperPhysW = isLandscape ? spec.height : spec.width;
+            let paperPhysH = isLandscape ? spec.width : spec.height;
+            let paperRatio = paperPhysH / paperPhysW;
 
             let sheetW, sheetH;
             if (maxDeskWidth * paperRatio <= maxDeskHeight) {
@@ -1288,12 +1328,47 @@ INDEX_HTML = """<!DOCTYPE html>
             paperSheet.style.width = sheetW + 'px';
             paperSheet.style.height = sheetH + 'px';
 
-            // 4. Color Mode (Filter)
+            // 4. Calculate Margins (Physical mm to Pixel Inset)
+            let mTopMm = 4.2, mBottomMm = 4.2, mLeftMm = 4.2, mRightMm = 4.2;
+            let marginLabel = 'Printable Area';
+
+            if (mode === 'advanced') {
+                const mMode = document.getElementById('marginSelect').value;
+                if (mMode === 'none') {
+                    mTopMm = 0; mBottomMm = 0; mLeftMm = 0; mRightMm = 0;
+                    marginLabel = 'Borderless (0mm)';
+                } else if (mMode === 'normal') {
+                    mTopMm = 12.7; mBottomMm = 12.7; mLeftMm = 12.7; mRightMm = 12.7;
+                    marginLabel = 'Normal (12.7mm)';
+                } else if (mMode === 'custom') {
+                    mTopMm = parseFloat(document.getElementById('mTop').value) || 0;
+                    mBottomMm = parseFloat(document.getElementById('mBottom').value) || 0;
+                    mLeftMm = parseFloat(document.getElementById('mLeft').value) || 0;
+                    mRightMm = parseFloat(document.getElementById('mRight').value) || 0;
+                    marginLabel = `Custom (${mTopMm}T, ${mLeftMm}L mm)`;
+                }
+            }
+
+            // Scale mm to preview sheet pixels
+            const scaleX = sheetW / paperPhysW;
+            const scaleY = sheetH / paperPhysH;
+
+            const topPx = Math.round(mTopMm * scaleY);
+            const bottomPx = Math.round(mBottomMm * scaleY);
+            const leftPx = Math.round(mLeftMm * scaleX);
+            const rightPx = Math.round(mRightMm * scaleX);
+
+            printableArea.style.top = topPx + 'px';
+            printableArea.style.bottom = bottomPx + 'px';
+            printableArea.style.left = leftPx + 'px';
+            printableArea.style.right = rightPx + 'px';
+
+            // 5. Color Mode (Filter)
             const isGray = document.getElementById('colGray').checked;
             paperSheet.style.filter = isGray ? 'grayscale(100%)' : 'none';
             sheetColorTag.textContent = isGray ? 'B&W' : 'Color';
 
-            // 5. Scaling mode
+            // 6. Scaling mode
             if (mode === 'advanced') {
                 const fitPage = document.getElementById('scalingSelect').value === 'true';
                 renderWrap.classList.toggle('scale-fill', !fitPage);
@@ -1301,21 +1376,9 @@ INDEX_HTML = """<!DOCTYPE html>
                 renderWrap.classList.remove('scale-fill');
             }
 
-            // 6. N-Up layout simulation (Advanced Mode)
-            if (mode === 'advanced') {
-                const nup = document.getElementById('nupSelect').value;
-                if (nup === '2') {
-                    sheetFormatTag.textContent = `${spec.name} • 2-Up`;
-                } else if (nup === '4') {
-                    sheetFormatTag.textContent = `${spec.name} • 4-Up`;
-                } else {
-                    sheetFormatTag.textContent = `${spec.name} • ${spec.desc}`;
-                }
-            } else {
-                sheetFormatTag.textContent = `${spec.name} • ${spec.desc}`;
-            }
-
+            sheetFormatTag.textContent = `${spec.name} • ${spec.desc}`;
             sheetOrientationTag.textContent = isLandscape ? 'Landscape' : 'Portrait';
+            sheetMarginTag.textContent = marginLabel;
         }
 
         function setMode(m) {
@@ -1368,6 +1431,7 @@ INDEX_HTML = """<!DOCTYPE html>
                 formData.set('duplex', 'None');
                 formData.set('orientation', 'auto');
                 formData.set('fitpage', 'true');
+                formData.set('margin_mode', 'printable');
             }
 
             try {
@@ -1585,6 +1649,7 @@ def api_print():
     orientation = request.form.get('orientation', 'auto')
     fitpage = request.form.get('fitpage', 'true')
     pagerange = request.form.get('pagerange', '').strip()
+    margin_mode = request.form.get('margin_mode', 'printable')
 
     suffix = os.path.splitext(file.filename)[1].lower()
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
@@ -1610,6 +1675,26 @@ def api_print():
             cmd.extend(['-o', 'fit-to-page'])
         if pagerange:
             cmd.extend(['-o', f'page-ranges={pagerange}'])
+
+        # Margin adjustments (convert mm to PostScript points: 1 mm = 2.83465 points)
+        if margin_mode == 'none':
+            cmd.extend(['-o', 'page-top=0', '-o', 'page-bottom=0', '-o', 'page-left=0', '-o', 'page-right=0'])
+        elif margin_mode == 'normal':
+            cmd.extend(['-o', 'page-top=36', '-o', 'page-bottom=36', '-o', 'page-left=36', '-o', 'page-right=36'])
+        elif margin_mode == 'custom':
+            try:
+                m_top = int(float(request.form.get('m_top', '10')) * 2.83465)
+                m_bottom = int(float(request.form.get('m_bottom', '10')) * 2.83465)
+                m_left = int(float(request.form.get('m_left', '10')) * 2.83465)
+                m_right = int(float(request.form.get('m_right', '10')) * 2.83465)
+                cmd.extend([
+                    '-o', f'page-top={m_top}',
+                    '-o', f'page-bottom={m_bottom}',
+                    '-o', f'page-left={m_left}',
+                    '-o', f'page-right={m_right}'
+                ])
+            except Exception:
+                pass
 
         cmd.append(tmp_path)
 
