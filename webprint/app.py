@@ -11,7 +11,8 @@ import shutil
 from datetime import datetime
 from flask import Flask, render_template_string, request, jsonify, Response
 
-app = Flask(__name__)
+STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'static')
+app = Flask(__name__, static_folder=STATIC_DIR, static_url_path='/static')
 app.config['MAX_CONTENT_LENGTH'] = 150 * 1024 * 1024  # 150MB file size limit
 
 DB_PATH = "/var/lib/webprint/webprint.db"
@@ -224,10 +225,36 @@ INDEX_HTML = """<!DOCTYPE html>
             document.documentElement.setAttribute('data-theme', savedTheme);
         })();
     </script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.1/fabric.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <script src="/static/pdf.min.js" onerror="this.onerror=null;this.src='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js'"></script>
+    <script src="/static/fabric.min.js" onerror="this.onerror=null;this.src='https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.1/fabric.min.js'"></script>
+    <script src="/static/jspdf.umd.min.js" onerror="this.onerror=null;this.src='https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js'"></script>
+    <script src="/static/qrcode.min.js" onerror="this.onerror=null;this.src='https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js'"></script>
+    <script>
+        // Bulletproof early tab navigation definition
+        window.switchTab = function(tabName) {
+            try {
+                var btns = document.querySelectorAll('.nav-btn');
+                btns.forEach(function(b) {
+                    b.classList.toggle('active', b.getAttribute('data-tab') === tabName);
+                });
+                var tabs = document.querySelectorAll('.tab-content');
+                tabs.forEach(function(c) {
+                    c.classList.toggle('active', c.id === 'tab-' + tabName);
+                });
+                if (tabName === 'studio') {
+                    if (typeof initCanvaStudio === 'function') initCanvaStudio();
+                } else if (tabName === 'pin') {
+                    if (typeof loadPinList === 'function') loadPinList();
+                } else if (tabName === 'history') {
+                    if (typeof loadHistory === 'function') loadHistory();
+                } else if (tabName === 'settings') {
+                    if (typeof loadTelemetry === 'function') loadTelemetry();
+                }
+            } catch (err) {
+                console.error("Tab switch error:", err);
+            }
+        };
+    </script>
     <style>
         :root {
             --radius-sm: 6px;
@@ -943,12 +970,12 @@ INDEX_HTML = """<!DOCTYPE html>
     </div>
 
     <nav class="header-nav">
-        <button class="nav-btn active" data-tab="print">Print</button>
-        <button class="nav-btn" data-tab="studio">Design Studio</button>
-        <button class="nav-btn" data-tab="scan">Scan</button>
-        <button class="nav-btn" data-tab="pin">PIN Release</button>
-        <button class="nav-btn" data-tab="history">History</button>
-        <button class="nav-btn" data-tab="settings">Settings</button>
+        <button class="nav-btn active" data-tab="print" onclick="switchTab('print')">Print</button>
+        <button class="nav-btn" data-tab="studio" onclick="switchTab('studio')">Design Studio</button>
+        <button class="nav-btn" data-tab="scan" onclick="switchTab('scan')">Scan</button>
+        <button class="nav-btn" data-tab="pin" onclick="switchTab('pin')">PIN Release</button>
+        <button class="nav-btn" data-tab="history" onclick="switchTab('history')">History</button>
+        <button class="nav-btn" data-tab="settings" onclick="switchTab('settings')">Settings</button>
     </nav>
 
     <div class="header-controls">
@@ -1657,7 +1684,18 @@ INDEX_HTML = """<!DOCTYPE html>
 </div>
 
 <script>
-    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    try {
+        if (typeof pdfjsLib !== 'undefined' && pdfjsLib && pdfjsLib.GlobalWorkerOptions) {
+            pdfjsLib.GlobalWorkerOptions.workerSrc = '/static/pdf.worker.min.js';
+        }
+    } catch (e) {
+        console.warn("PDF worker init warning:", e);
+    }
+
+    var canvaStudioCanvas = null;
+    var studioHistory = [];
+    var historyIndex = -1;
+    var isHistoryUpdating = false;
 
     const PAPER_SPECS = {
         'A4': { width: 210, height: 297, name: 'A4', desc: '210 × 297 mm' },
@@ -1698,23 +1736,12 @@ INDEX_HTML = """<!DOCTYPE html>
         localStorage.setItem('theme', next);
     });
 
-    // Tab Navigation
+    // Tab Navigation Event Listeners
     document.querySelectorAll('.nav-btn').forEach(btn => {
         btn.addEventListener('click', () => {
-            document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
-            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-            btn.classList.add('active');
-            const target = document.getElementById('tab-' + btn.getAttribute('data-tab'));
-            if (target) target.classList.add('active');
-
-            if (btn.getAttribute('data-tab') === 'studio') {
-                if (!canvaStudioCanvas) initCanvaStudio();
-            } else if (btn.getAttribute('data-tab') === 'pin') {
-                loadPinList();
-            } else if (btn.getAttribute('data-tab') === 'history') {
-                loadHistory();
-            } else if (btn.getAttribute('data-tab') === 'settings') {
-                loadTelemetry();
+            const tab = btn.getAttribute('data-tab');
+            if (tab && window.switchTab) {
+                window.switchTab(tab);
             }
         });
     });
@@ -2021,62 +2048,67 @@ INDEX_HTML = """<!DOCTYPE html>
     // ========================================================
     // FULL-FLEDGED CANVA CLONE ENGINE (100% BROWSER OFFLOADED)
     // ========================================================
-    let canvaStudioCanvas = null;
-    let studioHistory = [];
-    let historyIndex = -1;
-    let isHistoryUpdating = false;
-
+    // (canvaStudioCanvas & studioHistory variables declared at script top)
     function initCanvaStudio() {
-        canvaStudioCanvas = new fabric.Canvas('canvaStudioCanvas', {
-            width: 480,
-            height: 680,
-            backgroundColor: '#ffffff',
-            preserveObjectStacking: true
-        });
-
-        // Initialize dock tab switching
-        document.querySelectorAll('.dock-item').forEach(item => {
-            item.addEventListener('click', () => {
-                document.querySelectorAll('.dock-item').forEach(d => d.classList.remove('active'));
-                document.querySelectorAll('.drawer-section').forEach(s => s.classList.remove('active'));
-                item.classList.add('active');
-                const target = document.getElementById('drawer-' + item.getAttribute('data-drawer'));
-                if (target) target.classList.add('active');
+        if (typeof fabric === 'undefined') {
+            console.warn("Fabric.js library not loaded yet.");
+            return;
+        }
+        if (canvaStudioCanvas) return;
+        try {
+            canvaStudioCanvas = new fabric.Canvas('canvaStudioCanvas', {
+                width: 480,
+                height: 680,
+                backgroundColor: '#ffffff',
+                preserveObjectStacking: true
             });
-        });
 
-        // Selection listeners for contextual toolbar
-        canvaStudioCanvas.on('selection:created', updateContextualBar);
-        canvaStudioCanvas.on('selection:updated', updateContextualBar);
-        canvaStudioCanvas.on('selection:cleared', clearContextualBar);
+            // Initialize dock tab switching
+            document.querySelectorAll('.dock-item').forEach(item => {
+                item.addEventListener('click', () => {
+                    document.querySelectorAll('.dock-item').forEach(d => d.classList.remove('active'));
+                    document.querySelectorAll('.drawer-section').forEach(s => s.classList.remove('active'));
+                    item.classList.add('active');
+                    const target = document.getElementById('drawer-' + item.getAttribute('data-drawer'));
+                    if (target) target.classList.add('active');
+                });
+            });
 
-        // History recording
-        canvaStudioCanvas.on('object:added', () => recordCanvaHistory());
-        canvaStudioCanvas.on('object:modified', () => recordCanvaHistory());
-        canvaStudioCanvas.on('object:removed', () => recordCanvaHistory());
+            // Selection listeners for contextual toolbar
+            canvaStudioCanvas.on('selection:created', updateContextualBar);
+            canvaStudioCanvas.on('selection:updated', updateContextualBar);
+            canvaStudioCanvas.on('selection:cleared', clearContextualBar);
 
-        // Keyboard shortcuts
-        window.addEventListener('keydown', (e) => {
-            if (!canvaStudioCanvas) return;
-            const active = canvaStudioCanvas.getActiveObject();
-            if (active && (e.key === 'Delete' || e.key === 'Backspace')) {
-                if (active.isEditing) return;
-                canvaStudioCanvas.remove(active);
-                e.preventDefault();
-            } else if (e.ctrlKey && e.key === 'z') {
-                undoCanva();
-                e.preventDefault();
-            } else if (e.ctrlKey && e.key === 'y') {
-                redoCanva();
-                e.preventDefault();
-            } else if (e.ctrlKey && e.key === 'd' && active) {
-                cloneActiveCanvaObject();
-                e.preventDefault();
-            }
-        });
+            // History recording
+            canvaStudioCanvas.on('object:added', () => recordCanvaHistory());
+            canvaStudioCanvas.on('object:modified', () => recordCanvaHistory());
+            canvaStudioCanvas.on('object:removed', () => recordCanvaHistory());
 
-        setCanvaCanvasPreset('a4');
-        recordCanvaHistory();
+            // Keyboard shortcuts
+            window.addEventListener('keydown', (e) => {
+                if (!canvaStudioCanvas) return;
+                const active = canvaStudioCanvas.getActiveObject();
+                if (active && (e.key === 'Delete' || e.key === 'Backspace')) {
+                    if (active.isEditing) return;
+                    canvaStudioCanvas.remove(active);
+                    e.preventDefault();
+                } else if (e.ctrlKey && e.key === 'z') {
+                    undoCanva();
+                    e.preventDefault();
+                } else if (e.ctrlKey && e.key === 'y') {
+                    redoCanva();
+                    e.preventDefault();
+                } else if (e.ctrlKey && e.key === 'd' && active) {
+                    cloneActiveCanvaObject();
+                    e.preventDefault();
+                }
+            });
+
+            setCanvaCanvasPreset('a4');
+            recordCanvaHistory();
+        } catch (err) {
+            console.error("initCanvaStudio error:", err);
+        }
     }
 
     function recordCanvaHistory() {
