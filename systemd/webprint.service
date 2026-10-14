@@ -1,0 +1,15 @@
+[Unit]
+Description=Lightweight Web Print Server for Armbian
+After=network.target cups.service
+Requires=cups.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/webprint
+ExecStart=/usr/bin/python3 /opt/webprint/app.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

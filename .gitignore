@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.env
+.venv
+env/
+venv/
+ENV/
+
+# System / OS
+.DS_Store
+Thumbs.db
+*.swp
+*~
+
+# Logs & Temp
+*.log
+/tmp/
