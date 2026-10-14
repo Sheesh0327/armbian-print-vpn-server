@@ -799,6 +799,10 @@ INDEX_HTML = """<!DOCTYPE html>
         footer a:hover {
             text-decoration: underline;
         }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
     </style>
 </head>
 <body>
@@ -815,6 +819,7 @@ INDEX_HTML = """<!DOCTYPE html>
         <div class="header-controls">
             <nav class="header-nav">
                 <button class="nav-btn active" onclick="showTab('print')">Print</button>
+                <button class="nav-btn" onclick="showTab('scan')">Scan</button>
                 <button class="nav-btn" onclick="showTab('queue')">Queue</button>
                 <button class="nav-btn" onclick="showTab('system')">System</button>
             </nav>
@@ -1069,6 +1074,104 @@ INDEX_HTML = """<!DOCTYPE html>
 
                 </div>
             </form>
+        </div>
+
+        <!-- TAB: SCAN (Flatbed Scanner) -->
+        <div id="tab-scan" class="tab-content">
+            <div class="grid-layout">
+                <!-- Left: Scan Preview & Output -->
+                <div class="card">
+                    <div class="card-header">
+                        <span class="card-heading">Flatbed Scan Output</span>
+                        <div id="scanStatusBadge" class="preview-badge" style="display: none;">Ready</div>
+                    </div>
+                    
+                    <div id="scanDisplayArea" style="min-height: 480px; display: flex; flex-direction: column; align-items: center; justify-content: center; background: var(--desk-bg); border-radius: var(--radius-md); padding: 24px; position: relative;">
+                        <!-- Placeholder state -->
+                        <div id="scanPlaceholder" style="text-align: center; color: var(--text-tertiary); max-width: 320px;">
+                            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="margin-bottom: 12px; opacity: 0.6;">
+                                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                                <line x1="3" y1="9" x2="21" y2="9"></line>
+                                <line x1="9" y1="21" x2="9" y2="9"></line>
+                            </svg>
+                            <p style="font-size: 13px; font-weight: 500; color: var(--text-secondary); margin-bottom: 4px;">Flatbed Scanner Ready</p>
+                            <p style="font-size: 12px;">Place your document face-down on the HP Smart Tank 520 glass and click "Scan Flatbed".</p>
+                        </div>
+
+                        <!-- Progress / Scanning state -->
+                        <div id="scanLoading" style="display: none; text-align: center; color: var(--text-secondary);">
+                            <div style="width: 36px; height: 36px; border: 3px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; margin: 0 auto 16px;"></div>
+                            <p style="font-size: 14px; font-weight: 500; color: var(--text-primary); margin-bottom: 4px;">Scanning document...</p>
+                            <p style="font-size: 12px; color: var(--text-tertiary);">Reading optical sensor on HP Smart Tank 520</p>
+                        </div>
+
+                        <!-- Scanned Image Result -->
+                        <img id="scanResultImg" style="display: none; max-width: 100%; max-height: 520px; border-radius: var(--radius-sm); box-shadow: var(--paper-shadow); object-fit: contain;">
+
+                        <!-- Scanned PDF Result -->
+                        <div id="scanResultPdf" style="display: none; width: 100%; height: 520px;">
+                            <canvas id="scanPdfCanvas" style="display: block; margin: 0 auto; max-width: 100%; max-height: 520px; border-radius: var(--radius-sm); box-shadow: var(--paper-shadow);"></canvas>
+                        </div>
+                    </div>
+
+                    <!-- Scanned Action Bar -->
+                    <div id="scanActionBar" style="display: none; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border); align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;">
+                        <span id="scanFileInfo" style="font-family: var(--font-mono); font-size: 12px; color: var(--text-secondary);"></span>
+                        <div style="display: flex; gap: 8px;">
+                            <a id="btnScanDownload" class="btn-action" style="text-decoration: none; padding: 6px 14px; background: var(--surface-elevated);" download>Download</a>
+                            <button type="button" class="btn-action" onclick="loadScanIntoPrint()" style="background: var(--text-primary); color: var(--bg);">Print Document</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Right: Scan Settings Sidebar -->
+                <div class="card settings-sidebar">
+                    <div class="card-header">
+                        <span class="card-heading">Scanner Settings</span>
+                    </div>
+
+                    <form id="scanForm">
+                        <div class="form-row">
+                            <label class="label">Resolution (DPI)</label>
+                            <select id="scanResolution" name="resolution">
+                                <option value="75">75 DPI (Draft / Fast)</option>
+                                <option value="150" selected>150 DPI (Document / Standard)</option>
+                                <option value="300">300 DPI (Photo / Crisp)</option>
+                                <option value="600">600 DPI (High Resolution)</option>
+                            </select>
+                        </div>
+
+                        <div class="form-row">
+                            <label class="label">Color Mode</label>
+                            <select id="scanMode" name="mode">
+                                <option value="Color" selected>Full Color</option>
+                                <option value="Gray">Grayscale</option>
+                                <option value="Lineart">Monochrome (Black & White)</option>
+                            </select>
+                        </div>
+
+                        <div class="form-row">
+                            <label class="label">Output Format</label>
+                            <select id="scanFormat" name="format">
+                                <option value="pdf" selected>PDF Document (.pdf)</option>
+                                <option value="png">PNG Image (.png)</option>
+                                <option value="jpeg">JPEG Photo (.jpg)</option>
+                            </select>
+                        </div>
+
+                        <div class="form-row" style="margin-top: 16px;">
+                            <label style="display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-secondary); cursor: pointer;">
+                                <input type="checkbox" id="scanSaveSamba" name="save_samba" value="true" checked style="accent-color: var(--accent);">
+                                Save copy to Samba (\\\\printserver.local\\\\Public\\\\Scans)
+                            </label>
+                        </div>
+
+                        <button type="submit" class="btn-submit" id="btnScanSubmit" style="margin-top: 16px;">Scan Flatbed</button>
+                    </form>
+
+                    <div id="scanToast" class="toast"></div>
+                </div>
+            </div>
         </div>
 
         <!-- TAB: QUEUE -->
@@ -1530,6 +1633,100 @@ INDEX_HTML = """<!DOCTYPE html>
             return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
         }
 
+        // Scanner Logic
+        let currentScanBlob = null;
+        let currentScanFilename = '';
+
+        document.getElementById('scanForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const btn = document.getElementById('btnScanSubmit');
+            const toast = document.getElementById('scanToast');
+            const placeholder = document.getElementById('scanPlaceholder');
+            const loading = document.getElementById('scanLoading');
+            const imgEl = document.getElementById('scanResultImg');
+            const pdfEl = document.getElementById('scanResultPdf');
+            const actionBar = document.getElementById('scanActionBar');
+
+            btn.disabled = true;
+            btn.textContent = 'Scanning...';
+            toast.style.display = 'none';
+            placeholder.style.display = 'none';
+            imgEl.style.display = 'none';
+            pdfEl.style.display = 'none';
+            actionBar.style.display = 'none';
+            loading.style.display = 'block';
+
+            const formData = new FormData(e.target);
+
+            try {
+                const res = await fetch('/api/scan', { method: 'POST', body: formData });
+                const d = await res.json();
+                if (res.ok && d.success) {
+                    loading.style.display = 'none';
+                    currentScanFilename = d.filename;
+
+                    const byteCharacters = atob(d.data);
+                    const byteNumbers = new Array(byteCharacters.length);
+                    for (let i = 0; i < byteCharacters.length; i++) {
+                        byteNumbers[i] = byteCharacters.charCodeAt(i);
+                    }
+                    const byteArray = new Uint8Array(byteNumbers);
+                    const mime = d.format === 'pdf' ? 'application/pdf' : (d.format === 'png' ? 'image/png' : 'image/jpeg');
+                    currentScanBlob = new Blob([byteArray], { type: mime });
+
+                    const blobUrl = URL.createObjectURL(currentScanBlob);
+                    const dlBtn = document.getElementById('btnScanDownload');
+                    dlBtn.href = blobUrl;
+                    dlBtn.download = d.filename;
+
+                    document.getElementById('scanFileInfo').textContent = `${d.filename} (${formatBytes(currentScanBlob.size)})` + (d.samba_saved ? ' • Saved to Samba' : '');
+                    actionBar.style.display = 'flex';
+
+                    if (d.format === 'pdf') {
+                        pdfEl.style.display = 'block';
+                        const loadingTask = pdfjsLib.getDocument({ data: byteArray });
+                        const pdf = await loadingTask.promise;
+                        const page = await pdf.getPage(1);
+                        const viewport = page.getViewport({ scale: 1.5 });
+                        const canvas = document.getElementById('scanPdfCanvas');
+                        const ctx = canvas.getContext('2d');
+                        canvas.height = viewport.height;
+                        canvas.width = viewport.width;
+                        await page.render({ canvasContext: ctx, viewport: viewport }).promise;
+                    } else {
+                        imgEl.src = blobUrl;
+                        imgEl.style.display = 'block';
+                    }
+                } else {
+                    loading.style.display = 'none';
+                    placeholder.style.display = 'block';
+                    toast.textContent = d.error || 'Scan failed.';
+                    toast.className = 'toast error';
+                    toast.style.display = 'block';
+                }
+            } catch (err) {
+                loading.style.display = 'none';
+                placeholder.style.display = 'block';
+                toast.textContent = 'Scan error: ' + err.message;
+                toast.className = 'toast error';
+                toast.style.display = 'block';
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Scan Flatbed';
+            }
+        });
+
+        function loadScanIntoPrint() {
+            if (!currentScanBlob) return;
+            const file = new File([currentScanBlob], currentScanFilename, { type: currentScanBlob.type });
+            const dataTransfer = new DataTransfer();
+            dataTransfer.items.add(file);
+            fileInput.files = dataTransfer.files;
+            loadFile();
+            showTab('print');
+            showToast('Scanned document loaded into print preview.', 'success');
+        }
+
         fetchStatus();
     </script>
 </body>
@@ -1645,6 +1842,73 @@ def api_cancel():
         return jsonify({'success': True})
     except subprocess.CalledProcessError as e:
         return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/scan', methods=['POST'])
+def api_scan():
+    resolution = request.form.get('resolution', '150')
+    mode = request.form.get('mode', 'Color')
+    fmt = request.form.get('format', 'pdf').lower()
+    save_samba = request.form.get('save_samba', 'true') == 'true'
+
+    if resolution not in ['75', '150', '300', '600']:
+        resolution = '150'
+    if mode not in ['Color', 'Gray', 'Lineart']:
+        mode = 'Color'
+    if fmt not in ['pdf', 'png', 'jpeg']:
+        fmt = 'pdf'
+
+    timestamp = time.strftime('%Y%m%d_%H%M%S')
+    temp_dir = tempfile.mkdtemp()
+    raw_pnm = os.path.join(temp_dir, 'raw.pnm')
+    final_file = os.path.join(temp_dir, f'scan_{timestamp}.{fmt}')
+
+    try:
+        scan_cmd = ['scanimage', f'--resolution={resolution}', f'--mode={mode}']
+        with open(raw_pnm, 'wb') as f_out:
+            p = subprocess.run(scan_cmd, stdout=f_out, stderr=subprocess.PIPE, timeout=90)
+            if p.returncode != 0:
+                err_msg = p.stderr.decode('utf-8', errors='ignore').strip()
+                if 'no SANE devices found' in err_msg or not err_msg:
+                    err_msg = 'HP Smart Tank 520 scanner not detected. Please verify the printer is turned on and the USB cable is connected.'
+                return jsonify({'success': False, 'error': err_msg}), 500
+
+        # Convert to requested format
+        subprocess.run(['convert', raw_pnm, final_file], check=True, timeout=60)
+
+        samba_saved = False
+        samba_path = ''
+        if save_samba:
+            samba_dir = '/srv/shares/public/Scans'
+            try:
+                os.makedirs(samba_dir, exist_ok=True)
+                samba_dest = os.path.join(samba_dir, f'scan_{timestamp}.{fmt}')
+                subprocess.run(['cp', final_file, samba_dest], check=True)
+                subprocess.run(['chmod', '666', samba_dest], check=True)
+                samba_saved = True
+                samba_path = f'\\\\printserver.local\\Public\\Scans\\scan_{timestamp}.{fmt}'
+            except Exception:
+                pass
+
+        import base64
+        with open(final_file, 'rb') as f:
+            b64 = base64.b64encode(f.read()).decode('utf-8')
+
+        return jsonify({
+            'success': True,
+            'filename': f'scan_{timestamp}.{fmt}',
+            'format': fmt,
+            'data': b64,
+            'samba_saved': samba_saved,
+            'samba_path': samba_path
+        })
+    except subprocess.TimeoutExpired:
+        return jsonify({'success': False, 'error': 'Scanning timed out. Please check printer power and USB connection.'}), 500
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+    finally:
+        if os.path.exists(raw_pnm):
+            try: os.remove(raw_pnm)
+            except Exception: pass
 
 @app.route('/api/print', methods=['POST'])
 def api_print():

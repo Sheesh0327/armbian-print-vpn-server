@@ -23,25 +23,32 @@ Turn any low-cost ARM SBC or TV box (such as the **ZTE B860H** with Amlogic S905
 - **Native Office Document Conversion**: Automatically renders `.docx`, `.doc`, `.odt`, `.rtf` to PDF on the fly via headless LibreOffice.
 - **Dark & Light Themes**: Apple/Vercel-inspired minimal aesthetic with persistent theme memory and zero-flicker loading.
 
-### 2. 📱 Zero-Install Mobile Printing (AirPrint & Mopria)
+### 2. 📄 Web Flatbed Document Scanner (`/scan`)
+- **Browser-Based Scanning**: Scan documents and photos straight from your browser or mobile phone without installing manufacturer scanning software.
+- **Adjustable Quality**: 75 DPI (Draft), 150 DPI (Document), 300 DPI (High Res), and 600 DPI (Archival).
+- **Multiple Output Formats**: Direct export to **PDF**, **PNG**, or **JPEG**.
+- **1-Click Print & Auto-Save**: Automatically saves scans to the Samba share (`\\printserver.local\Public\Scans`) and offers instant one-click transfer into the Print portal.
+
+### 3. 📱 Zero-Install Mobile Printing (AirPrint & Mopria)
 - **Apple AirPrint**: Fully announced via Avahi DNS-SD (`_universal._sub._ipp._tcp`). Native printing from any iPhone, iPad, or Mac via the standard Share $\rightarrow$ Print menu.
 - **Android Mopria**: Discovered by Android's Default Print Service.
 - **Windows / Linux**: Discovered automatically over the local network.
 
-### 3. 🛡️ Network-Wide Ad-Blocking & DNS (AdGuard Home)
+### 4. 🛡️ Network-Wide Ad-Blocking & DNS (AdGuard Home)
 - Pre-installed and running on **`http://printserver.local:3000`**.
 - Blocks ads, trackers, and malware across all smart TVs, phones, and computers on your Wi-Fi.
 
-### 4. 📁 Network File Sharing (Samba / SMB)
+### 5. 📁 Network File Sharing (Samba / SMB)
 - Public network share located at **`\\printserver.local\Public`** (or `smb://printserver.local/Public`).
 - Instant file dropping, backups, and shared storage across Windows, macOS, iOS, and Android.
+- Scanned documents automatically saved to `\\printserver.local\Public\Scans`.
 
-### 5. 🌐 Remote VPN Bridge (Tailscale Subnet Router)
+### 6. 🌐 Remote VPN Bridge (Tailscale Subnet Router)
 - Encrypted WireGuard-based mesh access to your entire home LAN from anywhere in the world.
 - Print documents remotely from 5G cellular data or cafe Wi-Fi.
 - Access services at `http://100.104.185.40`.
 
-### 6. 🔒 Zero-Maintenance & Daily Backups
+### 7. 🔒 Zero-Maintenance & Daily Backups
 - **Unattended Security Patches**: Automatic background installation of Debian security updates.
 - **Automated Daily Backups**: Archives CUPS configs, drivers, and server settings daily at 3:00 AM to `\\printserver.local\Public\backups`.
 
