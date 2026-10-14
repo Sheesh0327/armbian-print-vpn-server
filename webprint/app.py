@@ -10,14 +10,30 @@ app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 150 * 1024 * 1024  # 150MB file size limit
 
 INDEX_HTML = """<!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Print Server</title>
+    <script>
+        (function() {
+            const savedTheme = localStorage.getItem('theme') || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+            document.documentElement.setAttribute('data-theme', savedTheme);
+        })();
+    </script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
     <style>
         :root {
+            --radius-sm: 6px;
+            --radius-md: 8px;
+            --radius-lg: 12px;
+            --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+            --transition-theme: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+        }
+
+        /* Dark Theme Palette (Default) */
+        html[data-theme="dark"] {
             --bg: #09090b;
             --surface: #121215;
             --surface-elevated: #18181b;
@@ -26,15 +42,30 @@ INDEX_HTML = """<!DOCTYPE html>
             --text-primary: #f4f4f5;
             --text-secondary: #a1a1aa;
             --text-tertiary: #71717a;
-            --accent: #2563eb;
-            --accent-hover: #1d4ed8;
+            --btn-bg: #f4f4f5;
+            --btn-text: #09090b;
+            --badge-bg: #18181b;
+            --accent: #3b82f6;
             --success: #22c55e;
             --danger: #ef4444;
-            --radius-sm: 6px;
-            --radius-md: 8px;
-            --radius-lg: 12px;
-            --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-            --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        }
+
+        /* Light Theme Palette */
+        html[data-theme="light"] {
+            --bg: #f8fafc;
+            --surface: #ffffff;
+            --surface-elevated: #f1f5f9;
+            --border: #e2e8f0;
+            --border-hover: #cbd5e1;
+            --text-primary: #0f172a;
+            --text-secondary: #475569;
+            --text-tertiary: #94a3b8;
+            --btn-bg: #0f172a;
+            --btn-text: #ffffff;
+            --badge-bg: #f1f5f9;
+            --accent: #2563eb;
+            --success: #16a34a;
+            --danger: #dc2626;
         }
 
         * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -49,16 +80,18 @@ INDEX_HTML = """<!DOCTYPE html>
             min-height: 100vh;
             display: flex;
             flex-direction: column;
+            transition: var(--transition-theme);
         }
 
-        /* Minimal Header */
+        /* Header */
         header {
             border-bottom: 1px solid var(--border);
             padding: 14px 24px;
             display: flex;
             align-items: center;
             justify-content: space-between;
-            background: var(--bg);
+            background: var(--surface);
+            transition: var(--transition-theme);
         }
 
         .header-brand {
@@ -80,8 +113,8 @@ INDEX_HTML = """<!DOCTYPE html>
             gap: 6px;
             font-size: 12px;
             color: var(--text-secondary);
-            padding: 2px 8px;
-            background: var(--surface);
+            padding: 3px 8px;
+            background: var(--badge-bg);
             border: 1px solid var(--border);
             border-radius: 9999px;
         }
@@ -93,10 +126,16 @@ INDEX_HTML = """<!DOCTYPE html>
             border-radius: 50%;
         }
 
+        .header-controls {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
         .header-nav {
             display: flex;
             gap: 4px;
-            background: var(--surface);
+            background: var(--surface-elevated);
             padding: 3px;
             border-radius: var(--radius-md);
             border: 1px solid var(--border);
@@ -119,9 +158,45 @@ INDEX_HTML = """<!DOCTYPE html>
         }
 
         .nav-btn.active {
-            background: var(--surface-elevated);
+            background: var(--surface);
             color: var(--text-primary);
+            box-shadow: 0 1px 2px rgba(0,0,0,0.05);
         }
+
+        /* Theme Toggle Button */
+        .btn-theme {
+            background: var(--surface-elevated);
+            border: 1px solid var(--border);
+            color: var(--text-secondary);
+            width: 34px;
+            height: 34px;
+            border-radius: var(--radius-sm);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.15s;
+        }
+
+        .btn-theme:hover {
+            color: var(--text-primary);
+            border-color: var(--border-hover);
+        }
+
+        .icon-sun, .icon-moon {
+            width: 16px;
+            height: 16px;
+            fill: none;
+            stroke: currentColor;
+            stroke-width: 2;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+        }
+
+        html[data-theme="dark"] .icon-moon { display: none; }
+        html[data-theme="dark"] .icon-sun { display: block; }
+        html[data-theme="light"] .icon-sun { display: none; }
+        html[data-theme="light"] .icon-moon { display: block; }
 
         /* Container Layout */
         main {
@@ -156,6 +231,8 @@ INDEX_HTML = """<!DOCTYPE html>
             border: 1px solid var(--border);
             border-radius: var(--radius-lg);
             padding: 24px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.03);
+            transition: var(--transition-theme);
         }
 
         .card-header {
@@ -174,7 +251,7 @@ INDEX_HTML = """<!DOCTYPE html>
         /* Segmented Mode Switch */
         .segmented-control {
             display: inline-flex;
-            background: var(--bg);
+            background: var(--surface-elevated);
             border: 1px solid var(--border);
             padding: 2px;
             border-radius: var(--radius-sm);
@@ -193,8 +270,9 @@ INDEX_HTML = """<!DOCTYPE html>
         }
 
         .segmented-btn.active {
-            background: var(--surface-elevated);
+            background: var(--surface);
             color: var(--text-primary);
+            box-shadow: 0 1px 2px rgba(0,0,0,0.05);
         }
 
         /* Upload Dropzone */
@@ -205,7 +283,7 @@ INDEX_HTML = """<!DOCTYPE html>
             text-align: center;
             cursor: pointer;
             background: var(--bg);
-            transition: border-color 0.15s ease;
+            transition: border-color 0.15s ease, background-color 0.2s ease;
         }
 
         .dropzone:hover, .dropzone.dragover {
@@ -271,7 +349,7 @@ INDEX_HTML = """<!DOCTYPE html>
         }
         .btn-clear:hover {
             color: var(--text-primary);
-            background: var(--surface);
+            background: var(--surface-elevated);
         }
 
         .preview-canvas-wrap {
@@ -426,18 +504,11 @@ INDEX_HTML = """<!DOCTYPE html>
             background: transparent !important;
         }
 
-        /* Divider */
-        .divider {
-            height: 1px;
-            background: var(--border);
-            margin: 18px 0;
-        }
-
         /* Primary Print Button */
         .btn-submit {
             width: 100%;
-            background: var(--text-primary);
-            color: var(--bg);
+            background: var(--btn-bg);
+            color: var(--btn-text);
             border: none;
             font-family: inherit;
             font-size: 13px;
@@ -511,7 +582,7 @@ INDEX_HTML = """<!DOCTYPE html>
             font-weight: 500;
             padding: 2px 6px;
             border-radius: 4px;
-            background: var(--bg);
+            background: var(--surface-elevated);
             border: 1px solid var(--border);
         }
 
@@ -575,6 +646,8 @@ INDEX_HTML = """<!DOCTYPE html>
             display: flex;
             align-items: center;
             justify-content: space-between;
+            background: var(--surface);
+            transition: var(--transition-theme);
         }
 
         footer a {
@@ -598,11 +671,32 @@ INDEX_HTML = """<!DOCTYPE html>
             </div>
         </div>
 
-        <nav class="header-nav">
-            <button class="nav-btn active" onclick="showTab('print')">Print</button>
-            <button class="nav-btn" onclick="showTab('queue')">Queue</button>
-            <button class="nav-btn" onclick="showTab('system')">System</button>
-        </nav>
+        <div class="header-controls">
+            <nav class="header-nav">
+                <button class="nav-btn active" onclick="showTab('print')">Print</button>
+                <button class="nav-btn" onclick="showTab('queue')">Queue</button>
+                <button class="nav-btn" onclick="showTab('system')">System</button>
+            </nav>
+
+            <button type="button" class="btn-theme" onclick="toggleTheme()" title="Toggle theme">
+                <!-- Sun Icon (for Dark mode) -->
+                <svg class="icon-sun" viewBox="0 0 24 24">
+                    <circle cx="12" cy="12" r="5"></circle>
+                    <line x1="12" y1="1" x2="12" y2="3"></line>
+                    <line x1="12" y1="21" x2="12" y2="23"></line>
+                    <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+                    <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+                    <line x1="1" y1="12" x2="3" y2="12"></line>
+                    <line x1="21" y1="12" x2="23" y2="12"></line>
+                    <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+                    <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+                </svg>
+                <!-- Moon Icon (for Light mode) -->
+                <svg class="icon-moon" viewBox="0 0 24 24">
+                    <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+                </svg>
+            </button>
+        </div>
     </header>
 
     <main>
@@ -863,6 +957,14 @@ INDEX_HTML = """<!DOCTYPE html>
         let pdfPage = 1;
         let pdfPagesTotal = 1;
         let mode = 'simple';
+
+        // Theme switching
+        function toggleTheme() {
+            const current = document.documentElement.getAttribute('data-theme') || 'dark';
+            const next = current === 'dark' ? 'light' : 'dark';
+            document.documentElement.setAttribute('data-theme', next);
+            localStorage.setItem('theme', next);
+        }
 
         const dropzone = document.getElementById('dropzone');
         const fileInput = document.getElementById('fileInput');
