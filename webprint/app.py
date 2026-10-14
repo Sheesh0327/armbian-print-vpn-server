@@ -746,7 +746,7 @@ INDEX_HTML = """<!DOCTYPE html>
         /* System Telemetry List */
         .info-list {
             display: grid;
-            grid-template-columns: 1fr 1fr;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
             gap: 16px;
         }
 
@@ -769,6 +769,14 @@ INDEX_HTML = """<!DOCTYPE html>
             font-family: var(--font-mono);
             font-size: 13px;
             color: var(--text-primary);
+        }
+
+        .info-value a {
+            color: var(--accent);
+            text-decoration: none;
+        }
+        .info-value a:hover {
+            text-decoration: underline;
         }
 
         footer {
@@ -845,10 +853,10 @@ INDEX_HTML = """<!DOCTYPE html>
                             <span id="fileBadge" style="font-size: 11px; color: var(--text-tertiary);">No file selected</span>
                         </div>
 
-                        <input type="file" id="fileInput" name="file" style="display: none;" accept=".pdf,.png,.jpg,.jpeg,.txt,.doc,.docx">
+                        <input type="file" id="fileInput" name="file" style="display: none;" accept=".pdf,.png,.jpg,.jpeg,.txt,.doc,.docx,.odt,.rtf">
                         <div class="dropzone" id="dropzone">
                             <div class="dropzone-label">Click or drop document to preview & print</div>
-                            <div class="dropzone-sub">Supports PDF, JPG, PNG, TXT, DOCX</div>
+                            <div class="dropzone-sub">Supports PDF, DOCX, Word, Images, TXT</div>
                         </div>
 
                         <div class="preview-box" id="previewBox" style="display: none;">
@@ -1096,12 +1104,28 @@ INDEX_HTML = """<!DOCTYPE html>
         <div id="tab-system" class="tab-content">
             <div class="card">
                 <div class="card-header">
-                    <span class="card-heading">System Information</span>
+                    <span class="card-heading">Home Server Services & Information</span>
                     <span style="font-size: 12px; color: var(--text-tertiary);">Armbian / Debian 13</span>
                 </div>
                 <div class="info-list">
                     <div class="info-item">
-                        <div class="info-label">Hostname</div>
+                        <div class="info-label">Web Print Server</div>
+                        <div class="info-value">Port 80 (Standard) & 8080</div>
+                    </div>
+                    <div class="info-item">
+                        <div class="info-label">AdGuard Home (DNS)</div>
+                        <div class="info-value"><a href="http://10.0.0.95:3000" target="_blank">:3000 (Setup / Dashboard)</a></div>
+                    </div>
+                    <div class="info-item">
+                        <div class="info-label">Samba File Share</div>
+                        <div class="info-value">\\\\printserver.local\\Public</div>
+                    </div>
+                    <div class="info-item">
+                        <div class="info-label">CUPS Admin</div>
+                        <div class="info-value"><a href="https://printserver.local:631" target="_blank">:631</a></div>
+                    </div>
+                    <div class="info-item">
+                        <div class="info-label">mDNS Hostname</div>
                         <div class="info-value">printserver.local</div>
                     </div>
                     <div class="info-item">
@@ -1131,7 +1155,11 @@ INDEX_HTML = """<!DOCTYPE html>
 
     <footer>
         <span>Print Server • ZTE B860H</span>
-        <span><a href="https://printserver.local:631" target="_blank">CUPS Admin</a> • <a href="https://github.com/Sheesh0327/armbian-print-vpn-server" target="_blank">GitHub</a></span>
+        <span>
+            <a href="http://10.0.0.95:3000" target="_blank">AdGuard Home</a> • 
+            <a href="https://printserver.local:631" target="_blank">CUPS Admin</a> • 
+            <a href="https://github.com/Sheesh0327/armbian-print-vpn-server" target="_blank">GitHub</a>
+        </span>
     </footer>
 
     <script>
@@ -1246,13 +1274,9 @@ INDEX_HTML = """<!DOCTYPE html>
                 };
                 reader.readAsArrayBuffer(f);
             } else {
-                const reader = new FileReader();
-                reader.onload = (e) => {
-                    txtPreview.style.display = 'block';
-                    txtPreview.textContent = e.target.result.slice(0, 1500);
-                    updatePreviewLayout();
-                };
-                reader.readAsText(f);
+                txtPreview.style.display = 'block';
+                txtPreview.textContent = `Document (${ext.toUpperCase()}) loaded and ready to print.`;
+                updatePreviewLayout();
             }
         }
 
@@ -1290,14 +1314,12 @@ INDEX_HTML = """<!DOCTYPE html>
 
         // Real-Time Layout, Paper Size & Margins Geometry Engine
         function updatePreviewLayout() {
-            // 1. Determine active Paper Size
             const sizeKey = mode === 'simple' 
                 ? document.getElementById('simpleSize').value 
                 : document.getElementById('advSize').value;
             const spec = PAPER_SPECS[sizeKey] || PAPER_SPECS['A4'];
 
-            // 2. Determine Orientation
-            let orientation = '3'; // Portrait
+            let orientation = '3';
             if (mode === 'advanced') {
                 orientation = document.getElementById('orientationSelect').value;
             }
@@ -1308,8 +1330,6 @@ INDEX_HTML = """<!DOCTYPE html>
                 isLandscape = docNaturalAspect < 0.95;
             }
 
-            // 3. Compute Paper Dimensions to fill the large preview area
-            // Viewport max bounds: e.g. 520px width x 560px height
             const maxDeskWidth = 460;
             const maxDeskHeight = 540;
             let paperPhysW = isLandscape ? spec.height : spec.width;
@@ -1328,7 +1348,6 @@ INDEX_HTML = """<!DOCTYPE html>
             paperSheet.style.width = sheetW + 'px';
             paperSheet.style.height = sheetH + 'px';
 
-            // 4. Calculate Margins (Physical mm to Pixel Inset)
             let mTopMm = 4.2, mBottomMm = 4.2, mLeftMm = 4.2, mRightMm = 4.2;
             let marginLabel = 'Printable Area';
 
@@ -1349,7 +1368,6 @@ INDEX_HTML = """<!DOCTYPE html>
                 }
             }
 
-            // Scale mm to preview sheet pixels
             const scaleX = sheetW / paperPhysW;
             const scaleY = sheetH / paperPhysH;
 
@@ -1363,12 +1381,10 @@ INDEX_HTML = """<!DOCTYPE html>
             printableArea.style.left = leftPx + 'px';
             printableArea.style.right = rightPx + 'px';
 
-            // 5. Color Mode (Filter)
             const isGray = document.getElementById('colGray').checked;
             paperSheet.style.filter = isGray ? 'grayscale(100%)' : 'none';
             sheetColorTag.textContent = isGray ? 'B&W' : 'Color';
 
-            // 6. Scaling mode
             if (mode === 'advanced') {
                 const fitPage = document.getElementById('scalingSelect').value === 'true';
                 renderWrap.classList.toggle('scale-fill', !fitPage);
@@ -1656,6 +1672,21 @@ def api_print():
         file.save(tmp.name)
         tmp_path = tmp.name
 
+    # Handle Office Document formats (.docx, .doc, .odt, .rtf) via headless LibreOffice
+    if suffix in ['.docx', '.doc', '.odt', '.rtf']:
+        try:
+            conv_dir = tempfile.mkdtemp()
+            subprocess.run([
+                'libreoffice', '--headless', '--convert-to', 'pdf',
+                tmp_path, '--outdir', conv_dir
+            ], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30)
+            base_name = os.path.splitext(os.path.basename(tmp_path))[0]
+            converted_pdf = os.path.join(conv_dir, f"{base_name}.pdf")
+            if os.path.exists(converted_pdf):
+                tmp_path = converted_pdf
+        except Exception as e:
+            pass
+
     try:
         cmd = ['lp', '-d', printer, '-n', str(copies)]
 
@@ -1708,5 +1739,5 @@ def api_print():
             os.remove(tmp_path)
 
 if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 8080))
+    port = int(os.environ.get('PORT', 80))
     app.run(host='::', port=port)
