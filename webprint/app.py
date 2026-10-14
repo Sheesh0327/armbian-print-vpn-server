@@ -4,17 +4,221 @@ import tempfile
 import time
 import json
 import re
-from flask import Flask, render_template_string, request, jsonify
+import sqlite3
+import hashlib
+import secrets
+import shutil
+from datetime import datetime
+from flask import Flask, render_template_string, request, jsonify, Response, send_file
 
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 150 * 1024 * 1024  # 150MB file size limit
+
+DB_PATH = "/var/lib/webprint/webprint.db"
+SPOOL_PINNED_DIR = "/var/spool/webprint/pinned"
+TEMP_DIR_BASE = "/tmp/webprint"
+
+# Active admin tokens: {token: expires_timestamp}
+ACTIVE_TOKENS = {}
+
+def get_db():
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+def init_db():
+    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+    os.makedirs(SPOOL_PINNED_DIR, exist_ok=True)
+    conn = get_db()
+    with conn:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS settings (
+                key TEXT PRIMARY KEY,
+                value TEXT
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS pinned_jobs (
+                job_id TEXT PRIMARY KEY,
+                file_path TEXT,
+                filename TEXT,
+                pin_hash TEXT,
+                pages INTEGER,
+                copies INTEGER,
+                colormodel TEXT,
+                printer TEXT,
+                options_json TEXT,
+                cost REAL,
+                created_at INTEGER,
+                expires_at INTEGER
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS print_ledger (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp INTEGER,
+                job_title TEXT,
+                printer TEXT,
+                pages INTEGER,
+                copies INTEGER,
+                total_pages INTEGER,
+                colormodel TEXT,
+                cost REAL,
+                client_ip TEXT,
+                status TEXT
+            )
+        """)
+        defaults = {
+            'admin_hash': hashlib.sha256('admin'.encode('utf-8')).hexdigest(),
+            'currency_symbol': '₱',
+            'rate_bw': '2.00',
+            'rate_color': '5.00',
+            'pin_expire_hours': '24'
+        }
+        for k, v in defaults.items():
+            conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", (k, v))
+
+def get_setting(key, default=''):
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute("SELECT value FROM settings WHERE key = ?", (key,))
+        row = cur.fetchone()
+        if row:
+            return row['value']
+    except Exception:
+        pass
+    return default
+
+def get_rate(is_color=False):
+    key = 'rate_color' if is_color else 'rate_bw'
+    val = get_setting(key, '5.00' if is_color else '2.00')
+    try:
+        return float(val)
+    except Exception:
+        return 5.0 if is_color else 2.0
+
+def verify_admin_token(token):
+    if not token:
+        return False
+    exp = ACTIVE_TOKENS.get(token)
+    if exp and exp > time.time():
+        return True
+    if exp:
+        del ACTIVE_TOKENS[token]
+    return False
+
+def record_ledger(title, printer, pages, copies, total_pages, colormodel, cost, client_ip, status):
+    try:
+        conn = get_db()
+        with conn:
+            conn.execute("""
+                INSERT INTO print_ledger 
+                (timestamp, job_title, printer, pages, copies, total_pages, colormodel, cost, client_ip, status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (int(time.time()), title, printer, pages, copies, total_pages, colormodel, cost, client_ip, status))
+    except Exception:
+        pass
+
+def get_printers():
+    printers = []
+    default_printer = None
+    try:
+        res = subprocess.run(['lpstat', '-d'], capture_output=True, text=True, timeout=5)
+        for line in res.stdout.splitlines():
+            if 'system default destination:' in line:
+                default_printer = line.split(':', 1)[1].strip()
+    except Exception:
+        pass
+
+    try:
+        res = subprocess.run(['lpstat', '-e'], capture_output=True, text=True, timeout=5)
+        for line in res.stdout.splitlines():
+            p_name = line.strip()
+            if p_name and p_name not in printers:
+                printers.append(p_name)
+    except Exception:
+        pass
+
+    if not printers:
+        try:
+            res = subprocess.run(['lpstat', '-p'], capture_output=True, text=True, timeout=5)
+            for line in res.stdout.splitlines():
+                m = re.match(r'printer\s+(\S+)', line)
+                if m and m.group(1) not in printers:
+                    printers.append(m.group(1))
+        except Exception:
+            pass
+
+    if not printers and default_printer:
+        printers.append(default_printer)
+
+    printer_details = []
+    for p in printers:
+        is_default = (p == default_printer)
+        status = "idle"
+        status_text = "Ready"
+        try:
+            stat_res = subprocess.run(['lpstat', '-p', p], capture_output=True, text=True, timeout=5)
+            out_lower = stat_res.stdout.lower()
+            if 'printing' in out_lower:
+                status = "printing"
+                status_text = "Printing"
+            elif 'stopped' in out_lower or 'disabled' in out_lower:
+                status = "stopped"
+                status_text = "Stopped"
+        except Exception:
+            pass
+
+        printer_details.append({
+            'name': p,
+            'is_default': is_default,
+            'status': status,
+            'status_text': status_text
+        })
+
+    return printer_details, default_printer
+
+def get_pdf_page_count(pdf_path):
+    try:
+        res = subprocess.run(['pdfinfo', pdf_path], capture_output=True, text=True, timeout=10)
+        for line in res.stdout.splitlines():
+            if line.startswith('Pages:'):
+                return int(line.split(':', 1)[1].strip())
+    except Exception:
+        pass
+    return 1
+
+def convert_to_pdf(input_path, original_filename):
+    ext = os.path.splitext(original_filename)[1].lower()
+    temp_dir = tempfile.mkdtemp(prefix="conv_")
+    output_pdf = os.path.join(temp_dir, "converted.pdf")
+
+    if ext == '.pdf':
+        return input_path, None
+
+    if ext in ['.heic', '.heif', '.avif', '.webp', '.png', '.jpg', '.jpeg', '.bmp', '.tiff', '.tif']:
+        subprocess.run(['convert', input_path, '-auto-orient', output_pdf], check=True, timeout=30)
+        return output_pdf, temp_dir
+
+    if ext in ['.docx', '.doc', '.odt', '.rtf', '.txt', '.csv', '.xlsx', '.xls', '.pptx', '.ppt']:
+        subprocess.run([
+            'libreoffice', '--headless', '--convert-to', 'pdf',
+            input_path, '--outdir', temp_dir
+        ], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=45)
+        base = os.path.splitext(os.path.basename(input_path))[0]
+        conv_file = os.path.join(temp_dir, f"{base}.pdf")
+        if os.path.exists(conv_file):
+            return conv_file, temp_dir
+
+    return input_path, None
 
 INDEX_HTML = """<!DOCTYPE html>
 <html lang="en" data-theme="dark">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Print Server</title>
+    <title>Print Server Appliance</title>
     <script>
         (function() {
             const savedTheme = localStorage.getItem('theme') || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
@@ -22,6 +226,8 @@ INDEX_HTML = """<!DOCTYPE html>
         })();
     </script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.1/fabric.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <style>
         :root {
             --radius-sm: 6px;
@@ -32,7 +238,6 @@ INDEX_HTML = """<!DOCTYPE html>
             --transition-theme: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
         }
 
-        /* Dark Theme Palette (Default) */
         html[data-theme="dark"] {
             --bg: #09090b;
             --surface: #121215;
@@ -52,11 +257,12 @@ INDEX_HTML = """<!DOCTYPE html>
             --paper-shadow: 0 16px 40px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.08);
             --margin-line: rgba(59, 130, 246, 0.45);
             --accent: #3b82f6;
+            --accent-hover: #2563eb;
             --success: #22c55e;
             --danger: #ef4444;
+            --warning: #f59e0b;
         }
 
-        /* Light Theme Palette */
         html[data-theme="light"] {
             --bg: #f8fafc;
             --surface: #ffffff;
@@ -76,8 +282,10 @@ INDEX_HTML = """<!DOCTYPE html>
             --paper-shadow: 0 14px 30px rgba(0, 0, 0, 0.08), 0 0 0 1px rgba(0, 0, 0, 0.06);
             --margin-line: rgba(37, 99, 235, 0.35);
             --accent: #2563eb;
+            --accent-hover: #1d4ed8;
             --success: #16a34a;
             --danger: #dc2626;
+            --warning: #d97706;
         }
 
         * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -95,18 +303,17 @@ INDEX_HTML = """<!DOCTYPE html>
             transition: var(--transition-theme);
         }
 
-        /* Header */
         header {
             border-bottom: 1px solid var(--border);
-            padding: 12px 28px;
+            padding: 10px 24px;
             display: flex;
             align-items: center;
             justify-content: space-between;
             background: var(--surface);
-            transition: var(--transition-theme);
             position: sticky;
             top: 0;
-            z-index: 40;
+            z-index: 50;
+            gap: 16px;
         }
 
         .header-brand {
@@ -117,1702 +324,1610 @@ INDEX_HTML = """<!DOCTYPE html>
 
         .header-title {
             font-size: 15px;
-            font-weight: 600;
-            color: var(--text-primary);
+            font-weight: 700;
             letter-spacing: -0.01em;
-        }
-
-        .printer-status {
-            display: inline-flex;
+            color: var(--text-primary);
+            display: flex;
             align-items: center;
             gap: 6px;
-            font-size: 12px;
-            color: var(--text-secondary);
-            padding: 3px 8px;
-            background: var(--badge-bg);
+        }
+
+        .header-title .tag {
+            font-size: 10px;
+            font-weight: 600;
+            text-transform: uppercase;
+            padding: 2px 6px;
+            border-radius: 4px;
+            background: var(--surface-elevated);
+            color: var(--accent);
             border: 1px solid var(--border);
-            border-radius: 9999px;
+        }
+
+        .printer-select-wrapper {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            background: var(--surface-elevated);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            padding: 4px 10px;
+            font-size: 12px;
         }
 
         .status-dot {
-            width: 6px;
-            height: 6px;
-            background: var(--success);
+            width: 8px;
+            height: 8px;
             border-radius: 50%;
+            background: var(--success);
+            flex-shrink: 0;
         }
+        .status-dot.stopped { background: var(--danger); }
+        .status-dot.printing { background: var(--warning); animation: pulse 1.5s infinite; }
 
-        .header-controls {
-            display: flex;
-            align-items: center;
-            gap: 10px;
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.4; }
+            100% { opacity: 1; }
         }
 
         .header-nav {
             display: flex;
-            gap: 4px;
+            gap: 2px;
             background: var(--surface-elevated);
             padding: 3px;
             border-radius: var(--radius-md);
             border: 1px solid var(--border);
+            overflow-x: auto;
         }
 
         .nav-btn {
             background: transparent;
             border: none;
             color: var(--text-secondary);
-            font-size: 13px;
+            font-size: 12px;
             font-weight: 500;
-            padding: 6px 14px;
+            padding: 6px 12px;
             border-radius: var(--radius-sm);
             cursor: pointer;
+            white-space: nowrap;
             transition: all 0.15s ease;
         }
 
-        .nav-btn:hover {
-            color: var(--text-primary);
-        }
-
+        .nav-btn:hover { color: var(--text-primary); }
         .nav-btn.active {
             background: var(--surface);
             color: var(--text-primary);
-            box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            font-weight: 600;
         }
 
-        /* Theme Toggle Button */
-        .btn-theme {
+        .header-controls {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .btn-theme, .btn-lock {
             background: var(--surface-elevated);
             border: 1px solid var(--border);
             color: var(--text-secondary);
-            width: 34px;
-            height: 34px;
+            padding: 6px 10px;
             border-radius: var(--radius-sm);
             cursor: pointer;
+            font-size: 12px;
             display: flex;
             align-items: center;
-            justify-content: center;
+            gap: 6px;
             transition: all 0.15s;
         }
+        .btn-theme:hover, .btn-lock:hover { color: var(--text-primary); border-color: var(--border-hover); }
 
-        .btn-theme:hover {
-            color: var(--text-primary);
-            border-color: var(--border-hover);
-        }
-
-        .icon-sun, .icon-moon {
-            width: 16px;
-            height: 16px;
-            fill: none;
-            stroke: currentColor;
-            stroke-width: 2;
-            stroke-linecap: round;
-            stroke-linejoin: round;
-        }
-
-        html[data-theme="dark"] .icon-moon { display: none; }
-        html[data-theme="dark"] .icon-sun { display: block; }
-        html[data-theme="light"] .icon-sun { display: none; }
-        html[data-theme="light"] .icon-moon { display: block; }
-
-        /* Wide Main Container (Preview Dominant Layout) */
         main {
             flex: 1;
             max-width: 1600px;
             width: 100%;
             margin: 0 auto;
-            padding: 24px 28px 40px;
+            padding: 20px 24px 40px;
         }
 
-        .tab-content {
-            display: none;
-        }
-        .tab-content.active {
-            display: block;
-        }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
 
-        /* Large Preview + Slim Settings Sidebar Grid */
-        .grid-layout {
-            display: grid;
-            grid-template-columns: minmax(0, 1fr) 370px;
-            gap: 24px;
-            align-items: start;
-        }
-
-        @media (max-width: 1024px) {
-            .grid-layout { grid-template-columns: 1fr; }
-        }
-
-        /* Card Panels */
+        /* Common Card & Grid Layouts */
         .card {
             background: var(--surface);
             border: 1px solid var(--border);
             border-radius: var(--radius-lg);
             padding: 20px;
             box-shadow: 0 1px 3px rgba(0,0,0,0.03);
-            transition: var(--transition-theme);
         }
 
-        .settings-sidebar {
-            position: sticky;
-            top: 76px;
+        .grid-layout {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) 380px;
+            gap: 20px;
+            align-items: start;
         }
 
-        .card-header {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            margin-bottom: 14px;
+        @media (max-width: 1024px) {
+            .grid-layout { grid-template-columns: 1fr; }
+            header { flex-wrap: wrap; }
         }
 
-        .card-heading {
-            font-size: 14px;
+        /* Forms & Inputs */
+        label {
+            display: block;
+            font-size: 11px;
             font-weight: 600;
-            color: var(--text-primary);
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            color: var(--text-secondary);
+            margin-bottom: 6px;
         }
 
-        /* Segmented Mode Switch */
-        .segmented-control {
-            display: inline-flex;
+        input[type="text"], input[type="number"], input[type="password"], select {
+            width: 100%;
             background: var(--surface-elevated);
             border: 1px solid var(--border);
-            padding: 2px;
             border-radius: var(--radius-sm);
+            padding: 8px 12px;
+            font-size: 13px;
+            color: var(--text-primary);
+            outline: none;
+            transition: border-color 0.15s ease;
         }
+        input:focus, select:focus { border-color: var(--accent); }
 
-        .segmented-btn {
-            background: transparent;
+        .form-group { margin-bottom: 16px; }
+
+        .btn-primary {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            width: 100%;
+            background: var(--accent);
+            color: #ffffff;
             border: none;
-            color: var(--text-secondary);
+            padding: 11px 16px;
+            font-size: 13px;
+            font-weight: 600;
+            border-radius: var(--radius-md);
+            cursor: pointer;
+            transition: background 0.15s ease;
+        }
+        .btn-primary:hover { background: var(--accent-hover); }
+        .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        .btn-secondary {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            background: var(--surface-elevated);
+            color: var(--text-primary);
+            border: 1px solid var(--border);
+            padding: 8px 14px;
             font-size: 12px;
             font-weight: 500;
-            padding: 4px 12px;
-            border-radius: 4px;
+            border-radius: var(--radius-sm);
             cursor: pointer;
             transition: all 0.15s;
         }
+        .btn-secondary:hover { border-color: var(--border-hover); }
 
-        .segmented-btn.active {
-            background: var(--surface);
-            color: var(--text-primary);
-            box-shadow: 0 1px 2px rgba(0,0,0,0.05);
-        }
-
-        /* Upload Dropzone (Compact in Preview Header) */
-        .dropzone {
-            border: 1px dashed var(--border-hover);
-            border-radius: var(--radius-md);
-            padding: 20px;
-            text-align: center;
-            cursor: pointer;
-            background: var(--bg);
-            transition: border-color 0.15s ease, background-color 0.2s ease;
-            margin-bottom: 16px;
-        }
-
-        .dropzone:hover, .dropzone.dragover {
-            border-color: var(--text-secondary);
-        }
-
-        .dropzone-label {
-            font-size: 13px;
-            font-weight: 500;
-            color: var(--text-primary);
-            margin-bottom: 2px;
-        }
-
-        .dropzone-sub {
-            font-size: 12px;
-            color: var(--text-tertiary);
-        }
-
-        /* High-Impact Real-Time Paper Preview */
-        .preview-box {
+        /* Cost Badge Card */
+        .cost-card {
+            background: var(--surface-elevated);
             border: 1px solid var(--border);
             border-radius: var(--radius-md);
-            background: var(--surface);
-            overflow: hidden;
-        }
-
-        .preview-head {
+            padding: 12px 16px;
+            margin-bottom: 16px;
             display: flex;
             align-items: center;
             justify-content: space-between;
-            padding: 10px 16px;
-            border-bottom: 1px solid var(--border);
-            font-size: 12px;
-            color: var(--text-secondary);
+        }
+        .cost-title { font-size: 12px; color: var(--text-secondary); }
+        .cost-amount { font-size: 18px; font-weight: 700; color: var(--accent); font-family: var(--font-mono); }
+
+        /* Drag & Drop Upload Zone */
+        .dropzone {
+            border: 2px dashed var(--border);
+            border-radius: var(--radius-lg);
+            padding: 32px 20px;
+            text-align: center;
             background: var(--surface);
-        }
-
-        .preview-info {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            overflow: hidden;
-        }
-
-        .preview-name {
-            font-weight: 500;
-            color: var(--text-primary);
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            max-width: 260px;
-        }
-
-        .preview-meta-pill {
-            font-size: 11px;
-            font-family: var(--font-mono);
-            color: var(--text-tertiary);
-            background: var(--surface-elevated);
-            padding: 2px 6px;
-            border-radius: 4px;
-            border: 1px solid var(--border);
-        }
-
-        .btn-clear {
-            background: transparent;
-            border: none;
-            color: var(--text-tertiary);
             cursor: pointer;
-            font-size: 13px;
-            padding: 2px 6px;
-            border-radius: 4px;
+            transition: all 0.2s ease;
+            position: relative;
         }
-        .btn-clear:hover {
-            color: var(--text-primary);
+        .dropzone:hover, .dropzone.dragover {
+            border-color: var(--accent);
             background: var(--surface-elevated);
         }
+        .dropzone input[type="file"] {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            opacity: 0;
+            cursor: pointer;
+        }
 
-        /* Large Virtual Workspace Viewport */
-        .preview-viewport {
+        /* Paper Preview Desk */
+        .preview-desk {
             background: var(--desk-bg);
-            padding: 36px 20px;
+            border: 1px solid var(--border);
+            border-radius: var(--radius-lg);
+            min-height: 580px;
             display: flex;
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            min-height: 600px;
+            padding: 24px;
             position: relative;
             overflow: hidden;
-            transition: var(--transition-theme);
         }
 
-        /* Simulated Physical Paper Sheet with Smooth Animation */
         .paper-sheet {
             background: var(--paper-bg);
             color: var(--paper-text);
             box-shadow: var(--paper-shadow);
-            border-radius: 3px;
-            position: relative;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            overflow: hidden;
-            transition: width 0.25s cubic-bezier(0.16, 1, 0.3, 1), 
-                        height 0.25s cubic-bezier(0.16, 1, 0.3, 1),
-                        filter 0.2s ease;
-        }
-
-        /* Dynamic Printable Margins Box */
-        .printable-area {
-            position: absolute;
-            border: 1px dashed var(--margin-line);
             border-radius: 2px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            overflow: hidden;
-            pointer-events: none;
-            transition: top 0.2s ease, bottom 0.2s ease, left 0.2s ease, right 0.2s ease;
-        }
-
-        /* Document Render Inside Margins */
-        .content-render-wrap {
-            width: 100%;
-            height: 100%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            pointer-events: auto;
-        }
-
-        .content-render-wrap img {
-            max-width: 100%;
-            max-height: 100%;
-            object-fit: contain;
-            display: block;
-        }
-
-        .content-render-wrap.scale-fill img {
-            object-fit: cover;
-            width: 100%;
-            height: 100%;
-        }
-
-        #pdfCanvas {
-            max-width: 100%;
-            max-height: 100%;
-            object-fit: contain;
-            display: block;
-        }
-
-        .text-sheet-content {
-            font-family: var(--font-mono);
-            font-size: 11px;
-            line-height: 1.4;
-            color: #1e293b;
-            padding: 8px;
-            overflow: hidden;
-            width: 100%;
-            height: 100%;
-            word-break: break-all;
-            white-space: pre-wrap;
-        }
-
-        /* Live Preview Metadata Tag */
-        .preview-dimensions-tag {
-            margin-top: 18px;
-            font-size: 11px;
-            font-family: var(--font-mono);
-            color: var(--text-tertiary);
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            background: var(--surface);
-            padding: 4px 12px;
-            border-radius: 9999px;
-            border: 1px solid var(--border);
-        }
-
-        .preview-pagination {
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            font-size: 11px;
-            color: var(--text-tertiary);
-        }
-
-        .page-btn {
-            background: var(--surface);
-            border: 1px solid var(--border);
-            color: var(--text-secondary);
-            padding: 1px 6px;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 11px;
-        }
-
-        /* Form Controls */
-        .form-row {
-            margin-bottom: 14px;
-        }
-
-        .label {
-            display: block;
-            font-size: 12px;
-            font-weight: 500;
-            color: var(--text-secondary);
-            margin-bottom: 5px;
-        }
-
-        .input, select {
-            width: 100%;
-            background: var(--bg);
-            border: 1px solid var(--border);
-            color: var(--text-primary);
-            font-family: inherit;
-            font-size: 13px;
-            padding: 7px 10px;
-            border-radius: var(--radius-sm);
-            outline: none;
-            transition: border-color 0.15s;
-        }
-
-        .input:focus, select:focus {
-            border-color: var(--text-secondary);
-        }
-
-        .grid-2 {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 10px;
-        }
-
-        .grid-4 {
-            display: grid;
-            grid-template-columns: 1fr 1fr 1fr 1fr;
-            gap: 6px;
-        }
-
-        .margin-input-col {
-            text-align: center;
-        }
-
-        .margin-input-col span {
-            display: block;
-            font-size: 10px;
-            color: var(--text-tertiary);
-            margin-bottom: 2px;
-            font-family: var(--font-mono);
-        }
-
-        .margin-input-col input {
-            text-align: center;
-            padding: 5px 2px;
-            font-size: 12px;
-            font-family: var(--font-mono);
-        }
-
-        /* Segmented Radios */
-        .radio-pills {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 6px;
-        }
-
-        .radio-pill {
             position: relative;
-        }
-
-        .radio-pill input {
-            position: absolute;
-            opacity: 0;
-            width: 0;
-            height: 0;
-        }
-
-        .radio-pill label {
-            display: block;
-            text-align: center;
-            padding: 7px 8px;
-            font-size: 12px;
-            font-weight: 500;
-            color: var(--text-secondary);
-            background: var(--bg);
-            border: 1px solid var(--border);
-            border-radius: var(--radius-sm);
-            cursor: pointer;
-            transition: all 0.15s;
-        }
-
-        .radio-pill input:checked + label {
-            background: var(--surface-elevated);
-            border-color: var(--text-secondary);
-            color: var(--text-primary);
-        }
-
-        /* Copies Stepper */
-        .stepper {
-            display: flex;
-            align-items: center;
-            background: var(--bg);
-            border: 1px solid var(--border);
-            border-radius: var(--radius-sm);
-        }
-
-        .stepper-btn {
-            background: transparent;
-            border: none;
-            color: var(--text-secondary);
-            width: 30px;
-            height: 32px;
-            font-size: 14px;
-            cursor: pointer;
             display: flex;
             align-items: center;
             justify-content: center;
+            transition: transform 0.2s ease, width 0.2s ease, height 0.2s ease;
         }
 
-        .stepper-btn:hover {
-            color: var(--text-primary);
-        }
-
-        .stepper-val {
-            flex: 1;
-            border: none !important;
-            text-align: center;
-            font-size: 13px;
-            font-weight: 500;
-            padding: 0;
-            background: transparent !important;
-        }
-
-        /* Primary Print Button */
-        .btn-submit {
+        .canvas-container {
+            position: relative;
             width: 100%;
-            background: var(--btn-bg);
-            color: var(--btn-text);
-            border: none;
-            font-family: inherit;
-            font-size: 13px;
-            font-weight: 600;
-            padding: 10px 16px;
-            border-radius: var(--radius-sm);
-            cursor: pointer;
-            transition: opacity 0.15s;
-            margin-top: 18px;
+            height: 100%;
         }
 
-        .btn-submit:hover {
-            opacity: 0.9;
-        }
-
-        .btn-submit:disabled {
-            opacity: 0.4;
-            cursor: not-allowed;
-        }
-
-        /* Simple Feedback Toast */
-        .toast {
-            margin-top: 14px;
-            padding: 10px 14px;
-            border-radius: var(--radius-sm);
-            font-size: 12px;
-            display: none;
-        }
-
-        .toast.success {
-            background: rgba(34, 197, 94, 0.1);
-            border: 1px solid rgba(34, 197, 94, 0.25);
-            color: var(--success);
-        }
-
-        .toast.error {
-            background: rgba(239, 68, 68, 0.1);
-            border: 1px solid rgba(239, 68, 68, 0.25);
-            color: var(--danger);
-        }
-
-        /* Jobs Queue Table */
-        .table {
-            width: 100%;
-            border-collapse: collapse;
-            font-size: 13px;
-        }
-
-        .table th {
-            text-align: left;
-            padding: 10px 12px;
-            font-size: 12px;
-            font-weight: 500;
-            color: var(--text-tertiary);
-            border-bottom: 1px solid var(--border);
-        }
-
-        .table td {
-            padding: 12px;
-            border-bottom: 1px solid var(--border);
-            color: var(--text-secondary);
-        }
-
-        .table tr:last-child td {
-            border-bottom: none;
-        }
-
-        .badge-status {
-            display: inline-block;
-            font-size: 11px;
-            font-weight: 500;
-            padding: 2px 6px;
-            border-radius: 4px;
-            background: var(--surface-elevated);
-            border: 1px solid var(--border);
-        }
-
-        .badge-status.active {
-            color: var(--accent);
-            border-color: rgba(37, 99, 235, 0.4);
-        }
-
-        .badge-status.completed {
-            color: var(--text-tertiary);
-        }
-
-        .btn-action {
-            background: transparent;
-            border: 1px solid var(--border);
-            color: var(--text-secondary);
-            font-size: 11px;
-            padding: 3px 8px;
-            border-radius: 4px;
-            cursor: pointer;
-        }
-
-        .btn-action:hover {
-            color: var(--danger);
-            border-color: var(--danger);
-        }
-
-        /* System Telemetry List */
-        .info-list {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-            gap: 16px;
-        }
-
-        .info-item {
-            background: var(--bg);
-            border: 1px solid var(--border);
-            border-radius: var(--radius-md);
-            padding: 14px;
-        }
-
-        .info-label {
-            font-size: 11px;
-            color: var(--text-tertiary);
-            text-transform: uppercase;
-            letter-spacing: 0.04em;
-            margin-bottom: 4px;
-        }
-
-        .info-value {
-            font-family: var(--font-mono);
-            font-size: 13px;
-            color: var(--text-primary);
-        }
-
-        .info-value a {
-            color: var(--accent);
-            text-decoration: none;
-        }
-        .info-value a:hover {
-            text-decoration: underline;
-        }
-
-        footer {
-            border-top: 1px solid var(--border);
-            padding: 18px 28px;
-            font-size: 12px;
-            color: var(--text-tertiary);
+        /* Design Studio Toolbar */
+        .studio-topbar {
             display: flex;
             align-items: center;
             justify-content: space-between;
+            gap: 12px;
+            flex-wrap: wrap;
+            padding-bottom: 16px;
+            border-bottom: 1px solid var(--border);
+            margin-bottom: 16px;
+        }
+        .studio-tools {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .studio-layout {
+            display: grid;
+            grid-template-columns: 240px 1fr 280px;
+            gap: 16px;
+            align-items: start;
+        }
+        @media (max-width: 1200px) {
+            .studio-layout { grid-template-columns: 1fr; }
+        }
+
+        .studio-sidebar {
             background: var(--surface);
-            transition: var(--transition-theme);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-lg);
+            padding: 16px;
         }
 
-        footer a {
+        .stamp-btn {
+            display: block;
+            width: 100%;
+            text-align: left;
+            padding: 8px 12px;
+            margin-bottom: 6px;
+            background: var(--surface-elevated);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            color: var(--text-primary);
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        .stamp-btn:hover { border-color: var(--accent); background: var(--surface); }
+
+        /* Walk-Up Photocopy Touch Kiosk */
+        .kiosk-container {
+            max-width: 720px;
+            margin: 0 auto;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-lg);
+            padding: 32px;
+        }
+
+        .touch-stepper {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 16px;
+            margin: 12px 0 24px;
+        }
+        .step-btn {
+            width: 52px;
+            height: 52px;
+            border-radius: 50%;
+            background: var(--surface-elevated);
+            border: 1px solid var(--border);
+            color: var(--text-primary);
+            font-size: 22px;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        .step-btn:hover { border-color: var(--accent); color: var(--accent); }
+        .step-display {
+            font-size: 36px;
+            font-weight: 800;
+            font-family: var(--font-mono);
+            min-width: 80px;
+            text-align: center;
+        }
+
+        .touch-modes {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+        .touch-mode-btn {
+            background: var(--surface-elevated);
+            border: 2px solid var(--border);
+            border-radius: var(--radius-md);
+            padding: 20px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        .touch-mode-btn.active {
+            border-color: var(--accent);
+            background: var(--surface);
+        }
+        .touch-mode-title { font-size: 16px; font-weight: 700; margin-bottom: 4px; }
+        .touch-mode-desc { font-size: 12px; color: var(--text-secondary); }
+
+        /* Tables */
+        .table-wrapper {
+            width: 100%;
+            overflow-x: auto;
+            border: 1px solid var(--border);
+            border-radius: var(--radius-md);
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+            text-align: left;
+        }
+        th {
+            background: var(--surface-elevated);
+            padding: 10px 14px;
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
             color: var(--text-secondary);
-            text-decoration: none;
+            border-bottom: 1px solid var(--border);
         }
-
-        footer a:hover {
-            text-decoration: underline;
+        td {
+            padding: 10px 14px;
+            border-bottom: 1px solid var(--border);
+            color: var(--text-primary);
         }
+        tr:last-child td { border-bottom: none; }
 
-        @keyframes spin {
-            to { transform: rotate(360deg); }
+        /* Status Toast */
+        .toast {
+            position: fixed;
+            bottom: 24px;
+            right: 24px;
+            background: var(--surface-elevated);
+            border: 1px solid var(--border);
+            box-shadow: 0 10px 25px rgba(0,0,0,0.2);
+            border-radius: var(--radius-md);
+            padding: 12px 20px;
+            font-size: 13px;
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            z-index: 100;
+            transform: translateY(150%);
+            transition: transform 0.25s ease;
+        }
+        .toast.show { transform: translateY(0); }
+        .toast.success { border-color: var(--success); }
+        .toast.error { border-color: var(--danger); }
+
+        /* Modal */
+        .modal-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.6);
+            backdrop-filter: blur(4px);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 90;
+        }
+        .modal-overlay.show { display: flex; }
+        .modal-card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-lg);
+            padding: 24px;
+            max-width: 420px;
+            width: 90%;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.4);
         }
     </style>
 </head>
 <body>
 
-    <header>
-        <div class="header-brand">
-            <span class="header-title">Print Server</span>
-            <div class="printer-status">
-                <span class="status-dot"></span>
-                <span id="headerStatusText">HP Smart Tank 520</span>
+<header>
+    <div class="header-brand">
+        <div class="header-title">
+            PRINTSERVER
+            <span class="tag">APPLIANCE</span>
+        </div>
+        <div class="printer-select-wrapper">
+            <span class="status-dot" id="headerStatusDot"></span>
+            <select id="headerPrinterSelect" style="border:none; background:transparent; padding:0; font-size:12px; font-weight:600;">
+                <option value="">Detecting printers...</option>
+            </select>
+        </div>
+    </div>
+
+    <nav class="header-nav">
+        <button class="nav-btn active" data-tab="print">Print</button>
+        <button class="nav-btn" data-tab="studio">Design Studio</button>
+        <button class="nav-btn" data-tab="copy">Photocopy</button>
+        <button class="nav-btn" data-tab="scan">Scan</button>
+        <button class="nav-btn" data-tab="pin">PIN Release</button>
+        <button class="nav-btn" data-tab="history">History</button>
+        <button class="nav-btn" data-tab="settings">Settings</button>
+    </nav>
+
+    <div class="header-controls">
+        <button class="btn-lock" id="btnAdminLock">🔒 Locked</button>
+        <button class="btn-theme" id="btnThemeToggle" title="Toggle theme">🌓</button>
+    </div>
+</header>
+
+<main>
+    <!-- TAB 1: PRINT -->
+    <div class="tab-content active" id="tab-print">
+        <div class="grid-layout">
+            <div class="preview-desk">
+                <div class="paper-sheet" id="paperSheet" style="width: 420px; height: 594px;">
+                    <canvas id="pdfCanvas" style="max-width:100%; max-height:100%;"></canvas>
+                </div>
+                <div id="previewEmptyState" style="text-align: center; color: var(--text-tertiary);">
+                    <div style="font-size: 32px; margin-bottom: 8px;">📄</div>
+                    <div style="font-weight: 500;">No document loaded</div>
+                    <div style="font-size: 12px;">Drop PDF, Office Doc, or Photo on the right to preview</div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="form-group">
+                    <label>Document Ingestion</label>
+                    <div class="dropzone" id="printDropzone">
+                        <input type="file" id="printFileInput" accept=".pdf,.doc,.docx,.odt,.rtf,.txt,.csv,.xlsx,.xls,.pptx,.ppt,.png,.jpg,.jpeg,.webp,.heic,.heif,.avif,.tiff,.bmp">
+                        <div style="font-size: 24px; margin-bottom: 4px;">📂</div>
+                        <div style="font-weight: 600;" id="printFileName">Click or drop file here</div>
+                        <div style="font-size: 11px; color: var(--text-tertiary); margin-top: 4px;">
+                            PDF, Word, Excel, PPT, iPhone HEIC/AVIF, Images
+                        </div>
+                    </div>
+                </div>
+
+                <div class="cost-card">
+                    <div>
+                        <div class="cost-title">Pre-Flight Estimated Cost</div>
+                        <div style="font-size: 11px; color: var(--text-secondary);" id="costDetails">0 pages</div>
+                    </div>
+                    <div class="cost-amount" id="costTotal">₱0.00</div>
+                </div>
+
+                <div class="form-group">
+                    <label>Copies</label>
+                    <input type="number" id="printCopies" min="1" max="99" value="1">
+                </div>
+
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                    <div class="form-group">
+                        <label>Paper Size</label>
+                        <select id="printPageSize">
+                            <option value="A4" selected>A4 (210 x 297 mm)</option>
+                            <option value="Letter">US Letter</option>
+                            <option value="Legal">Legal</option>
+                            <option value="4x6in">4x6" Photo</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Color Mode</label>
+                        <select id="printColorModel">
+                            <option value="RGB" selected>Full Color</option>
+                            <option value="KGray">Black & White (Grayscale)</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                    <div class="form-group">
+                        <label>DPI / Quality</label>
+                        <select id="printDpi">
+                            <option value="150">150 DPI (Fast)</option>
+                            <option value="300" selected>300 DPI (High Quality)</option>
+                            <option value="600">600 DPI (Ultra Fine)</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Duplex (Two-Sided)</label>
+                        <select id="printDuplex">
+                            <option value="None" selected>Single-Sided</option>
+                            <option value="DuplexNoTumble">Long-Edge Duplex</option>
+                            <option value="DuplexTumble">Short-Edge Duplex</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="form-group" style="padding-top: 6px;">
+                    <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; text-transform: none; font-size: 13px;">
+                        <input type="checkbox" id="chkPinHold">
+                        <span>Hold in Confidential PIN Queue</span>
+                    </label>
+                    <div id="pinInputWrapper" style="display: none; margin-top: 8px;">
+                        <label>Enter 4-Digit Release PIN</label>
+                        <input type="password" id="printPin" maxlength="4" placeholder="••••" style="text-align: center; font-size: 18px; letter-spacing: 0.3em; font-family: var(--font-mono);">
+                    </div>
+                </div>
+
+                <button class="btn-primary" id="btnSubmitPrint">
+                    <span>🖨️ Send to Printer</span>
+                </button>
             </div>
         </div>
+    </div>
 
-        <div class="header-controls">
-            <nav class="header-nav">
-                <button class="nav-btn active" onclick="showTab('print')">Print</button>
-                <button class="nav-btn" onclick="showTab('scan')">Scan</button>
-                <button class="nav-btn" onclick="showTab('queue')">Queue</button>
-                <button class="nav-btn" onclick="showTab('system')">System</button>
-            </nav>
+    <!-- TAB 2: DESIGN STUDIO (CANVA-STYLE) -->
+    <div class="tab-content" id="tab-studio">
+        <div class="card" style="margin-bottom: 16px;">
+            <div class="studio-topbar">
+                <div class="studio-tools">
+                    <div>
+                        <label>Preset Canvas</label>
+                        <select id="studioPreset" style="width: auto;">
+                            <option value="a4" selected>A4 Document (Default)</option>
+                            <option value="letter">US Letter</option>
+                            <option value="photo46">4x6" Photo</option>
+                            <option value="idgrid">2x2" ID Photo Grid</option>
+                        </select>
+                    </div>
 
-            <button type="button" class="btn-theme" onclick="toggleTheme()" title="Toggle theme">
-                <!-- Sun Icon -->
-                <svg class="icon-sun" viewBox="0 0 24 24">
-                    <circle cx="12" cy="12" r="5"></circle>
-                    <line x1="12" y1="1" x2="12" y2="3"></line>
-                    <line x1="12" y1="21" x2="12" y2="23"></line>
-                    <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
-                    <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
-                    <line x1="1" y1="12" x2="3" y2="12"></line>
-                    <line x1="21" y1="12" x2="23" y2="12"></line>
-                    <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
-                    <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
-                </svg>
-                <!-- Moon Icon -->
-                <svg class="icon-moon" viewBox="0 0 24 24">
-                    <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
-                </svg>
+                    <div>
+                        <label>Output DPI</label>
+                        <select id="studioDpi" style="width: auto;">
+                            <option value="150">150 DPI (Draft)</option>
+                            <option value="300" selected>300 DPI (High-Res Print)</option>
+                            <option value="600">600 DPI (Ultra Crisp)</option>
+                        </select>
+                    </div>
+
+                    <button class="btn-secondary" id="btnStudioAddText">+ Add Text</button>
+                    <button class="btn-secondary" id="btnStudioUploadImg">📷 Add Photo</button>
+                    <input type="file" id="studioImgInput" accept="image/*" style="display:none;">
+                    <button class="btn-secondary" id="btnStudioIdGrid">👤 2x2 ID Maker</button>
+                    <button class="btn-secondary" id="btnStudioClear">🗑️ Clear</button>
+                </div>
+
+                <div style="display: flex; gap: 10px;">
+                    <button class="btn-secondary" id="btnStudioDownloadPdf">💾 Download PDF</button>
+                    <button class="btn-primary" id="btnStudioDirectPrint" style="width: auto; padding: 8px 20px;">🖨️ Print Direct</button>
+                </div>
+            </div>
+
+            <div class="studio-layout">
+                <div class="studio-sidebar">
+                    <label>Enterprise Stamps</label>
+                    <button class="stamp-btn" data-stamp="APPROVED" style="color: var(--success); border-color: rgba(34,197,94,0.3);">✓ APPROVED</button>
+                    <button class="stamp-btn" data-stamp="CONFIDENTIAL" style="color: var(--danger); border-color: rgba(239,68,68,0.3);">🔒 CONFIDENTIAL</button>
+                    <button class="stamp-btn" data-stamp="PAID" style="color: var(--accent); border-color: rgba(59,130,246,0.3);">💵 PAID</button>
+                    <button class="stamp-btn" data-stamp="URGENT" style="color: var(--warning); border-color: rgba(245,158,11,0.3);">⚠️ URGENT</button>
+                    <button class="stamp-btn" data-stamp="SIGNATURE">✍ Authorized Signature</button>
+
+                    <div style="margin-top: 16px;">
+                        <label>Shapes & Accents</label>
+                        <button class="stamp-btn" id="btnAddRect">▭ Rectangle</button>
+                        <button class="stamp-btn" id="btnAddCircle">◯ Circle</button>
+                        <button class="stamp-btn" id="btnAddLine">— Divider Line</button>
+                    </div>
+                </div>
+
+                <div class="preview-desk" style="min-height: 620px;">
+                    <div style="box-shadow: var(--paper-shadow); background: #ffffff;">
+                        <canvas id="studioFabricCanvas"></canvas>
+                    </div>
+                </div>
+
+                <div class="studio-sidebar">
+                    <label>Selected Layer Tools</label>
+                    <div class="form-group">
+                        <label>Text / Color</label>
+                        <input type="color" id="studioColorPicker" value="#000000" style="height: 36px; padding: 2px; cursor: pointer;">
+                    </div>
+                    <div class="form-group">
+                        <label>Font Family</label>
+                        <select id="studioFontFamily">
+                            <option value="Arial">Arial (Clean Sans)</option>
+                            <option value="Georgia">Georgia (Classic Serif)</option>
+                            <option value="Courier New">Courier (Monospace)</option>
+                            <option value="Impact">Impact (Bold Title)</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Image Filter</label>
+                        <select id="studioImageFilter">
+                            <option value="none">Original Colors</option>
+                            <option value="grayscale">Black & White (Grayscale)</option>
+                            <option value="sepia">Sepia / Vintage</option>
+                            <option value="contrast">High Contrast</option>
+                        </select>
+                    </div>
+                    <div style="display: flex; gap: 6px; margin-top: 12px;">
+                        <button class="btn-secondary" id="btnLayerUp" style="flex:1;">Bring Up</button>
+                        <button class="btn-secondary" id="btnLayerDown" style="flex:1;">Send Down</button>
+                        <button class="btn-secondary" id="btnLayerDelete" style="color: var(--danger);">✕</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- TAB 3: PHOTOCOPY (WALK-UP COPIER) -->
+    <div class="tab-content" id="tab-copy">
+        <div class="kiosk-container">
+            <h2 style="font-size: 20px; font-weight: 700; margin-bottom: 4px; text-align: center;">Digital Walk-Up Photocopier</h2>
+            <p style="font-size: 13px; color: var(--text-secondary); text-align: center; margin-bottom: 24px;">Place your document on the scanner flatbed and press Start</p>
+
+            <label style="text-align: center;">Select Color Mode</label>
+            <div class="touch-modes">
+                <div class="touch-mode-btn active" id="btnCopyBw" data-mode="Gray">
+                    <div class="touch-mode-title">Black & White</div>
+                    <div class="touch-mode-desc">High-speed grayscale copy</div>
+                </div>
+                <div class="touch-mode-btn" id="btnCopyColor" data-mode="Color">
+                    <div class="touch-mode-title">Full Color</div>
+                    <div class="touch-mode-desc">Vibrant color replication</div>
+                </div>
+            </div>
+
+            <label style="text-align: center;">Number of Copies</label>
+            <div class="touch-stepper">
+                <button class="step-btn" id="btnCopyMinus">-</button>
+                <div class="step-display" id="copyCountDisplay">1</div>
+                <button class="step-btn" id="btnCopyPlus">+</button>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 24px;">
+                <div>
+                    <label>Copy Resolution (DPI)</label>
+                    <select id="copyResolution">
+                        <option value="150">150 DPI (Fast Copy)</option>
+                        <option value="300" selected>300 DPI (Standard Copy)</option>
+                        <option value="600">600 DPI (High-Definition)</option>
+                    </select>
+                </div>
+                <div>
+                    <label>Paper Size</label>
+                    <select id="copyPageSize">
+                        <option value="A4" selected>A4 Paper</option>
+                        <option value="Letter">US Letter</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="form-group" style="margin-bottom: 24px;">
+                <label>Darkness / Contrast Adjustment (<span id="copyContrastVal">Normal</span>)</label>
+                <input type="range" id="copyContrast" min="-20" max="20" value="0" style="width: 100%;">
+            </div>
+
+            <button class="btn-primary" id="btnStartPhotocopy" style="padding: 16px; font-size: 16px;">
+                🖨️ Start Digital Photocopy
             </button>
+            <div id="copyStatusText" style="text-align: center; margin-top: 12px; font-size: 12px; color: var(--text-secondary);"></div>
         </div>
-    </header>
+    </div>
 
-    <main>
-        <!-- TAB: PRINT (Preview Dominant Split) -->
-        <div id="tab-print" class="tab-content active">
-            <form id="printForm">
-                <div class="grid-layout">
-                    
-                    <!-- Left Column: Large Dynamic Preview (Dominant Share) -->
-                    <div class="card">
-                        <div class="card-header">
-                            <span class="card-heading">Document Preview</span>
-                            <span id="fileBadge" style="font-size: 11px; color: var(--text-tertiary);">No file selected</span>
-                        </div>
-
-                        <input type="file" id="fileInput" name="file" style="display: none;" accept=".pdf,.png,.jpg,.jpeg,.txt,.doc,.docx,.odt,.rtf">
-                        <div class="dropzone" id="dropzone">
-                            <div class="dropzone-label">Click or drop document to preview & print</div>
-                            <div class="dropzone-sub">Supports PDF, DOCX, Word, Images, TXT</div>
-                        </div>
-
-                        <div class="preview-box" id="previewBox" style="display: none;">
-                            <div class="preview-head">
-                                <div class="preview-info">
-                                    <span class="preview-name" id="previewName">file.pdf</span>
-                                    <span class="preview-meta-pill" id="previewSizePill">0 KB</span>
-                                </div>
-                                <div style="display: flex; align-items: center; gap: 8px;">
-                                    <div class="preview-pagination" id="previewPagination" style="display: none;">
-                                        <button type="button" class="page-btn" id="btnPrev">‹</button>
-                                        <span id="pageIndicator">1 / 1</span>
-                                        <button type="button" class="page-btn" id="btnNext">›</button>
-                                    </div>
-                                    <button type="button" class="btn-clear" onclick="clearFile()">✕</button>
-                                </div>
-                            </div>
-
-                            <!-- Large Virtual Desk with Realistic Paper Sheet -->
-                            <div class="preview-viewport">
-                                <div class="paper-sheet" id="paperSheet">
-                                    <div class="printable-area" id="printableArea">
-                                        <div class="content-render-wrap" id="renderWrap">
-                                            <img id="imgPreview" style="display: none;" alt="Preview">
-                                            <canvas id="pdfCanvas" style="display: none;"></canvas>
-                                            <div id="txtPreview" class="text-sheet-content" style="display: none;"></div>
-                                        </div>
-                                    </div>
-                                </div>
-                                <div class="preview-dimensions-tag">
-                                    <span id="sheetFormatTag">A4 • 210 × 297 mm</span>
-                                    <span>•</span>
-                                    <span id="sheetOrientationTag">Portrait</span>
-                                    <span>•</span>
-                                    <span id="sheetMarginTag">Printable Area</span>
-                                    <span>•</span>
-                                    <span id="sheetColorTag">Color</span>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Right Column: Settings Panel (Slim Sidebar) -->
-                    <div class="card settings-sidebar">
-                        <div class="card-header">
-                            <span class="card-heading">Settings</span>
-                            <div class="segmented-control">
-                                <button type="button" class="segmented-btn active" id="btnSimple" onclick="setMode('simple')">Simple</button>
-                                <button type="button" class="segmented-btn" id="btnAdv" onclick="setMode('advanced')">Advanced</button>
-                            </div>
-                        </div>
-
-                        <!-- Destination Printer -->
-                        <div class="form-row">
-                            <label class="label" for="printerSelect">Printer</label>
-                            <select id="printerSelect" name="printer" required>
-                                <option value="HP_Smart_Tank_520">HP Smart Tank 520</option>
-                            </select>
-                        </div>
-
-                        <!-- Copies & Color Mode -->
-                        <div class="grid-2 form-row">
-                            <div>
-                                <label class="label">Copies</label>
-                                <div class="stepper">
-                                    <button type="button" class="stepper-btn" onclick="stepCopies(-1)">−</button>
-                                    <input type="number" id="copiesInput" name="copies" class="input stepper-val" value="1" min="1" max="99">
-                                    <button type="button" class="stepper-btn" onclick="stepCopies(1)">+</button>
-                                </div>
-                            </div>
-                            <div>
-                                <label class="label">Color</label>
-                                <div class="radio-pills">
-                                    <div class="radio-pill">
-                                        <input type="radio" id="colRGB" name="colormodel" value="RGB" checked onchange="updatePreviewLayout()">
-                                        <label for="colRGB">Color</label>
-                                    </div>
-                                    <div class="radio-pill">
-                                        <input type="radio" id="colGray" name="colormodel" value="KGray" onchange="updatePreviewLayout()">
-                                        <label for="colGray">B&W</label>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- Simple Mode: Basic Paper Size -->
-                        <div id="secSimple">
-                            <div class="form-row">
-                                <label class="label">Paper Size</label>
-                                <select id="simpleSize" onchange="syncSize(this.value)">
-                                    <option value="A4" selected>A4 (210 × 297 mm)</option>
-                                    <option value="Letter">Letter (8.5 × 11 in)</option>
-                                    <option value="Legal">Legal (8.5 × 14 in)</option>
-                                    <option value="4x6in">4 × 6 in Photo</option>
-                                    <option value="5x7in">5 × 7 in Photo</option>
-                                </select>
-                            </div>
-                        </div>
-
-                        <!-- Advanced Mode: Detailed Controls -->
-                        <div id="secAdv" style="display: none;">
-                            <div class="grid-2 form-row">
-                                <div>
-                                    <label class="label">Paper Size</label>
-                                    <select id="advSize" name="pagesize" onchange="updatePreviewLayout()">
-                                        <option value="A4" selected>A4</option>
-                                        <option value="Letter">Letter</option>
-                                        <option value="Legal">Legal</option>
-                                        <option value="A5">A5</option>
-                                        <option value="A6">A6</option>
-                                        <option value="B5">B5</option>
-                                        <option value="4x6in">4 × 6 in</option>
-                                        <option value="5x7in">5 × 7 in</option>
-                                        <option value="8x10">8 × 10 in</option>
-                                        <option value="EnvelopeDL">Envelope DL</option>
-                                    </select>
-                                </div>
-                                <div>
-                                    <label class="label">Media Type</label>
-                                    <select name="mediatype">
-                                        <option value="Plain" selected>Plain Paper</option>
-                                        <option value="Glossy">Glossy Photo</option>
-                                        <option value="FastGlossy">Everyday Photo</option>
-                                        <option value="CoatedMatte">Matte Paper</option>
-                                        <option value="CoatedBrochure">Brochure</option>
-                                    </select>
-                                </div>
-                            </div>
-
-                            <!-- Margin Controls with Custom Inputs -->
-                            <div class="form-row">
-                                <label class="label">Margins</label>
-                                <select id="marginSelect" name="margin_mode" onchange="handleMarginChange(this.value)">
-                                    <option value="printable" selected>Full Printable Area (Standard)</option>
-                                    <option value="none">Zero / Borderless (0 mm)</option>
-                                    <option value="normal">Normal (12.7 mm / 0.5 in)</option>
-                                    <option value="custom">Custom Margins...</option>
-                                </select>
-                            </div>
-
-                            <!-- Custom Margin mm Inputs (Hidden unless Custom is selected) -->
-                            <div id="customMarginBox" class="form-row" style="display: none;">
-                                <label class="label" style="font-size: 11px;">Custom Margins (mm)</label>
-                                <div class="grid-4">
-                                    <div class="margin-input-col">
-                                        <span>Top</span>
-                                        <input type="number" id="mTop" name="m_top" class="input" value="10" min="0" max="60" oninput="updatePreviewLayout()">
-                                    </div>
-                                    <div class="margin-input-col">
-                                        <span>Bottom</span>
-                                        <input type="number" id="mBottom" name="m_bottom" class="input" value="10" min="0" max="60" oninput="updatePreviewLayout()">
-                                    </div>
-                                    <div class="margin-input-col">
-                                        <span>Left</span>
-                                        <input type="number" id="mLeft" name="m_left" class="input" value="10" min="0" max="60" oninput="updatePreviewLayout()">
-                                    </div>
-                                    <div class="margin-input-col">
-                                        <span>Right</span>
-                                        <input type="number" id="mRight" name="m_right" class="input" value="10" min="0" max="60" oninput="updatePreviewLayout()">
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div class="grid-2 form-row">
-                                <div>
-                                    <label class="label">Quality</label>
-                                    <select name="quality">
-                                        <option value="Normal" selected>Normal</option>
-                                        <option value="Best">Best</option>
-                                        <option value="Photo">High Resolution</option>
-                                    </select>
-                                </div>
-                                <div>
-                                    <label class="label">Two-Sided</label>
-                                    <select name="duplex">
-                                        <option value="None" selected>Off (1-Sided)</option>
-                                        <option value="DuplexNoTumble">Long Edge</option>
-                                        <option value="DuplexTumble">Short Edge</option>
-                                    </select>
-                                </div>
-                            </div>
-
-                            <div class="grid-2 form-row">
-                                <div>
-                                    <label class="label">Orientation</label>
-                                    <select id="orientationSelect" name="orientation" onchange="updatePreviewLayout()">
-                                        <option value="auto" selected>Auto</option>
-                                        <option value="3">Portrait</option>
-                                        <option value="4">Landscape</option>
-                                    </select>
-                                </div>
-                                <div>
-                                    <label class="label">Scaling</label>
-                                    <select id="scalingSelect" name="fitpage" onchange="updatePreviewLayout()">
-                                        <option value="true" selected>Fit to Page</option>
-                                        <option value="false">Fill Sheet</option>
-                                    </select>
-                                </div>
-                            </div>
-
-                            <div class="form-row">
-                                <label class="label">Page Range</label>
-                                <input type="text" name="pagerange" class="input" placeholder="e.g. 1-4, 7">
-                            </div>
-                        </div>
-
-                        <button type="submit" class="btn-submit" id="btnSubmit">Print</button>
-                        <div class="toast" id="toast"></div>
-                    </div>
-
+    <!-- TAB 4: SCAN -->
+    <div class="tab-content" id="tab-scan">
+        <div class="grid-layout">
+            <div class="preview-desk">
+                <div id="scanPreviewContainer" style="display:none; text-align:center;">
+                    <img id="scanPreviewImg" style="max-width: 100%; max-height: 520px; box-shadow: var(--paper-shadow); border-radius: 4px;">
                 </div>
-            </form>
-        </div>
-
-        <!-- TAB: SCAN (Flatbed Scanner) -->
-        <div id="tab-scan" class="tab-content">
-            <div class="grid-layout">
-                <!-- Left: Scan Preview & Output -->
-                <div class="card">
-                    <div class="card-header">
-                        <span class="card-heading">Flatbed Scan Output</span>
-                        <div id="scanStatusBadge" class="preview-badge" style="display: none;">Ready</div>
-                    </div>
-                    
-                    <div id="scanDisplayArea" style="min-height: 480px; display: flex; flex-direction: column; align-items: center; justify-content: center; background: var(--desk-bg); border-radius: var(--radius-md); padding: 24px; position: relative;">
-                        <!-- Placeholder state -->
-                        <div id="scanPlaceholder" style="text-align: center; color: var(--text-tertiary); max-width: 320px;">
-                            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="margin-bottom: 12px; opacity: 0.6;">
-                                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
-                                <line x1="3" y1="9" x2="21" y2="9"></line>
-                                <line x1="9" y1="21" x2="9" y2="9"></line>
-                            </svg>
-                            <p style="font-size: 13px; font-weight: 500; color: var(--text-secondary); margin-bottom: 4px;">Flatbed Scanner Ready</p>
-                            <p style="font-size: 12px;">Place your document face-down on the HP Smart Tank 520 glass and click "Scan Flatbed".</p>
-                        </div>
-
-                        <!-- Progress / Scanning state -->
-                        <div id="scanLoading" style="display: none; text-align: center; color: var(--text-secondary);">
-                            <div style="width: 36px; height: 36px; border: 3px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; margin: 0 auto 16px;"></div>
-                            <p style="font-size: 14px; font-weight: 500; color: var(--text-primary); margin-bottom: 4px;">Scanning document...</p>
-                            <p style="font-size: 12px; color: var(--text-tertiary);">Reading optical sensor on HP Smart Tank 520</p>
-                        </div>
-
-                        <!-- Scanned Image Result -->
-                        <img id="scanResultImg" style="display: none; max-width: 100%; max-height: 520px; border-radius: var(--radius-sm); box-shadow: var(--paper-shadow); object-fit: contain;">
-
-                        <!-- Scanned PDF Result -->
-                        <div id="scanResultPdf" style="display: none; width: 100%; height: 520px;">
-                            <canvas id="scanPdfCanvas" style="display: block; margin: 0 auto; max-width: 100%; max-height: 520px; border-radius: var(--radius-sm); box-shadow: var(--paper-shadow);"></canvas>
-                        </div>
-                    </div>
-
-                    <!-- Scanned Action Bar -->
-                    <div id="scanActionBar" style="display: none; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border); align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;">
-                        <span id="scanFileInfo" style="font-family: var(--font-mono); font-size: 12px; color: var(--text-secondary);"></span>
-                        <div style="display: flex; gap: 8px;">
-                            <a id="btnScanDownload" class="btn-action" style="text-decoration: none; padding: 6px 14px; background: var(--surface-elevated);" download>Download</a>
-                            <button type="button" class="btn-action" onclick="loadScanIntoPrint()" style="background: var(--text-primary); color: var(--bg);">Print Document</button>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Right: Scan Settings Sidebar -->
-                <div class="card settings-sidebar">
-                    <div class="card-header">
-                        <span class="card-heading">Scanner Settings</span>
-                    </div>
-
-                    <form id="scanForm">
-                        <div class="form-row">
-                            <label class="label">Resolution (DPI)</label>
-                            <select id="scanResolution" name="resolution">
-                                <option value="75">75 DPI (Draft / Fast)</option>
-                                <option value="150" selected>150 DPI (Document / Standard)</option>
-                                <option value="300">300 DPI (Photo / Crisp)</option>
-                                <option value="600">600 DPI (High Resolution)</option>
-                            </select>
-                        </div>
-
-                        <div class="form-row">
-                            <label class="label">Color Mode</label>
-                            <select id="scanMode" name="mode">
-                                <option value="Color" selected>Full Color</option>
-                                <option value="Gray">Grayscale</option>
-                                <option value="Lineart">Monochrome (Black & White)</option>
-                            </select>
-                        </div>
-
-                        <div class="form-row">
-                            <label class="label">Output Format</label>
-                            <select id="scanFormat" name="format">
-                                <option value="pdf" selected>PDF Document (.pdf)</option>
-                                <option value="png">PNG Image (.png)</option>
-                                <option value="jpeg">JPEG Photo (.jpg)</option>
-                            </select>
-                        </div>
-
-                        <div class="form-row" style="margin-top: 16px;">
-                            <label style="display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-secondary); cursor: pointer;">
-                                <input type="checkbox" id="scanSaveSamba" name="save_samba" value="true" checked style="accent-color: var(--accent);">
-                                Save copy to Samba (\\\\printserver.local\\\\Public\\\\Scans)
-                            </label>
-                        </div>
-
-                        <button type="submit" class="btn-submit" id="btnScanSubmit" style="margin-top: 16px;">Scan Flatbed</button>
-                    </form>
-
-                    <div id="scanToast" class="toast"></div>
+                <div id="scanEmptyState" style="text-align: center; color: var(--text-tertiary);">
+                    <div style="font-size: 32px; margin-bottom: 8px;">📠</div>
+                    <div style="font-weight: 500;">Flatbed Scanner Ready</div>
+                    <div style="font-size: 12px;">Scans can be saved directly to \\\\printserver.local\\Public\\Scans</div>
                 </div>
             </div>
-        </div>
 
-        <!-- TAB: QUEUE -->
-        <div id="tab-queue" class="tab-content">
             <div class="card">
-                <div class="card-header">
-                    <span class="card-heading">Print Queue</span>
-                    <button type="button" class="btn-action" onclick="fetchJobs()">Refresh</button>
+                <h3 style="font-size: 16px; font-weight: 600; margin-bottom: 16px;">Digitize Document</h3>
+                <div class="form-group">
+                    <label>Resolution</label>
+                    <select id="scanResolution">
+                        <option value="75">75 DPI (Screen Draft)</option>
+                        <option value="150">150 DPI (Compact Document)</option>
+                        <option value="300" selected>300 DPI (Standard Archive)</option>
+                        <option value="600">600 DPI (High-Res Photo)</option>
+                    </select>
                 </div>
-                <div style="overflow-x: auto;">
-                    <table class="table">
-                        <thead>
-                            <tr>
-                                <th>Job</th>
-                                <th>User</th>
-                                <th>Size</th>
-                                <th>Submitted</th>
-                                <th>Status</th>
-                                <th></th>
-                            </tr>
-                        </thead>
-                        <tbody id="queueBody">
-                            <tr>
-                                <td colspan="6" style="text-align: center; color: var(--text-tertiary); padding: 24px;">No recent jobs.</td>
-                            </tr>
-                        </tbody>
-                    </table>
+                <div class="form-group">
+                    <label>Color Mode</label>
+                    <select id="scanMode">
+                        <option value="Color" selected>Color</option>
+                        <option value="Gray">Grayscale</option>
+                        <option value="Lineart">Black & White (Lineart)</option>
+                    </select>
                 </div>
+                <div class="form-group">
+                    <label>Output Format</label>
+                    <select id="scanFormat">
+                        <option value="pdf" selected>PDF Document</option>
+                        <option value="png">PNG Image</option>
+                        <option value="jpeg">JPEG Image</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; text-transform: none; font-size: 13px;">
+                        <input type="checkbox" id="scanSaveSamba" checked>
+                        <span>Save to Samba Share (\\\\printserver.local\\Public\\Scans)</span>
+                    </label>
+                </div>
+                <button class="btn-primary" id="btnTriggerScan">📠 Start Scanning</button>
             </div>
         </div>
+    </div>
 
-        <!-- TAB: SYSTEM -->
-        <div id="tab-system" class="tab-content">
+    <!-- TAB 5: PIN RELEASE -->
+    <div class="tab-content" id="tab-pin">
+        <div class="card">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                <div>
+                    <h2 style="font-size: 16px; font-weight: 700;">Confidential Print Queue</h2>
+                    <p style="font-size: 12px; color: var(--text-secondary);">Jobs held securely in memory until unlocked with your 4-digit PIN</p>
+                </div>
+                <button class="btn-secondary" id="btnRefreshPinList">↻ Refresh Queue</button>
+            </div>
+
+            <div class="table-wrapper">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Time Held</th>
+                            <th>Document Title</th>
+                            <th>Pages</th>
+                            <th>Copies</th>
+                            <th>Color Mode</th>
+                            <th>Est. Cost</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+                    <tbody id="pinTableBody">
+                        <tr><td colspan="7" style="text-align: center; color: var(--text-tertiary);">No confidential jobs held</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- TAB 6: HISTORY & ACCOUNTING -->
+    <div class="tab-content" id="tab-history">
+        <div class="card" style="margin-bottom: 20px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                <div>
+                    <h2 style="font-size: 16px; font-weight: 700;">Print Accounting & Audit Ledger</h2>
+                    <p style="font-size: 12px; color: var(--text-secondary);">Complete log of all print, copy, and released jobs</p>
+                </div>
+                <a href="/api/reports/export.csv" class="btn-secondary" download>📥 Export CSV Ledger</a>
+            </div>
+
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 20px;">
+                <div class="card" style="background: var(--surface-elevated); padding: 14px;">
+                    <div style="font-size: 11px; color: var(--text-secondary); text-transform: uppercase;">Total Jobs</div>
+                    <div style="font-size: 24px; font-weight: 700;" id="statTotalJobs">0</div>
+                </div>
+                <div class="card" style="background: var(--surface-elevated); padding: 14px;">
+                    <div style="font-size: 11px; color: var(--text-secondary); text-transform: uppercase;">Total Pages Printed</div>
+                    <div style="font-size: 24px; font-weight: 700;" id="statTotalPages">0</div>
+                </div>
+                <div class="card" style="background: var(--surface-elevated); padding: 14px;">
+                    <div style="font-size: 11px; color: var(--text-secondary); text-transform: uppercase;">Total Billed Cost</div>
+                    <div style="font-size: 24px; font-weight: 700; color: var(--accent);" id="statTotalRevenue">₱0.00</div>
+                </div>
+            </div>
+
+            <div class="table-wrapper">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Date / Time</th>
+                            <th>Job Title</th>
+                            <th>Printer</th>
+                            <th>Pages</th>
+                            <th>Copies</th>
+                            <th>Mode</th>
+                            <th>Cost</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody id="historyTableBody">
+                        <tr><td colspan="8" style="text-align: center; color: var(--text-tertiary);">Loading audit records...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- TAB 7: SETTINGS & APPLIANCE ADMIN -->
+    <div class="tab-content" id="tab-settings">
+        <div class="grid-layout">
             <div class="card">
-                <div class="card-header">
-                    <span class="card-heading">Home Server Services & Information</span>
-                    <span style="font-size: 12px; color: var(--text-tertiary);">Armbian / Debian 13</span>
+                <h3 style="font-size: 16px; font-weight: 600; margin-bottom: 16px;">Appliance System Telemetry</h3>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px;">
+                    <div class="cost-card">
+                        <div>
+                            <div class="cost-title">CPU Load</div>
+                            <div id="telemetryCpu" style="font-weight: 600;">0.00</div>
+                        </div>
+                    </div>
+                    <div class="cost-card">
+                        <div>
+                            <div class="cost-title">RAM Usage</div>
+                            <div id="telemetryRam" style="font-weight: 600;">0 / 0 MB</div>
+                        </div>
+                    </div>
+                    <div class="cost-card">
+                        <div>
+                            <div class="cost-title">S905X Temperature</div>
+                            <div id="telemetryTemp" style="font-weight: 600;">0°C</div>
+                        </div>
+                    </div>
+                    <div class="cost-card">
+                        <div>
+                            <div class="cost-title">Storage Space</div>
+                            <div id="telemetryDisk" style="font-weight: 600;">0% Free</div>
+                        </div>
+                    </div>
                 </div>
-                <div class="info-list">
-                    <div class="info-item">
-                        <div class="info-label">Web Print Server</div>
-                        <div class="info-value">Port 80 (Standard) & 8080</div>
+                <div style="font-size: 12px; color: var(--text-secondary);" id="telemetryUptime">Uptime: --</div>
+            </div>
+
+            <div class="card">
+                <h3 style="font-size: 16px; font-weight: 600; margin-bottom: 12px;">Admin Management</h3>
+                <div id="adminLockedState">
+                    <p style="font-size: 12px; color: var(--text-secondary); margin-bottom: 12px;">
+                        Appliance controls are password-protected to prevent unauthorized access.
+                    </p>
+                    <div class="form-group">
+                        <label>Admin Password</label>
+                        <input type="password" id="adminPassInput" placeholder="Enter password (default: admin)">
                     </div>
-                    <div class="info-item">
-                        <div class="info-label">AdGuard Home (DNS)</div>
-                        <div class="info-value"><a href="http://10.0.0.95:3000" target="_blank">:3000 (Setup / Dashboard)</a></div>
+                    <button class="btn-primary" id="btnUnlockAdmin">Unlock Appliance</button>
+                </div>
+
+                <div id="adminUnlockedState" style="display: none;">
+                    <div style="font-size: 12px; color: var(--success); font-weight: 600; margin-bottom: 12px;">
+                        ✓ Administrator Mode Active
                     </div>
-                    <div class="info-item">
-                        <div class="info-label">Samba File Share</div>
-                        <div class="info-value">\\\\printserver.local\\Public</div>
+
+                    <div class="form-group">
+                        <label>Rate Card Configuration</label>
+                        <div style="display: flex; gap: 8px; margin-bottom: 8px;">
+                            <input type="text" id="adminRateBw" placeholder="B&W Page (₱)">
+                            <input type="text" id="adminRateColor" placeholder="Color Page (₱)">
+                        </div>
+                        <button class="btn-secondary" id="btnSaveRates" style="width: 100%;">Save Rate Card</button>
                     </div>
-                    <div class="info-item">
-                        <div class="info-label">CUPS Admin</div>
-                        <div class="info-value"><a href="https://printserver.local:631" target="_blank">:631</a></div>
-                    </div>
-                    <div class="info-item">
-                        <div class="info-label">mDNS Hostname</div>
-                        <div class="info-value">printserver.local</div>
-                    </div>
-                    <div class="info-item">
-                        <div class="info-label">LAN Address</div>
-                        <div class="info-value">10.0.0.95</div>
-                    </div>
-                    <div class="info-item">
-                        <div class="info-label">Tailscale Address</div>
-                        <div class="info-value">100.104.185.40</div>
-                    </div>
-                    <div class="info-item">
-                        <div class="info-label">Memory</div>
-                        <div class="info-value" id="sysRam">--</div>
-                    </div>
-                    <div class="info-item">
-                        <div class="info-label">System Load</div>
-                        <div class="info-value" id="sysLoad">--</div>
-                    </div>
-                    <div class="info-item">
-                        <div class="info-label">Uptime</div>
-                        <div class="info-value" id="sysUptime">--</div>
+
+                    <div class="form-group" style="padding-top: 12px; border-top: 1px solid var(--border);">
+                        <label>Hardware Power & Spool Actions</label>
+                        <div style="display: flex; flex-direction: column; gap: 8px;">
+                            <button class="btn-secondary" id="btnAdminRestartCups">🔄 Restart CUPS Spooler</button>
+                            <button class="btn-secondary" id="btnAdminPurgeCache">🧹 Purge Temporary Cache</button>
+                            <button class="btn-secondary" id="btnAdminReboot" style="color: var(--warning);">⚡ Reboot Appliance</button>
+                            <button class="btn-secondary" id="btnAdminShutdown" style="color: var(--danger);">🛑 Shut Down Appliance</button>
+                        </div>
                     </div>
                 </div>
             </div>
         </div>
-    </main>
+    </div>
+</main>
 
-    <footer>
-        <span>Print Server • ZTE B860H</span>
-        <span>
-            <a href="http://10.0.0.95:3000" target="_blank">AdGuard Home</a> • 
-            <a href="https://printserver.local:631" target="_blank">CUPS Admin</a> • 
-            <a href="https://github.com/Sheesh0327/armbian-print-vpn-server" target="_blank">GitHub</a>
-        </span>
-    </footer>
+<!-- PIN UNLOCK MODAL -->
+<div class="modal-overlay" id="pinModal">
+    <div class="modal-card">
+        <h3 style="font-size: 16px; font-weight: 700; margin-bottom: 8px;">Release Confidential Job</h3>
+        <p style="font-size: 12px; color: var(--text-secondary); margin-bottom: 16px;" id="pinModalJobTitle">Document</p>
+        <div class="form-group">
+            <label>Enter 4-Digit Release PIN</label>
+            <input type="password" id="pinModalCode" maxlength="4" placeholder="••••" style="text-align: center; font-size: 24px; letter-spacing: 0.4em; font-family: var(--font-mono);">
+        </div>
+        <div style="display: flex; gap: 10px;">
+            <button class="btn-secondary" id="btnCancelPinModal" style="flex:1;">Cancel</button>
+            <button class="btn-primary" id="btnConfirmReleasePin" style="flex:1;">Release Print</button>
+        </div>
+    </div>
+</div>
 
-    <script>
-        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+<div class="toast" id="toastNotification">
+    <span id="toastMessage"></span>
+</div>
 
-        const PAPER_SPECS = {
-            'A4': { width: 210, height: 297, name: 'A4', desc: '210 × 297 mm' },
-            'Letter': { width: 215.9, height: 279.4, name: 'Letter', desc: '8.5 × 11 in' },
-            'Legal': { width: 215.9, height: 355.6, name: 'Legal', desc: '8.5 × 14 in' },
-            'A5': { width: 148, height: 210, name: 'A5', desc: '148 × 210 mm' },
-            'A6': { width: 105, height: 148, name: 'A6', desc: '105 × 148 mm' },
-            'B5': { width: 176, height: 250, name: 'B5', desc: '176 × 250 mm' },
-            '4x6in': { width: 101.6, height: 152.4, name: '4 × 6 in', desc: 'Photo Card' },
-            '5x7in': { width: 127, height: 177.8, name: '5 × 7 in', desc: 'Photo Card' },
-            '8x10': { width: 203.2, height: 254, name: '8 × 10 in', desc: 'Photo Print' },
-            'EnvelopeDL': { width: 110, height: 220, name: 'Envelope DL', desc: '110 × 220 mm' }
-        };
+<script>
+    let currentAdminToken = sessionStorage.getItem('admin_token') || '';
+    let selectedPrinter = '';
+    let fabricCanvas = null;
+    let pendingReleaseJobId = '';
+    let copyCopies = 1;
+    let copyMode = 'Gray';
 
-        let currentPdf = null;
-        let pdfPage = 1;
-        let pdfPagesTotal = 1;
-        let mode = 'simple';
-        let docNaturalAspect = 1.414;
+    // Toast utility
+    function showToast(msg, type='info') {
+        const toast = document.getElementById('toastNotification');
+        toast.className = 'toast show ' + type;
+        document.getElementById('toastMessage').textContent = msg;
+        setTimeout(() => toast.classList.remove('show'), 3500);
+    }
 
-        // Theme switching
-        function toggleTheme() {
-            const current = document.documentElement.getAttribute('data-theme') || 'dark';
-            const next = current === 'dark' ? 'light' : 'dark';
-            document.documentElement.setAttribute('data-theme', next);
-            localStorage.setItem('theme', next);
-        }
+    // Theme toggle
+    document.getElementById('btnThemeToggle').addEventListener('click', () => {
+        const cur = document.documentElement.getAttribute('data-theme');
+        const next = cur === 'dark' ? 'light' : 'dark';
+        document.documentElement.setAttribute('data-theme', next);
+        localStorage.setItem('theme', next);
+    });
 
-        const dropzone = document.getElementById('dropzone');
-        const fileInput = document.getElementById('fileInput');
-        const previewBox = document.getElementById('previewBox');
-        const previewName = document.getElementById('previewName');
-        const previewSizePill = document.getElementById('previewSizePill');
-        const fileBadge = document.getElementById('fileBadge');
-        const imgPreview = document.getElementById('imgPreview');
-        const pdfCanvas = document.getElementById('pdfCanvas');
-        const txtPreview = document.getElementById('txtPreview');
-        const previewPagination = document.getElementById('previewPagination');
-        const pageIndicator = document.getElementById('pageIndicator');
-        const btnPrev = document.getElementById('btnPrev');
-        const btnNext = document.getElementById('btnNext');
-        const toast = document.getElementById('toast');
-        const btnSubmit = document.getElementById('btnSubmit');
+    // Tab Navigation
+    document.querySelectorAll('.nav-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+            btn.classList.add('active');
+            const target = document.getElementById('tab-' + btn.getAttribute('data-tab'));
+            if (target) target.classList.add('active');
 
-        // Paper & Margin Preview DOM elements
-        const paperSheet = document.getElementById('paperSheet');
-        const printableArea = document.getElementById('printableArea');
-        const renderWrap = document.getElementById('renderWrap');
-        const sheetFormatTag = document.getElementById('sheetFormatTag');
-        const sheetOrientationTag = document.getElementById('sheetOrientationTag');
-        const sheetMarginTag = document.getElementById('sheetMarginTag');
-        const sheetColorTag = document.getElementById('sheetColorTag');
-        const customMarginBox = document.getElementById('customMarginBox');
-
-        dropzone.addEventListener('click', () => fileInput.click());
-        dropzone.addEventListener('dragover', (e) => { e.preventDefault(); dropzone.classList.add('dragover'); });
-        dropzone.addEventListener('dragleave', () => dropzone.classList.remove('dragover'));
-        dropzone.addEventListener('drop', (e) => {
-            e.preventDefault();
-            dropzone.classList.remove('dragover');
-            if (e.dataTransfer.files.length) {
-                fileInput.files = e.dataTransfer.files;
-                loadFile();
+            if (btn.getAttribute('data-tab') === 'studio' && !fabricCanvas) {
+                initFabricStudio();
+            } else if (btn.getAttribute('data-tab') === 'pin') {
+                loadPinList();
+            } else if (btn.getAttribute('data-tab') === 'history') {
+                loadHistory();
+            } else if (btn.getAttribute('data-tab') === 'settings') {
+                loadTelemetry();
             }
         });
-        fileInput.addEventListener('change', loadFile);
+    });
 
-        function loadFile() {
-            if (!fileInput.files.length) return;
-            const f = fileInput.files[0];
-            previewName.textContent = f.name;
-            const sizeStr = formatBytes(f.size);
-            fileBadge.textContent = sizeStr;
-            previewSizePill.textContent = sizeStr;
-            previewBox.style.display = 'block';
-
-            imgPreview.style.display = 'none';
-            pdfCanvas.style.display = 'none';
-            txtPreview.style.display = 'none';
-            previewPagination.style.display = 'none';
-
-            const ext = f.name.split('.').pop().toLowerCase();
-            if (['png', 'jpg', 'jpeg', 'webp'].includes(ext)) {
-                const reader = new FileReader();
-                reader.onload = (e) => {
-                    imgPreview.src = e.target.result;
-                    imgPreview.style.display = 'block';
-                    imgPreview.onload = () => {
-                        docNaturalAspect = imgPreview.naturalHeight / imgPreview.naturalWidth;
-                        updatePreviewLayout();
-                    };
-                };
-                reader.readAsDataURL(f);
-            } else if (ext === 'pdf') {
-                const reader = new FileReader();
-                reader.onload = function(e) {
-                    pdfjsLib.getDocument(new Uint8Array(e.target.result)).promise.then(pdf => {
-                        currentPdf = pdf;
-                        pdfPagesTotal = pdf.numPages;
-                        pdfPage = 1;
-                        if (pdfPagesTotal > 1) previewPagination.style.display = 'flex';
-                        renderPdf(pdfPage);
-                    }).catch(() => {
-                        txtPreview.style.display = 'block';
-                        txtPreview.textContent = 'PDF ready to print.';
-                        updatePreviewLayout();
-                    });
-                };
-                reader.readAsArrayBuffer(f);
-            } else {
-                txtPreview.style.display = 'block';
-                txtPreview.textContent = `Document (${ext.toUpperCase()}) loaded and ready to print.`;
-                updatePreviewLayout();
-            }
-        }
-
-        function renderPdf(num) {
-            if (!currentPdf) return;
-            currentPdf.getPage(num).then(page => {
-                const viewport = page.getViewport({ scale: 1.5 });
-                docNaturalAspect = viewport.height / viewport.width;
-                pdfCanvas.height = viewport.height;
-                pdfCanvas.width = viewport.width;
-                pdfCanvas.style.display = 'block';
-                page.render({
-                    canvasContext: pdfCanvas.getContext('2d'),
-                    viewport: viewport
+    // Printer Discovery & Population
+    async function loadPrinters() {
+        try {
+            const res = await fetch('/api/printers');
+            const data = await res.json();
+            const select = document.getElementById('headerPrinterSelect');
+            select.innerHTML = '';
+            if (data.printers && data.printers.length > 0) {
+                data.printers.forEach(p => {
+                    const opt = document.createElement('option');
+                    opt.value = p.name;
+                    opt.textContent = p.name + (p.is_default ? ' (Default)' : '');
+                    if (p.is_default) opt.selected = true;
+                    select.appendChild(opt);
                 });
-                pageIndicator.textContent = `${num} / ${pdfPagesTotal}`;
-                updatePreviewLayout();
-            });
-        }
-
-        btnPrev.addEventListener('click', () => { if (pdfPage > 1) { pdfPage--; renderPdf(pdfPage); } });
-        btnNext.addEventListener('click', () => { if (pdfPage < pdfPagesTotal) { pdfPage++; renderPdf(pdfPage); } });
-
-        function clearFile() {
-            fileInput.value = '';
-            previewBox.style.display = 'none';
-            fileBadge.textContent = 'No file selected';
-            currentPdf = null;
-        }
-
-        function handleMarginChange(val) {
-            customMarginBox.style.display = (val === 'custom') ? 'block' : 'none';
-            updatePreviewLayout();
-        }
-
-        // Real-Time Layout, Paper Size & Margins Geometry Engine
-        function updatePreviewLayout() {
-            const sizeKey = mode === 'simple' 
-                ? document.getElementById('simpleSize').value 
-                : document.getElementById('advSize').value;
-            const spec = PAPER_SPECS[sizeKey] || PAPER_SPECS['A4'];
-
-            let orientation = '3';
-            if (mode === 'advanced') {
-                orientation = document.getElementById('orientationSelect').value;
-            }
-            let isLandscape = false;
-            if (orientation === '4') {
-                isLandscape = true;
-            } else if (orientation === 'auto') {
-                isLandscape = docNaturalAspect < 0.95;
-            }
-
-            const maxDeskWidth = 460;
-            const maxDeskHeight = 540;
-            let paperPhysW = isLandscape ? spec.height : spec.width;
-            let paperPhysH = isLandscape ? spec.width : spec.height;
-            let paperRatio = paperPhysH / paperPhysW;
-
-            let sheetW, sheetH;
-            if (maxDeskWidth * paperRatio <= maxDeskHeight) {
-                sheetW = maxDeskWidth;
-                sheetH = Math.round(maxDeskWidth * paperRatio);
+                selectedPrinter = select.value;
+                document.getElementById('headerStatusDot').className = 'status-dot ' + (data.printers[0].status || 'idle');
             } else {
-                sheetH = maxDeskHeight;
-                sheetW = Math.round(maxDeskHeight / paperRatio);
+                select.innerHTML = '<option value="">No printers detected</option>';
             }
+        } catch (e) {
+            console.error(e);
+        }
+    }
+    document.getElementById('headerPrinterSelect').addEventListener('change', (e) => {
+        selectedPrinter = e.target.value;
+    });
 
-            paperSheet.style.width = sheetW + 'px';
-            paperSheet.style.height = sheetH + 'px';
+    // Pre-flight file inspection and cost preview
+    const fileInput = document.getElementById('printFileInput');
+    fileInput.addEventListener('change', async () => {
+        if (!fileInput.files.length) return;
+        const file = fileInput.files[0];
+        document.getElementById('printFileName').textContent = file.name;
+        document.getElementById('previewEmptyState').style.display = 'none';
 
-            let mTopMm = 4.2, mBottomMm = 4.2, mLeftMm = 4.2, mRightMm = 4.2;
-            let marginLabel = 'Printable Area';
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('copies', document.getElementById('printCopies').value);
+        formData.append('colormodel', document.getElementById('printColorModel').value);
 
-            if (mode === 'advanced') {
-                const mMode = document.getElementById('marginSelect').value;
-                if (mMode === 'none') {
-                    mTopMm = 0; mBottomMm = 0; mLeftMm = 0; mRightMm = 0;
-                    marginLabel = 'Borderless (0mm)';
-                } else if (mMode === 'normal') {
-                    mTopMm = 12.7; mBottomMm = 12.7; mLeftMm = 12.7; mRightMm = 12.7;
-                    marginLabel = 'Normal (12.7mm)';
-                } else if (mMode === 'custom') {
-                    mTopMm = parseFloat(document.getElementById('mTop').value) || 0;
-                    mBottomMm = parseFloat(document.getElementById('mBottom').value) || 0;
-                    mLeftMm = parseFloat(document.getElementById('mLeft').value) || 0;
-                    mRightMm = parseFloat(document.getElementById('mRight').value) || 0;
-                    marginLabel = `Custom (${mTopMm}T, ${mLeftMm}L mm)`;
-                }
+        try {
+            const res = await fetch('/api/inspect', { method: 'POST', body: formData });
+            const data = await res.json();
+            if (data.success) {
+                document.getElementById('costDetails').textContent = `${data.pages} page(s) × ${data.copies} copy(ies)`;
+                document.getElementById('costTotal').textContent = data.cost_formatted;
             }
+        } catch (e) {
+            console.error(e);
+        }
 
-            const scaleX = sheetW / paperPhysW;
-            const scaleY = sheetH / paperPhysH;
+        // Render PDF preview if PDF
+        if (file.type === 'application/pdf' || file.name.endsWith('.pdf')) {
+            const reader = new FileReader();
+            reader.onload = function(ev) {
+                const typedarray = new Uint8Array(ev.target.result);
+                pdfjsLib.getDocument(typedarray).promise.then(pdf => {
+                    pdf.getPage(1).then(page => {
+                        const canvas = document.getElementById('pdfCanvas');
+                        const ctx = canvas.getContext('2d');
+                        const viewport = page.getViewport({ scale: 1.2 });
+                        canvas.height = viewport.height;
+                        canvas.width = viewport.width;
+                        page.render({ canvasContext: ctx, viewport: viewport });
+                    });
+                });
+            };
+            reader.readAsArrayBuffer(file);
+        }
+    });
 
-            const topPx = Math.round(mTopMm * scaleY);
-            const bottomPx = Math.round(mBottomMm * scaleY);
-            const leftPx = Math.round(mLeftMm * scaleX);
-            const rightPx = Math.round(mRightMm * scaleX);
+    document.getElementById('chkPinHold').addEventListener('change', (e) => {
+        document.getElementById('pinInputWrapper').style.display = e.target.checked ? 'block' : 'none';
+        document.getElementById('btnSubmitPrint').textContent = e.target.checked ? '🔒 Hold in Confidential Queue' : '🖨️ Send to Printer';
+    });
 
-            printableArea.style.top = topPx + 'px';
-            printableArea.style.bottom = bottomPx + 'px';
-            printableArea.style.left = leftPx + 'px';
-            printableArea.style.right = rightPx + 'px';
+    document.getElementById('btnSubmitPrint').addEventListener('click', async () => {
+        if (!fileInput.files.length) {
+            showToast('Please select a file to print', 'error');
+            return;
+        }
 
-            const isGray = document.getElementById('colGray').checked;
-            paperSheet.style.filter = isGray ? 'grayscale(100%)' : 'none';
-            sheetColorTag.textContent = isGray ? 'B&W' : 'Color';
+        const isPin = document.getElementById('chkPinHold').checked;
+        const pin = document.getElementById('printPin').value.trim();
+        if (isPin && (!pin || pin.length !== 4)) {
+            showToast('Please enter a 4-digit PIN', 'error');
+            return;
+        }
 
-            if (mode === 'advanced') {
-                const fitPage = document.getElementById('scalingSelect').value === 'true';
-                renderWrap.classList.toggle('scale-fill', !fitPage);
+        const formData = new FormData();
+        formData.append('file', fileInput.files[0]);
+        formData.append('printer', selectedPrinter);
+        formData.append('copies', document.getElementById('printCopies').value);
+        formData.append('pagesize', document.getElementById('printPageSize').value);
+        formData.append('colormodel', document.getElementById('printColorModel').value);
+        formData.append('resolution', document.getElementById('printDpi').value);
+        formData.append('duplex', document.getElementById('printDuplex').value);
+
+        const endpoint = isPin ? '/api/print/pin-hold' : '/api/print';
+        if (isPin) formData.append('pin', pin);
+
+        showToast('Submitting print job...', 'info');
+        try {
+            const res = await fetch(endpoint, { method: 'POST', body: formData });
+            const data = await res.json();
+            if (data.success) {
+                showToast(isPin ? 'Document held in confidential queue!' : 'Print job queued successfully!', 'success');
             } else {
-                renderWrap.classList.remove('scale-fill');
+                showToast('Error: ' + data.error, 'error');
             }
-
-            sheetFormatTag.textContent = `${spec.name} • ${spec.desc}`;
-            sheetOrientationTag.textContent = isLandscape ? 'Landscape' : 'Portrait';
-            sheetMarginTag.textContent = marginLabel;
+        } catch (e) {
+            showToast('Failed to reach print server', 'error');
         }
+    });
 
-        function setMode(m) {
-            mode = m;
-            document.getElementById('btnSimple').classList.toggle('active', m === 'simple');
-            document.getElementById('btnAdv').classList.toggle('active', m === 'advanced');
-            document.getElementById('secSimple').style.display = m === 'simple' ? 'block' : 'none';
-            document.getElementById('secAdv').style.display = m === 'advanced' ? 'block' : 'none';
-            updatePreviewLayout();
+    // ==========================================
+    // DESIGN STUDIO (100% Client-Side in Browser)
+    // ==========================================
+    function initFabricStudio() {
+        fabricCanvas = new fabric.Canvas('studioFabricCanvas', {
+            width: 480,
+            height: 680,
+            backgroundColor: '#ffffff'
+        });
+
+        // Responsive A4 ratio
+        setStudioPreset('a4');
+    }
+
+    function setStudioPreset(preset) {
+        if (!fabricCanvas) return;
+        if (preset === 'a4') {
+            fabricCanvas.setWidth(480);
+            fabricCanvas.setHeight(680); // ~1:1.414 A4 ratio
+        } else if (preset === 'letter') {
+            fabricCanvas.setWidth(480);
+            fabricCanvas.setHeight(620);
+        } else if (preset === 'photo46') {
+            fabricCanvas.setWidth(400);
+            fabricCanvas.setHeight(600); // 4x6 ratio
+        } else if (preset === 'idgrid') {
+            fabricCanvas.setWidth(480);
+            fabricCanvas.setHeight(680);
         }
+        fabricCanvas.renderAll();
+    }
 
-        function syncSize(val) {
-            document.getElementById('advSize').value = val;
-            updatePreviewLayout();
-        }
+    document.getElementById('studioPreset').addEventListener('change', (e) => {
+        setStudioPreset(e.target.value);
+    });
 
-        function stepCopies(d) {
-            const el = document.getElementById('copiesInput');
-            el.value = Math.max(1, Math.min(99, (parseInt(el.value) || 1) + d));
-        }
+    document.getElementById('btnStudioAddText').addEventListener('click', () => {
+        if (!fabricCanvas) return;
+        const text = new fabric.IText('Double click to edit', {
+            left: 50,
+            top: 50,
+            fontFamily: document.getElementById('studioFontFamily').value,
+            fill: document.getElementById('studioColorPicker').value,
+            fontSize: 24
+        });
+        fabricCanvas.add(text);
+        fabricCanvas.setActiveObject(text);
+    });
 
-        function showTab(t) {
-            document.querySelectorAll('.tab-content').forEach(e => e.classList.remove('active'));
-            document.querySelectorAll('.nav-btn').forEach(e => e.classList.remove('active'));
-            document.getElementById('tab-' + t).classList.add('active');
-            
-            const btn = Array.from(document.querySelectorAll('.nav-btn')).find(b => b.textContent.toLowerCase() === t);
-            if (btn) btn.classList.add('active');
-
-            if (t === 'queue') fetchJobs();
-            if (t === 'system') fetchStatus();
-        }
-
-        document.getElementById('printForm').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            if (!fileInput.files.length) {
-                showToast('Select a file to print.', 'error');
+    document.querySelectorAll('.stamp-btn[data-stamp]').forEach(btn => {
+        btn.addEventListener('click', () => {
+            if (!fabricCanvas) return;
+            const type = btn.getAttribute('data-stamp');
+            let color = '#22c55e';
+            if (type === 'CONFIDENTIAL') color = '#ef4444';
+            if (type === 'PAID') color = '#3b82f6';
+            if (type === 'URGENT') color = '#f59e0b';
+            if (type === 'SIGNATURE') {
+                const line = new fabric.Line([50, 100, 250, 100], { stroke: '#000000', strokeWidth: 2 });
+                const lbl = new fabric.Text('Authorized Signature', { left: 50, top: 106, fontSize: 12, fill: '#666' });
+                const grp = new fabric.Group([line, lbl], { left: 80, top: 150 });
+                fabricCanvas.add(grp);
+                fabricCanvas.setActiveObject(grp);
                 return;
             }
 
-            btnSubmit.disabled = true;
-            btnSubmit.textContent = 'Sending...';
-            showToast('', '');
-
-            const formData = new FormData(e.target);
-            if (mode === 'simple') {
-                formData.set('pagesize', document.getElementById('simpleSize').value);
-                formData.set('mediatype', 'Plain');
-                formData.set('quality', 'Normal');
-                formData.set('duplex', 'None');
-                formData.set('orientation', 'auto');
-                formData.set('fitpage', 'true');
-                formData.set('margin_mode', 'printable');
-            }
-
-            try {
-                const res = await fetch('/api/print', { method: 'POST', body: formData });
-                const d = await res.json();
-                if (res.ok && d.success) {
-                    showToast(`Print job submitted (${d.job_id})`, 'success');
-                    clearFile();
-                } else {
-                    showToast(d.error || 'Print failed.', 'error');
-                }
-            } catch (err) {
-                showToast('Network error: ' + err.message, 'error');
-            } finally {
-                btnSubmit.disabled = false;
-                btnSubmit.textContent = 'Print';
-            }
+            const stampRect = new fabric.Rect({
+                width: 180,
+                height: 48,
+                fill: 'transparent',
+                stroke: color,
+                strokeWidth: 4,
+                rx: 6, ry: 6
+            });
+            const stampText = new fabric.Text(type, {
+                fontSize: 22,
+                fontWeight: 'bold',
+                fill: color,
+                originX: 'center',
+                originY: 'center',
+                left: 90, top: 24
+            });
+            const stampGroup = new fabric.Group([stampRect, stampText], {
+                left: 100, top: 100, angle: -10
+            });
+            fabricCanvas.add(stampGroup);
+            fabricCanvas.setActiveObject(stampGroup);
         });
+    });
 
-        function showToast(msg, type) {
-            if (!msg) { toast.style.display = 'none'; return; }
-            toast.textContent = msg;
-            toast.className = 'toast ' + type;
-            toast.style.display = 'block';
-        }
+    document.getElementById('btnAddRect').addEventListener('click', () => {
+        if (!fabricCanvas) return;
+        const rect = new fabric.Rect({ left: 60, top: 60, width: 120, height: 80, fill: '#e2e8f0', stroke: '#94a3b8', strokeWidth: 1 });
+        fabricCanvas.add(rect);
+    });
+    document.getElementById('btnAddCircle').addEventListener('click', () => {
+        if (!fabricCanvas) return;
+        const circle = new fabric.Circle({ left: 60, top: 60, radius: 45, fill: '#e2e8f0', stroke: '#94a3b8', strokeWidth: 1 });
+        fabricCanvas.add(circle);
+    });
+    document.getElementById('btnAddLine').addEventListener('click', () => {
+        if (!fabricCanvas) return;
+        const line = new fabric.Line([50, 50, 350, 50], { stroke: '#000000', strokeWidth: 2 });
+        fabricCanvas.add(line);
+    });
 
-        async function fetchStatus() {
-            try {
-                const res = await fetch('/api/status');
-                const d = await res.json();
-                if (d.printers && d.printers.length) {
-                    document.getElementById('headerStatusText').textContent = d.printers[0].name;
-                }
-                if (d.telemetry) {
-                    document.getElementById('sysRam').textContent = d.telemetry.ram_used + ' / ' + d.telemetry.ram_total;
-                    document.getElementById('sysLoad').textContent = d.telemetry.load;
-                    document.getElementById('sysUptime').textContent = d.telemetry.uptime;
-                }
-            } catch (e) {}
-        }
+    document.getElementById('btnStudioClear').addEventListener('click', () => {
+        if (fabricCanvas && confirm('Clear entire canvas?')) fabricCanvas.clear();
+    });
 
-        async function fetchJobs() {
-            try {
-                const res = await fetch('/api/jobs');
-                const d = await res.json();
-                const tbody = document.getElementById('queueBody');
-                if (!d.jobs || !d.jobs.length) {
-                    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; color: var(--text-tertiary); padding: 24px;">No recent jobs.</td></tr>';
-                    return;
-                }
-                tbody.innerHTML = d.jobs.map(j => `
-                    <tr>
-                        <td style="font-family: var(--font-mono); color: var(--text-primary);">${j.id}</td>
-                        <td>${j.user}</td>
-                        <td>${formatBytes(j.bytes)}</td>
-                        <td>${j.time}</td>
-                        <td><span class="badge-status ${j.state.toLowerCase()}">${j.state}</span></td>
-                        <td>${j.state === 'Active' ? `<button type="button" class="btn-action" onclick="cancelJob('${j.id}')">Cancel</button>` : ''}</td>
-                    </tr>
-                `).join('');
-            } catch (e) {}
-        }
+    // Image Upload to Canvas
+    document.getElementById('btnStudioUploadImg').addEventListener('click', () => {
+        document.getElementById('studioImgInput').click();
+    });
+    document.getElementById('studioImgInput').addEventListener('change', (e) => {
+        if (!e.target.files.length || !fabricCanvas) return;
+        const reader = new FileReader();
+        reader.onload = function(f) {
+            fabric.Image.fromURL(f.target.result, (img) => {
+                img.scaleToWidth(250);
+                fabricCanvas.add(img);
+                fabricCanvas.centerObject(img);
+                fabricCanvas.setActiveObject(img);
+            });
+        };
+        reader.readAsDataURL(e.target.files[0]);
+    });
 
-        async function cancelJob(id) {
-            if (!confirm(`Cancel job ${id}?`)) return;
-            try {
-                await fetch('/api/cancel', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ job_id: id })
+    // 2x2 ID Photo Grid Maker (Tiles 6x photos on sheet with cut marks)
+    document.getElementById('btnStudioIdGrid').addEventListener('click', () => {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = 'image/*';
+        input.onchange = (e) => {
+            if (!e.target.files.length) return;
+            const r = new FileReader();
+            r.onload = function(ev) {
+                fabric.Image.fromURL(ev.target.result, (img) => {
+                    fabricCanvas.clear();
+                    setStudioPreset('a4');
+                    // 2x2 inch tile size
+                    const tileW = 140;
+                    const tileH = 140;
+                    const cols = 2;
+                    const rows = 3;
+                    const startX = 60;
+                    const startY = 60;
+                    const gapX = 40;
+                    const gapY = 40;
+
+                    for (let row = 0; row < rows; row++) {
+                        for (let col = 0; col < cols; col++) {
+                            img.clone((cloned) => {
+                                cloned.scaleToWidth(tileW);
+                                cloned.scaleToHeight(tileH);
+                                cloned.set({
+                                    left: startX + col * (tileW + gapX),
+                                    top: startY + row * (tileH + gapY),
+                                    stroke: '#cbd5e1',
+                                    strokeWidth: 1
+                                });
+                                fabricCanvas.add(cloned);
+                            });
+                        }
+                    }
+                    showToast('Generated 2x2 ID photo grid with cut guides', 'success');
                 });
-                fetchJobs();
-            } catch (e) {}
-        }
+            };
+            r.readAsDataURL(e.target.files[0]);
+        };
+        input.click();
+    });
 
-        function formatBytes(bytes) {
-            if (!bytes) return '0 B';
-            const k = 1024, sizes = ['B', 'KB', 'MB', 'GB'];
-            const i = Math.floor(Math.log(bytes) / Math.log(k));
-            return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
-        }
+    // Direct 300 DPI Print from Studio (Offloaded to client browser)
+    document.getElementById('btnStudioDirectPrint').addEventListener('click', () => {
+        if (!fabricCanvas) return;
+        const dpi = parseInt(document.getElementById('studioDpi').value);
+        const multiplier = dpi / 72; // scale up to selected DPI in browser
+        showToast(`Rendering ${dpi} DPI high-res canvas in browser...`, 'info');
 
-        // Scanner Logic
-        let currentScanBlob = null;
-        let currentScanFilename = '';
-
-        document.getElementById('scanForm').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const btn = document.getElementById('btnScanSubmit');
-            const toast = document.getElementById('scanToast');
-            const placeholder = document.getElementById('scanPlaceholder');
-            const loading = document.getElementById('scanLoading');
-            const imgEl = document.getElementById('scanResultImg');
-            const pdfEl = document.getElementById('scanResultPdf');
-            const actionBar = document.getElementById('scanActionBar');
-
-            btn.disabled = true;
-            btn.textContent = 'Scanning...';
-            toast.style.display = 'none';
-            placeholder.style.display = 'none';
-            imgEl.style.display = 'none';
-            pdfEl.style.display = 'none';
-            actionBar.style.display = 'none';
-            loading.style.display = 'block';
-
-            const formData = new FormData(e.target);
-
-            try {
-                const res = await fetch('/api/scan', { method: 'POST', body: formData });
-                const d = await res.json();
-                if (res.ok && d.success) {
-                    loading.style.display = 'none';
-                    currentScanFilename = d.filename;
-
-                    const byteCharacters = atob(d.data);
-                    const byteNumbers = new Array(byteCharacters.length);
-                    for (let i = 0; i < byteCharacters.length; i++) {
-                        byteNumbers[i] = byteCharacters.charCodeAt(i);
-                    }
-                    const byteArray = new Uint8Array(byteNumbers);
-                    const mime = d.format === 'pdf' ? 'application/pdf' : (d.format === 'png' ? 'image/png' : 'image/jpeg');
-                    currentScanBlob = new Blob([byteArray], { type: mime });
-
-                    const blobUrl = URL.createObjectURL(currentScanBlob);
-                    const dlBtn = document.getElementById('btnScanDownload');
-                    dlBtn.href = blobUrl;
-                    dlBtn.download = d.filename;
-
-                    document.getElementById('scanFileInfo').textContent = `${d.filename} (${formatBytes(currentScanBlob.size)})` + (d.samba_saved ? ' • Saved to Samba' : '');
-                    actionBar.style.display = 'flex';
-
-                    if (d.format === 'pdf') {
-                        pdfEl.style.display = 'block';
-                        const loadingTask = pdfjsLib.getDocument({ data: byteArray });
-                        const pdf = await loadingTask.promise;
-                        const page = await pdf.getPage(1);
-                        const viewport = page.getViewport({ scale: 1.5 });
-                        const canvas = document.getElementById('scanPdfCanvas');
-                        const ctx = canvas.getContext('2d');
-                        canvas.height = viewport.height;
-                        canvas.width = viewport.width;
-                        await page.render({ canvasContext: ctx, viewport: viewport }).promise;
-                    } else {
-                        imgEl.src = blobUrl;
-                        imgEl.style.display = 'block';
-                    }
-                } else {
-                    loading.style.display = 'none';
-                    placeholder.style.display = 'block';
-                    toast.textContent = d.error || 'Scan failed.';
-                    toast.className = 'toast error';
-                    toast.style.display = 'block';
-                }
-            } catch (err) {
-                loading.style.display = 'none';
-                placeholder.style.display = 'block';
-                toast.textContent = 'Scan error: ' + err.message;
-                toast.className = 'toast error';
-                toast.style.display = 'block';
-            } finally {
-                btn.disabled = false;
-                btn.textContent = 'Scan Flatbed';
-            }
+        const dataUrl = fabricCanvas.toDataURL({
+            format: 'png',
+            multiplier: multiplier
         });
 
-        function loadScanIntoPrint() {
-            if (!currentScanBlob) return;
-            const file = new File([currentScanBlob], currentScanFilename, { type: currentScanBlob.type });
-            const dataTransfer = new DataTransfer();
-            dataTransfer.items.add(file);
-            fileInput.files = dataTransfer.files;
-            loadFile();
-            showTab('print');
-            showToast('Scanned document loaded into print preview.', 'success');
-        }
+        fetch(dataUrl)
+            .then(res => res.blob())
+            .then(blob => {
+                const formData = new FormData();
+                formData.append('file', blob, 'studio_design.png');
+                formData.append('printer', selectedPrinter);
+                formData.append('copies', '1');
+                formData.append('pagesize', document.getElementById('studioPreset').value === 'letter' ? 'Letter' : 'A4');
+                formData.append('colormodel', 'RGB');
+                formData.append('resolution', dpi);
+                formData.append('fitpage', 'true');
 
-        fetchStatus();
-    </script>
+                fetch('/api/print', { method: 'POST', body: formData })
+                    .then(r => r.json())
+                    .then(d => {
+                        if (d.success) showToast('Canvas spooled directly to printer!', 'success');
+                        else showToast('Error: ' + d.error, 'error');
+                    });
+            });
+    });
+
+    document.getElementById('btnStudioDownloadPdf').addEventListener('click', () => {
+        if (!fabricCanvas) return;
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF('p', 'mm', 'a4');
+        const imgData = fabricCanvas.toDataURL({ format: 'png', multiplier: 2 });
+        doc.addImage(imgData, 'PNG', 10, 10, 190, 260);
+        doc.save('design.pdf');
+    });
+
+    // ==========================================
+    // WALK-UP PHOTOCOPIER
+    // ==========================================
+    document.getElementById('btnCopyMinus').addEventListener('click', () => {
+        if (copyCopies > 1) {
+            copyCopies--;
+            document.getElementById('copyCountDisplay').textContent = copyCopies;
+        }
+    });
+    document.getElementById('btnCopyPlus').addEventListener('click', () => {
+        if (copyCopies < 99) {
+            copyCopies++;
+            document.getElementById('copyCountDisplay').textContent = copyCopies;
+        }
+    });
+    document.getElementById('btnCopyBw').addEventListener('click', () => {
+        copyMode = 'Gray';
+        document.getElementById('btnCopyBw').classList.add('active');
+        document.getElementById('btnCopyColor').classList.remove('active');
+    });
+    document.getElementById('btnCopyColor').addEventListener('click', () => {
+        copyMode = 'Color';
+        document.getElementById('btnCopyColor').classList.add('active');
+        document.getElementById('btnCopyBw').classList.remove('active');
+    });
+    document.getElementById('copyContrast').addEventListener('input', (e) => {
+        const v = parseInt(e.target.value);
+        document.getElementById('copyContrastVal').textContent = v === 0 ? 'Normal' : (v > 0 ? `+${v} (Darker)` : `${v} (Lighter)`);
+    });
+
+    document.getElementById('btnStartPhotocopy').addEventListener('click', async () => {
+        const btn = document.getElementById('btnStartPhotocopy');
+        const statusText = document.getElementById('copyStatusText');
+        btn.disabled = true;
+        statusText.textContent = 'Scanning flatbed... Please wait...';
+
+        const formData = new FormData();
+        formData.append('printer', selectedPrinter);
+        formData.append('copies', copyCopies);
+        formData.append('mode', copyMode);
+        formData.append('contrast', document.getElementById('copyContrast').value);
+        formData.append('resolution', document.getElementById('copyResolution').value);
+        formData.append('pagesize', document.getElementById('copyPageSize').value);
+
+        try {
+            const res = await fetch('/api/photocopy', { method: 'POST', body: formData });
+            const data = await res.json();
+            if (data.success) {
+                showToast(`Photocopy complete! Spooled ${data.copies} copy(ies).`, 'success');
+                statusText.textContent = `Completed job #${data.job_id}`;
+            } else {
+                showToast('Photocopy error: ' + data.error, 'error');
+                statusText.textContent = 'Error: ' + data.error;
+            }
+        } catch (e) {
+            showToast('Photocopy failed', 'error');
+            statusText.textContent = 'Connection failure';
+        } finally {
+            btn.disabled = false;
+        }
+    });
+
+    // ==========================================
+    // SCAN DIGITIZER
+    // ==========================================
+    document.getElementById('btnTriggerScan').addEventListener('click', async () => {
+        const btn = document.getElementById('btnTriggerScan');
+        btn.disabled = true;
+        showToast('Scanning in progress...', 'info');
+
+        const formData = new FormData();
+        formData.append('resolution', document.getElementById('scanResolution').value);
+        formData.append('mode', document.getElementById('scanMode').value);
+        formData.append('format', document.getElementById('scanFormat').value);
+        formData.append('save_samba', document.getElementById('scanSaveSamba').checked);
+
+        try {
+            const res = await fetch('/api/scan', { method: 'POST', body: formData });
+            const data = await res.json();
+            if (data.success) {
+                showToast('Scan complete!', 'success');
+                if (data.data) {
+                    const img = document.getElementById('scanPreviewImg');
+                    img.src = 'data:image/png;base64,' + data.data;
+                    document.getElementById('scanPreviewContainer').style.display = 'block';
+                    document.getElementById('scanEmptyState').style.display = 'none';
+                }
+            } else {
+                showToast('Scan error: ' + data.error, 'error');
+            }
+        } catch (e) {
+            showToast('Scan failed', 'error');
+        } finally {
+            btn.disabled = false;
+        }
+    });
+
+    // ==========================================
+    // CONFIDENTIAL PIN QUEUE
+    // ==========================================
+    async function loadPinList() {
+        try {
+            const res = await fetch('/api/pin/list');
+            const data = await res.json();
+            const tbody = document.getElementById('pinTableBody');
+            tbody.innerHTML = '';
+            if (data.jobs && data.jobs.length > 0) {
+                data.jobs.forEach(j => {
+                    const tr = document.createElement('tr');
+                    tr.innerHTML = `
+                        <td>${j.created_at}</td>
+                        <td style="font-weight: 600;">🔒 ${j.filename}</td>
+                        <td>${j.pages}</td>
+                        <td>${j.copies}</td>
+                        <td>${j.colormodel}</td>
+                        <td style="color: var(--accent); font-weight:600;">₱${j.cost.toFixed(2)}</td>
+                        <td><button class="btn-primary" style="padding: 4px 10px; font-size: 11px; width:auto;" onclick="openPinModal('${j.job_id}', '${j.filename}')">Release</button></td>
+                    `;
+                    tbody.appendChild(tr);
+                });
+            } else {
+                tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: var(--text-tertiary);">No confidential jobs held</td></tr>';
+            }
+        } catch (e) {
+            console.error(e);
+        }
+    }
+
+    window.openPinModal = function(jobId, filename) {
+        pendingReleaseJobId = jobId;
+        document.getElementById('pinModalJobTitle').textContent = filename;
+        document.getElementById('pinModalCode').value = '';
+        document.getElementById('pinModal').classList.add('show');
+    };
+    document.getElementById('btnCancelPinModal').addEventListener('click', () => {
+        document.getElementById('pinModal').classList.remove('show');
+    });
+    document.getElementById('btnConfirmReleasePin').addEventListener('click', async () => {
+        const pin = document.getElementById('pinModalCode').value.trim();
+        if (!pin) return;
+
+        const formData = new FormData();
+        formData.append('job_id', pendingReleaseJobId);
+        formData.append('pin', pin);
+
+        try {
+            const res = await fetch('/api/pin/release', { method: 'POST', body: formData });
+            const data = await res.json();
+            if (data.success) {
+                showToast('Job unlocked and sent to printer!', 'success');
+                document.getElementById('pinModal').classList.remove('show');
+                loadPinList();
+            } else {
+                showToast('Error: ' + data.error, 'error');
+            }
+        } catch (e) {
+            showToast('Release failed', 'error');
+        }
+    });
+
+    // ==========================================
+    // HISTORY & TELEMETRY
+    // ==========================================
+    async function loadHistory() {
+        try {
+            const res = await fetch('/api/reports/ledger');
+            const data = await res.json();
+            if (data.stats) {
+                document.getElementById('statTotalJobs').textContent = data.stats.total_jobs;
+                document.getElementById('statTotalPages').textContent = data.stats.total_pages;
+                document.getElementById('statTotalRevenue').textContent = data.stats.total_revenue;
+            }
+            const tbody = document.getElementById('historyTableBody');
+            tbody.innerHTML = '';
+            if (data.jobs && data.jobs.length > 0) {
+                data.jobs.forEach(j => {
+                    const tr = document.createElement('tr');
+                    tr.innerHTML = `
+                        <td>${j.timestamp}</td>
+                        <td style="font-weight: 600;">${j.title}</td>
+                        <td>${j.printer}</td>
+                        <td>${j.pages}</td>
+                        <td>${j.copies}</td>
+                        <td>${j.colormodel}</td>
+                        <td style="color: var(--accent); font-weight:600;">${j.cost}</td>
+                        <td><span style="font-size: 11px; padding: 2px 6px; border-radius: 4px; background: var(--surface-elevated);">${j.status}</span></td>
+                    `;
+                    tbody.appendChild(tr);
+                });
+            } else {
+                tbody.innerHTML = '<tr><td colspan="8" style="text-align: center; color: var(--text-tertiary);">No audit history recorded</td></tr>';
+            }
+        } catch (e) {
+            console.error(e);
+        }
+    }
+
+    async function loadTelemetry() {
+        try {
+            const res = await fetch('/api/status');
+            const d = await res.json();
+            document.getElementById('telemetryCpu').textContent = d.cpu_load || '0.00';
+            document.getElementById('telemetryRam').textContent = `${d.ram_used || 0} / ${d.ram_total || 0} MB`;
+            document.getElementById('telemetryTemp').textContent = `${d.temp_c || 0}°C`;
+            document.getElementById('telemetryDisk').textContent = `${d.disk_free || 0}% Free`;
+            document.getElementById('telemetryUptime').textContent = 'Uptime: ' + (d.uptime || '--');
+        } catch (e) {}
+    }
+
+    // ==========================================
+    // ADMIN ACTIONS
+    // ==========================================
+    document.getElementById('btnUnlockAdmin').addEventListener('click', async () => {
+        const pass = document.getElementById('adminPassInput').value;
+        const formData = new FormData();
+        formData.append('password', pass);
+
+        const res = await fetch('/api/admin/auth', { method: 'POST', body: formData });
+        const data = await res.json();
+        if (data.success) {
+            currentAdminToken = data.token;
+            sessionStorage.setItem('admin_token', currentAdminToken);
+            document.getElementById('adminLockedState').style.display = 'none';
+            document.getElementById('adminUnlockedState').style.display = 'block';
+            document.getElementById('btnAdminLock').textContent = '🔓 Admin';
+            showToast('Administrator privileges unlocked', 'success');
+        } else {
+            showToast('Invalid password', 'error');
+        }
+    });
+
+    async function executeAdminAction(action, extraData={}) {
+        const formData = new FormData();
+        formData.append('action', action);
+        formData.append('token', currentAdminToken);
+        for (let k in extraData) formData.append(k, extraData[k]);
+
+        const res = await fetch('/api/admin/action', {
+            method: 'POST',
+            headers: { 'X-Admin-Token': currentAdminToken },
+            body: formData
+        });
+        const data = await res.json();
+        if (data.success) showToast(data.message, 'success');
+        else showToast('Error: ' + data.error, 'error');
+    }
+
+    document.getElementById('btnSaveRates').addEventListener('click', () => {
+        executeAdminAction('update_rates', {
+            rate_bw: document.getElementById('adminRateBw').value,
+            rate_color: document.getElementById('adminRateColor').value,
+            currency_symbol: '₱'
+        });
+    });
+    document.getElementById('btnAdminRestartCups').addEventListener('click', () => executeAdminAction('restart_cups'));
+    document.getElementById('btnAdminPurgeCache').addEventListener('click', () => executeAdminAction('purge_cache'));
+    document.getElementById('btnAdminReboot').addEventListener('click', () => {
+        if (confirm('Reboot print server appliance now?')) executeAdminAction('reboot');
+    });
+    document.getElementById('btnAdminShutdown').addEventListener('click', () => {
+        if (confirm('Shut down print server appliance now?')) executeAdminAction('shutdown');
+    });
+
+    // Initial boot
+    loadPrinters();
+</script>
 </body>
 </html>
 """
-
-def parse_printers():
-    printers = []
-    try:
-        raw = subprocess.check_output(['lpstat', '-p', '-d'], text=True)
-        default_name = ''
-        for line in raw.split('\n'):
-            if 'system default destination:' in line:
-                default_name = line.split('system default destination:')[-1].strip()
-
-        for line in raw.split('\n'):
-            if line.startswith('printer '):
-                parts = line.split()
-                if len(parts) >= 2:
-                    name = parts[1]
-                    state = 'Idle'
-                    if 'is printing' in line:
-                        state = 'Printing'
-                    elif 'disabled' in line:
-                        state = 'Disabled'
-                    printers.append({
-                        'name': name,
-                        'state': state,
-                        'is_default': (name == default_name)
-                    })
-    except Exception:
-        printers.append({'name': 'HP_Smart_Tank_520', 'state': 'Idle', 'is_default': True})
-    return printers
-
-def get_telemetry():
-    telemetry = {
-        'ram_used': '--',
-        'ram_total': '--',
-        'load': '--',
-        'uptime': '--'
-    }
-    try:
-        mem = subprocess.check_output(['free', '-m'], text=True).split('\n')[1].split()
-        telemetry['ram_total'] = f"{mem[1]} MB"
-        telemetry['ram_used'] = f"{mem[2]} MB"
-        
-        load = subprocess.check_output(['uptime'], text=True)
-        telemetry['load'] = load.split('load average:')[-1].strip()
-        up_match = re.search(r'up\s+(.*?),\s+\d+\s+user', load)
-        if up_match:
-            telemetry['uptime'] = up_match.group(1).strip()
-    except Exception:
-        pass
-    return telemetry
-
-def parse_jobs():
-    jobs = []
-    try:
-        active_raw = subprocess.check_output(['lpstat', '-o'], text=True)
-        for line in active_raw.strip().split('\n'):
-            if not line.strip(): continue
-            parts = line.split()
-            if len(parts) >= 4:
-                jobs.append({
-                    'id': parts[0],
-                    'user': parts[1],
-                    'bytes': int(parts[2]) if parts[2].isdigit() else 0,
-                    'time': ' '.join(parts[3:]),
-                    'state': 'Active'
-                })
-
-        comp_raw = subprocess.check_output(['lpstat', '-W', 'completed', '-o'], text=True)
-        for line in comp_raw.strip().split('\n')[:10]:
-            if not line.strip(): continue
-            parts = line.split()
-            if len(parts) >= 4:
-                jobs.append({
-                    'id': parts[0],
-                    'user': parts[1],
-                    'bytes': int(parts[2]) if parts[2].isdigit() else 0,
-                    'time': ' '.join(parts[3:]),
-                    'state': 'Completed'
-                })
-    except Exception:
-        pass
-    return jobs
 
 @app.route('/')
 def index():
@@ -1820,28 +1935,374 @@ def index():
 
 @app.route('/api/status')
 def api_status():
-    return jsonify({
-        'printers': parse_printers(),
-        'telemetry': get_telemetry()
-    })
-
-@app.route('/api/jobs')
-def api_jobs():
-    return jsonify({
-        'jobs': parse_jobs()
-    })
-
-@app.route('/api/cancel', methods=['POST'])
-def api_cancel():
-    data = request.get_json() or {}
-    job_id = data.get('job_id')
-    if not job_id:
-        return jsonify({'success': False, 'error': 'Missing job_id'}), 400
+    temp_c = 0
     try:
-        subprocess.run(['cancel', job_id], check=True, text=True)
-        return jsonify({'success': True})
-    except subprocess.CalledProcessError as e:
+        with open('/sys/class/thermal/thermal_zone0/temp', 'r') as f:
+            temp_c = round(int(f.read().strip()) / 1000, 1)
+    except Exception:
+        pass
+
+    ram_used = 0
+    ram_total = 0
+    try:
+        res = subprocess.run(['free', '-m'], capture_output=True, text=True)
+        for line in res.stdout.splitlines():
+            if line.startswith('Mem:'):
+                parts = line.split()
+                ram_total = int(parts[1])
+                ram_used = int(parts[2])
+    except Exception:
+        pass
+
+    disk_free = 0
+    try:
+        st = os.statvfs('/')
+        disk_free = round((st.f_bavail / st.f_blocks) * 100, 1)
+    except Exception:
+        pass
+
+    cpu_load = "0.00"
+    try:
+        cpu_load = str(os.getloadavg()[0])
+    except Exception:
+        pass
+
+    uptime_str = "--"
+    try:
+        res = subprocess.run(['uptime', '-p'], capture_output=True, text=True)
+        uptime_str = res.stdout.strip()
+    except Exception:
+        pass
+
+    return jsonify({
+        'temp_c': temp_c,
+        'ram_used': ram_used,
+        'ram_total': ram_total,
+        'disk_free': disk_free,
+        'cpu_load': cpu_load,
+        'uptime': uptime_str
+    })
+
+@app.route('/api/printers')
+def api_printers():
+    printers, def_p = get_printers()
+    return jsonify({'printers': printers, 'default': def_p})
+
+@app.route('/api/inspect', methods=['POST'])
+def api_inspect():
+    if 'file' not in request.files:
+        return jsonify({'success': False, 'error': 'No file uploaded'}), 400
+    file = request.files['file']
+    colormodel = request.form.get('colormodel', 'RGB')
+    copies = int(request.form.get('copies', '1'))
+
+    suffix = os.path.splitext(file.filename)[1].lower()
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+        file.save(tmp.name)
+        raw_path = tmp.name
+
+    temp_dir = None
+    try:
+        conv_pdf, temp_dir = convert_to_pdf(raw_path, file.filename)
+        pages = get_pdf_page_count(conv_pdf)
+        rate = get_rate(colormodel == 'RGB')
+        cost = rate * pages * copies
+        symbol = get_setting('currency_symbol', '₱')
+        return jsonify({
+            'success': True,
+            'pages': pages,
+            'copies': copies,
+            'cost': cost,
+            'cost_formatted': f"{symbol}{cost:.2f}",
+            'filename': file.filename
+        })
+    except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
+    finally:
+        if temp_dir:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+        if os.path.exists(raw_path):
+            try: os.remove(raw_path)
+            except Exception: pass
+
+@app.route('/api/print', methods=['POST'])
+def api_print():
+    if 'file' not in request.files:
+        return jsonify({'success': False, 'error': 'No file uploaded'}), 400
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({'success': False, 'error': 'Empty filename'}), 400
+
+    printer = request.form.get('printer', '')
+    if not printer:
+        _, def_p = get_printers()
+        printer = def_p or 'HP_Smart_Tank_520'
+
+    copies = request.form.get('copies', '1')
+    pagesize = request.form.get('pagesize', 'A4')
+    mediatype = request.form.get('mediatype', 'Plain')
+    colormodel = request.form.get('colormodel', 'RGB')
+    duplex = request.form.get('duplex', 'None')
+    resolution = request.form.get('resolution', '300')
+    fitpage = request.form.get('fitpage', 'true')
+    pagerange = request.form.get('pagerange', '').strip()
+
+    suffix = os.path.splitext(file.filename)[1].lower()
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+        file.save(tmp.name)
+        raw_path = tmp.name
+
+    temp_dir = None
+    try:
+        conv_pdf, temp_dir = convert_to_pdf(raw_path, file.filename)
+        pages = get_pdf_page_count(conv_pdf)
+        copies_int = int(copies)
+        rate = get_rate(colormodel == 'RGB')
+        cost = rate * pages * copies_int
+
+        cmd = ['lp', '-d', printer, '-n', str(copies)]
+        if pagesize: cmd.extend(['-o', f'PageSize={pagesize}'])
+        if mediatype: cmd.extend(['-o', f'MediaType={mediatype}'])
+        if colormodel: cmd.extend(['-o', f'ColorModel={colormodel}'])
+        if duplex and duplex != 'None': cmd.extend(['-o', f'Duplex={duplex}'])
+        if fitpage == 'true': cmd.extend(['-o', 'fit-to-page'])
+        if pagerange: cmd.extend(['-o', f'page-ranges={pagerange}'])
+        if resolution in ['150', '300', '600', '1200']: cmd.extend(['-o', f'resolution={resolution}dpi'])
+        cmd.append(conv_pdf)
+
+        res = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        job_id = res.stdout.strip()
+
+        record_ledger(file.filename, printer, pages, copies_int, pages * copies_int, colormodel, cost, request.remote_addr, "COMPLETED")
+        return jsonify({'success': True, 'job_id': job_id, 'pages': pages, 'cost': cost})
+    except subprocess.CalledProcessError as e:
+        return jsonify({'success': False, 'error': e.stderr.strip() or str(e)}), 500
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+    finally:
+        if temp_dir:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+        if os.path.exists(raw_path):
+            try: os.remove(raw_path)
+            except Exception: pass
+
+@app.route('/api/print/pin-hold', methods=['POST'])
+def api_pin_hold():
+    if 'file' not in request.files:
+        return jsonify({'success': False, 'error': 'No file uploaded'}), 400
+    file = request.files['file']
+    pin = request.form.get('pin', '').strip()
+    if not pin or len(pin) != 4 or not pin.isdigit():
+        return jsonify({'success': False, 'error': 'PIN must be exactly 4 digits'}), 400
+
+    printer = request.form.get('printer', '')
+    if not printer:
+        _, def_p = get_printers()
+        printer = def_p or 'HP_Smart_Tank_520'
+
+    copies = int(request.form.get('copies', '1'))
+    pagesize = request.form.get('pagesize', 'A4')
+    colormodel = request.form.get('colormodel', 'RGB')
+    duplex = request.form.get('duplex', 'None')
+    resolution = request.form.get('resolution', '300')
+    fitpage = request.form.get('fitpage', 'true')
+    pagerange = request.form.get('pagerange', '').strip()
+
+    job_id = f"pin_{int(time.time())}_{secrets.token_hex(4)}"
+    pin_hash = hashlib.sha256(pin.encode('utf-8')).hexdigest()
+
+    suffix = os.path.splitext(file.filename)[1].lower()
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+        file.save(tmp.name)
+        raw_path = tmp.name
+
+    temp_dir = None
+    try:
+        conv_pdf, temp_dir = convert_to_pdf(raw_path, file.filename)
+        dest_path = os.path.join(SPOOL_PINNED_DIR, f"{job_id}.pdf")
+        shutil.copy2(conv_pdf, dest_path)
+        os.chmod(dest_path, 0o600)
+
+        pages = get_pdf_page_count(dest_path)
+        rate = get_rate(colormodel == 'RGB')
+        cost = rate * pages * copies
+
+        options = {
+            'printer': printer,
+            'copies': copies,
+            'pagesize': pagesize,
+            'colormodel': colormodel,
+            'duplex': duplex,
+            'resolution': resolution,
+            'fitpage': fitpage,
+            'pagerange': pagerange
+        }
+
+        conn = get_db()
+        with conn:
+            conn.execute("""
+                INSERT INTO pinned_jobs 
+                (job_id, file_path, filename, pin_hash, pages, copies, colormodel, printer, options_json, cost, created_at, expires_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                job_id, dest_path, file.filename, pin_hash, pages, copies, colormodel, printer,
+                json.dumps(options), cost, int(time.time()), int(time.time() + 24 * 3600)
+            ))
+
+        return jsonify({
+            'success': True,
+            'job_id': job_id,
+            'pages': pages,
+            'copies': copies,
+            'cost': cost,
+            'message': 'Document securely held in PIN queue.'
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+    finally:
+        if temp_dir:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+        if os.path.exists(raw_path):
+            try: os.remove(raw_path)
+            except Exception: pass
+
+@app.route('/api/pin/list', methods=['GET'])
+def api_pin_list():
+    conn = get_db()
+    cur = conn.cursor()
+    now = int(time.time())
+    cur.execute("SELECT job_id, file_path FROM pinned_jobs WHERE expires_at < ?", (now,))
+    expired = cur.fetchall()
+    for row in expired:
+        try: os.remove(row['file_path'])
+        except Exception: pass
+    cur.execute("DELETE FROM pinned_jobs WHERE expires_at < ?", (now,))
+    conn.commit()
+
+    cur.execute("SELECT job_id, filename, pages, copies, colormodel, printer, cost, created_at FROM pinned_jobs ORDER BY created_at DESC")
+    jobs = []
+    for row in cur.fetchall():
+        jobs.append({
+            'job_id': row['job_id'],
+            'filename': row['filename'],
+            'pages': row['pages'],
+            'copies': row['copies'],
+            'colormodel': row['colormodel'],
+            'printer': row['printer'],
+            'cost': row['cost'],
+            'created_at': datetime.fromtimestamp(row['created_at']).strftime('%Y-%m-%d %H:%M:%S')
+        })
+    return jsonify({'success': True, 'jobs': jobs})
+
+@app.route('/api/pin/release', methods=['POST'])
+def api_pin_release():
+    job_id = request.form.get('job_id', '').strip()
+    pin = request.form.get('pin', '').strip()
+    if not job_id or not pin:
+        return jsonify({'success': False, 'error': 'Missing Job ID or PIN'}), 400
+
+    pin_hash = hashlib.sha256(pin.encode('utf-8')).hexdigest()
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM pinned_jobs WHERE job_id = ?", (job_id,))
+    row = cur.fetchone()
+    if not row:
+        return jsonify({'success': False, 'error': 'Job not found or expired'}), 404
+
+    if row['pin_hash'] != pin_hash:
+        return jsonify({'success': False, 'error': 'Incorrect PIN. Please re-enter.'}), 401
+
+    options = json.loads(row['options_json'])
+    printer = options.get('printer') or 'HP_Smart_Tank_520'
+    copies = options.get('copies', 1)
+    file_path = row['file_path']
+
+    if not os.path.exists(file_path):
+        return jsonify({'success': False, 'error': 'Spool file missing'}), 500
+
+    try:
+        cmd = ['lp', '-d', printer, '-n', str(copies)]
+        if options.get('pagesize'): cmd.extend(['-o', f"PageSize={options['pagesize']}"])
+        if options.get('colormodel'): cmd.extend(['-o', f"ColorModel={options['colormodel']}"])
+        if options.get('duplex') and options['duplex'] != 'None': cmd.extend(['-o', f"Duplex={options['duplex']}"])
+        if options.get('fitpage') == 'true': cmd.extend(['-o', 'fit-to-page'])
+        if options.get('pagerange'): cmd.extend(['-o', f"page-ranges={options['pagerange']}"])
+        if options.get('resolution'): cmd.extend(['-o', f"resolution={options['resolution']}dpi"])
+        cmd.append(file_path)
+
+        res = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        cups_job = res.stdout.strip()
+
+        try: os.remove(file_path)
+        except Exception: pass
+        cur.execute("DELETE FROM pinned_jobs WHERE job_id = ?", (job_id,))
+        conn.commit()
+
+        record_ledger(row['filename'], printer, row['pages'], row['copies'], row['pages'] * row['copies'],
+                      row['colormodel'], row['cost'], request.remote_addr, "RELEASED")
+
+        return jsonify({'success': True, 'cups_job': cups_job, 'message': 'Job released to printer.'})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/photocopy', methods=['POST'])
+def api_photocopy():
+    printer = request.form.get('printer', '')
+    if not printer:
+        _, def_p = get_printers()
+        printer = def_p or 'HP_Smart_Tank_520'
+    copies = int(request.form.get('copies', '1'))
+    mode = request.form.get('mode', 'Gray')
+    contrast = int(request.form.get('contrast', '0'))
+    resolution = request.form.get('resolution', '300')
+    pagesize = request.form.get('pagesize', 'A4')
+
+    temp_dir = tempfile.mkdtemp(prefix="copy_")
+    raw_pnm = os.path.join(temp_dir, 'raw.pnm')
+    proc_pdf = os.path.join(temp_dir, 'copy.pdf')
+
+    try:
+        scan_cmd = ['scanimage', f'--resolution={resolution}', f'--mode={mode}']
+        with open(raw_pnm, 'wb') as f_out:
+            p = subprocess.run(scan_cmd, stdout=f_out, stderr=subprocess.PIPE, timeout=90)
+            if p.returncode != 0:
+                err_msg = p.stderr.decode('utf-8', errors='ignore').strip()
+                if 'no SANE devices found' in err_msg or not err_msg:
+                    err_msg = 'Scanner not detected. Verify USB connection and power.'
+                return jsonify({'success': False, 'error': err_msg}), 500
+
+        conv_cmd = ['convert', raw_pnm, '-auto-orient']
+        if contrast != 0:
+            conv_cmd.extend(['-brightness-contrast', f'0x{contrast}'])
+        conv_cmd.append(proc_pdf)
+        subprocess.run(conv_cmd, check=True, timeout=60)
+
+        print_cmd = [
+            'lp', '-d', printer, '-n', str(copies),
+            '-o', f'PageSize={pagesize}',
+            '-o', 'fit-to-page'
+        ]
+        if mode == 'Gray':
+            print_cmd.extend(['-o', 'ColorModel=KGray'])
+        else:
+            print_cmd.extend(['-o', 'ColorModel=RGB'])
+
+        if resolution in ['150', '300', '600']:
+            print_cmd.extend(['-o', f'resolution={resolution}dpi'])
+
+        print_cmd.append(proc_pdf)
+        p_res = subprocess.run(print_cmd, capture_output=True, text=True, check=True)
+        job_id = p_res.stdout.strip()
+
+        rate = get_rate(mode == 'Color')
+        cost = rate * copies
+        record_ledger(f"Digital Copy ({copies}x {mode})", printer, 1, copies, copies, mode, cost, request.remote_addr, "COPIED")
+
+        return jsonify({'success': True, 'job_id': job_id, 'copies': copies, 'mode': mode, 'cost': cost})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+    finally:
+        shutil.rmtree(temp_dir, ignore_errors=True)
 
 @app.route('/api/scan', methods=['POST'])
 def api_scan():
@@ -1850,15 +2311,12 @@ def api_scan():
     fmt = request.form.get('format', 'pdf').lower()
     save_samba = request.form.get('save_samba', 'true') == 'true'
 
-    if resolution not in ['75', '150', '300', '600']:
-        resolution = '150'
-    if mode not in ['Color', 'Gray', 'Lineart']:
-        mode = 'Color'
-    if fmt not in ['pdf', 'png', 'jpeg']:
-        fmt = 'pdf'
+    if resolution not in ['75', '150', '300', '600']: resolution = '150'
+    if mode not in ['Color', 'Gray', 'Lineart']: mode = 'Color'
+    if fmt not in ['pdf', 'png', 'jpeg']: fmt = 'pdf'
 
     timestamp = time.strftime('%Y%m%d_%H%M%S')
-    temp_dir = tempfile.mkdtemp()
+    temp_dir = tempfile.mkdtemp(prefix="scan_")
     raw_pnm = os.path.join(temp_dir, 'raw.pnm')
     final_file = os.path.join(temp_dir, f'scan_{timestamp}.{fmt}')
 
@@ -1869,10 +2327,9 @@ def api_scan():
             if p.returncode != 0:
                 err_msg = p.stderr.decode('utf-8', errors='ignore').strip()
                 if 'no SANE devices found' in err_msg or not err_msg:
-                    err_msg = 'HP Smart Tank 520 scanner not detected. Please verify the printer is turned on and the USB cable is connected.'
+                    err_msg = 'Scanner not detected. Verify USB connection and power.'
                 return jsonify({'success': False, 'error': err_msg}), 500
 
-        # Convert to requested format
         subprocess.run(['convert', raw_pnm, final_file], check=True, timeout=60)
 
         samba_saved = False
@@ -1882,10 +2339,10 @@ def api_scan():
             try:
                 os.makedirs(samba_dir, exist_ok=True)
                 samba_dest = os.path.join(samba_dir, f'scan_{timestamp}.{fmt}')
-                subprocess.run(['cp', final_file, samba_dest], check=True)
-                subprocess.run(['chmod', '666', samba_dest], check=True)
+                shutil.copy2(final_file, samba_dest)
+                os.chmod(samba_dest, 0o666)
                 samba_saved = True
-                samba_path = f'\\\\printserver.local\\Public\\Scans\\scan_{timestamp}.{fmt}'
+                samba_path = f'\\\\\\\\printserver.local\\\\Public\\\\Scans\\\\scan_{timestamp}.{fmt}'
             except Exception:
                 pass
 
@@ -1902,106 +2359,113 @@ def api_scan():
             'samba_path': samba_path
         })
     except subprocess.TimeoutExpired:
-        return jsonify({'success': False, 'error': 'Scanning timed out. Please check printer power and USB connection.'}), 500
+        return jsonify({'success': False, 'error': 'Scanning timed out. Check scanner connection.'}), 500
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
     finally:
-        if os.path.exists(raw_pnm):
-            try: os.remove(raw_pnm)
-            except Exception: pass
+        shutil.rmtree(temp_dir, ignore_errors=True)
 
-@app.route('/api/print', methods=['POST'])
-def api_print():
-    if 'file' not in request.files:
-        return jsonify({'success': False, 'error': 'No file uploaded'}), 400
-    
-    file = request.files['file']
-    if file.filename == '':
-        return jsonify({'success': False, 'error': 'Empty filename'}), 400
+@app.route('/api/reports/ledger', methods=['GET'])
+def api_reports_ledger():
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT COUNT(*) as total_jobs, SUM(total_pages) as total_pages, SUM(cost) as total_revenue FROM print_ledger")
+    stats = cur.fetchone()
 
-    printer = request.form.get('printer', 'HP_Smart_Tank_520')
-    copies = request.form.get('copies', '1')
-    pagesize = request.form.get('pagesize', 'A4')
-    mediatype = request.form.get('mediatype', 'Plain')
-    quality = request.form.get('quality', 'Normal')
-    colormodel = request.form.get('colormodel', 'RGB')
-    duplex = request.form.get('duplex', 'None')
-    orientation = request.form.get('orientation', 'auto')
-    fitpage = request.form.get('fitpage', 'true')
-    pagerange = request.form.get('pagerange', '').strip()
-    margin_mode = request.form.get('margin_mode', 'printable')
+    cur.execute("SELECT * FROM print_ledger ORDER BY timestamp DESC LIMIT 100")
+    rows = cur.fetchall()
+    jobs = []
+    symbol = get_setting('currency_symbol', '₱')
+    for r in rows:
+        jobs.append({
+            'id': r['id'],
+            'timestamp': datetime.fromtimestamp(r['timestamp']).strftime('%Y-%m-%d %H:%M:%S'),
+            'title': r['job_title'],
+            'printer': r['printer'],
+            'pages': r['pages'],
+            'copies': r['copies'],
+            'total_pages': r['total_pages'],
+            'colormodel': r['colormodel'],
+            'cost': f"{symbol}{r['cost']:.2f}",
+            'client_ip': r['client_ip'],
+            'status': r['status']
+        })
+    return jsonify({
+        'success': True,
+        'stats': {
+            'total_jobs': stats['total_jobs'] or 0,
+            'total_pages': stats['total_pages'] or 0,
+            'total_revenue': f"{symbol}{(stats['total_revenue'] or 0):.2f}"
+        },
+        'jobs': jobs
+    })
 
-    suffix = os.path.splitext(file.filename)[1].lower()
-    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-        file.save(tmp.name)
-        tmp_path = tmp.name
+@app.route('/api/reports/export.csv', methods=['GET'])
+def api_reports_export_csv():
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM print_ledger ORDER BY timestamp DESC")
+    rows = cur.fetchall()
 
-    # Handle Office Document formats (.docx, .doc, .odt, .rtf) via headless LibreOffice
-    if suffix in ['.docx', '.doc', '.odt', '.rtf']:
-        try:
-            conv_dir = tempfile.mkdtemp()
-            subprocess.run([
-                'libreoffice', '--headless', '--convert-to', 'pdf',
-                tmp_path, '--outdir', conv_dir
-            ], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30)
-            base_name = os.path.splitext(os.path.basename(tmp_path))[0]
-            converted_pdf = os.path.join(conv_dir, f"{base_name}.pdf")
-            if os.path.exists(converted_pdf):
-                tmp_path = converted_pdf
-        except Exception as e:
-            pass
+    def generate_csv():
+        yield "ID,Timestamp,Job Title,Printer,Pages,Copies,Total Pages,Color Mode,Cost,Client IP,Status\n"
+        for r in rows:
+            ts = datetime.fromtimestamp(r['timestamp']).strftime('%Y-%m-%d %H:%M:%S')
+            title = r['job_title'].replace('"', '""')
+            yield f'"{r["id"]}","{ts}","{title}","{r["printer"]}","{r["pages"]}","{r["copies"]}","{r["total_pages"]}","{r["colormodel"]}","{r["cost"]:.2f}","{r["client_ip"]}","{r["status"]}"\n'
 
-    try:
-        cmd = ['lp', '-d', printer, '-n', str(copies)]
+    return Response(generate_csv(), mimetype='text/csv', headers={'Content-Disposition': 'attachment; filename=print_ledger.csv'})
 
-        if pagesize:
-            cmd.extend(['-o', f'PageSize={pagesize}'])
-        if mediatype:
-            cmd.extend(['-o', f'MediaType={mediatype}'])
-        if quality:
-            cmd.extend(['-o', f'OutputMode={quality}'])
-        if colormodel:
-            cmd.extend(['-o', f'ColorModel={colormodel}'])
-        if duplex and duplex != 'None':
-            cmd.extend(['-o', f'Duplex={duplex}'])
-        if orientation in ['3', '4']:
-            cmd.extend(['-o', f'orientation-requested={orientation}'])
-        if fitpage == 'true':
-            cmd.extend(['-o', 'fit-to-page'])
-        if pagerange:
-            cmd.extend(['-o', f'page-ranges={pagerange}'])
+@app.route('/api/admin/auth', methods=['POST'])
+def api_admin_auth():
+    password = request.form.get('password', '')
+    admin_hash = get_setting('admin_hash', hashlib.sha256('admin'.encode('utf-8')).hexdigest())
+    req_hash = hashlib.sha256(password.encode('utf-8')).hexdigest()
+    if req_hash == admin_hash:
+        token = secrets.token_hex(16)
+        ACTIVE_TOKENS[token] = time.time() + 7200
+        return jsonify({'success': True, 'token': token})
+    return jsonify({'success': False, 'error': 'Invalid administrator password'}), 401
 
-        # Margin adjustments (convert mm to PostScript points: 1 mm = 2.83465 points)
-        if margin_mode == 'none':
-            cmd.extend(['-o', 'page-top=0', '-o', 'page-bottom=0', '-o', 'page-left=0', '-o', 'page-right=0'])
-        elif margin_mode == 'normal':
-            cmd.extend(['-o', 'page-top=36', '-o', 'page-bottom=36', '-o', 'page-left=36', '-o', 'page-right=36'])
-        elif margin_mode == 'custom':
-            try:
-                m_top = int(float(request.form.get('m_top', '10')) * 2.83465)
-                m_bottom = int(float(request.form.get('m_bottom', '10')) * 2.83465)
-                m_left = int(float(request.form.get('m_left', '10')) * 2.83465)
-                m_right = int(float(request.form.get('m_right', '10')) * 2.83465)
-                cmd.extend([
-                    '-o', f'page-top={m_top}',
-                    '-o', f'page-bottom={m_bottom}',
-                    '-o', f'page-left={m_left}',
-                    '-o', f'page-right={m_right}'
-                ])
-            except Exception:
-                pass
+@app.route('/api/admin/action', methods=['POST'])
+def api_admin_action():
+    token = request.headers.get('X-Admin-Token') or request.form.get('token')
+    if not verify_admin_token(token):
+        return jsonify({'success': False, 'error': 'Unauthorized. Admin login required.'}), 401
 
-        cmd.append(tmp_path)
-
-        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
-        job_id = result.stdout.strip()
-        return jsonify({'success': True, 'job_id': job_id})
-    except subprocess.CalledProcessError as e:
-        return jsonify({'success': False, 'error': e.stderr.strip() or str(e)}), 500
-    finally:
-        if os.path.exists(tmp_path):
-            os.remove(tmp_path)
+    action = request.form.get('action')
+    if action == 'reboot':
+        subprocess.Popen(['reboot'])
+        return jsonify({'success': True, 'message': 'System rebooting in 3 seconds...'})
+    elif action == 'shutdown':
+        subprocess.Popen(['poweroff'])
+        return jsonify({'success': True, 'message': 'System shutting down...'})
+    elif action == 'restart_cups':
+        subprocess.run(['systemctl', 'restart', 'cups'], check=True)
+        return jsonify({'success': True, 'message': 'CUPS print spooler restarted successfully.'})
+    elif action == 'purge_cache':
+        subprocess.run('rm -rf /tmp/webprint* /tmp/conv_* /tmp/copy_* /tmp/scan_*', shell=True)
+        return jsonify({'success': True, 'message': 'Temporary spool cache purged.'})
+    elif action == 'update_rates':
+        rate_bw = request.form.get('rate_bw', '2.00')
+        rate_color = request.form.get('rate_color', '5.00')
+        conn = get_db()
+        with conn:
+            conn.execute("UPDATE settings SET value = ? WHERE key = 'rate_bw'", (rate_bw,))
+            conn.execute("UPDATE settings SET value = ? WHERE key = 'rate_color'", (rate_color,))
+        return jsonify({'success': True, 'message': 'Rates updated successfully.'})
+    elif action == 'change_password':
+        new_pass = request.form.get('new_password', '')
+        if len(new_pass) < 4:
+            return jsonify({'success': False, 'error': 'Password must be at least 4 characters'}), 400
+        new_hash = hashlib.sha256(new_pass.encode('utf-8')).hexdigest()
+        conn = get_db()
+        with conn:
+            conn.execute("UPDATE settings SET value = ? WHERE key = 'admin_hash'", (new_hash,))
+        return jsonify({'success': True, 'message': 'Admin password changed.'})
+    return jsonify({'success': False, 'error': 'Unknown action'}), 400
 
 if __name__ == '__main__':
+    init_db()
     port = int(os.environ.get('PORT', 80))
     app.run(host='::', port=port)
