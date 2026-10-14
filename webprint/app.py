@@ -214,14 +214,14 @@ def convert_to_pdf(input_path, original_filename):
     return input_path, None
 
 INDEX_HTML = """<!DOCTYPE html>
-<html lang="en" data-theme="dark">
+<html lang="en" data-theme="gray">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Print Server Appliance</title>
     <script>
         (function() {
-            const savedTheme = localStorage.getItem('theme') || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+            const savedTheme = localStorage.getItem('theme') || 'gray';
             document.documentElement.setAttribute('data-theme', savedTheme);
         })();
     </script>
@@ -252,107 +252,131 @@ INDEX_HTML = """<!DOCTYPE html>
         };
     </script>
     <style>
-        :root {
-            --radius-sm: 6px;
-            --radius-md: 8px;
-            --radius-lg: 12px;
+        :root, html[data-theme="gray"], html[data-theme="dark"] {
+            --radius-sm: 4px;
+            --radius-md: 6px;
+            --radius-lg: 8px;
             --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
             --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-            --transition-theme: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
-        }
+            --transition-theme: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
 
-        html[data-theme="dark"] {
-            --bg: #09090b;
-            --surface: #121215;
-            --surface-elevated: #18181b;
-            --border: #27272a;
-            --border-hover: #3f3f46;
-            --text-primary: #f4f4f5;
-            --text-secondary: #a1a1aa;
-            --text-tertiary: #71717a;
-            --btn-bg: #f4f4f5;
-            --btn-text: #09090b;
-            --badge-bg: #18181b;
-            --desk-bg: #08080a;
+            /* Chromium Gray Minimal Dark Palette */
+            --bg: #202124;
+            --surface: #282828;
+            --surface-elevated: #35363a;
+            --surface-hover: #3c4043;
+            --border: #3c4043;
+            --border-subtle: rgba(255, 255, 255, 0.08);
+            --border-hover: #5f6368;
+            --desk-bg: #525659;
             --paper-bg: #ffffff;
-            --paper-text: #09090b;
-            --paper-border: #e4e4e7;
-            --paper-shadow: 0 16px 40px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.08);
-            --margin-line: rgba(59, 130, 246, 0.55);
-            --accent: #3b82f6;
-            --accent-hover: #2563eb;
-            --success: #22c55e;
-            --danger: #ef4444;
-            --warning: #f59e0b;
+            --paper-text: #202124;
+            --paper-shadow: 0 4px 20px rgba(0, 0, 0, 0.45), 0 1px 4px rgba(0, 0, 0, 0.25);
+            --margin-line: rgba(66, 133, 244, 0.6);
+            --text-primary: #e8eaed;
+            --text-secondary: #9aa0a6;
+            --text-tertiary: #80868b;
+            --accent: #8ab4f8;
+            --accent-hover: #aecbfa;
+            --btn-print-bg: #ffffff;
+            --btn-print-text: #202124;
+            --btn-cancel-border: #5f6368;
+            --btn-cancel-text: #e8eaed;
+            --input-bg: #35363a;
+            --input-border: #4a4d51;
+            --input-focus: #8ab4f8;
+            --row-hover: rgba(255, 255, 255, 0.03);
+            --badge-bg: #35363a;
+            --success: #81c995;
+            --danger: #f28b82;
+            --warning: #fdd663;
         }
 
         html[data-theme="light"] {
-            --bg: #f8fafc;
+            --radius-sm: 4px;
+            --radius-md: 6px;
+            --radius-lg: 8px;
+            --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+            --transition-theme: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+
+            /* Chromium Light Palette */
+            --bg: #f1f3f4;
             --surface: #ffffff;
-            --surface-elevated: #f1f5f9;
-            --border: #e2e8f0;
-            --border-hover: #cbd5e1;
-            --text-primary: #0f172a;
-            --text-secondary: #475569;
-            --text-tertiary: #94a3b8;
-            --btn-bg: #0f172a;
-            --btn-text: #ffffff;
-            --badge-bg: #f1f5f9;
-            --desk-bg: #e2e8f0;
+            --surface-elevated: #f8f9fa;
+            --surface-hover: #e8eaed;
+            --border: #dadce0;
+            --border-subtle: rgba(0, 0, 0, 0.06);
+            --border-hover: #bdc1c6;
+            --desk-bg: #d3d3d3;
             --paper-bg: #ffffff;
-            --paper-text: #0f172a;
-            --paper-border: #cbd5e1;
-            --paper-shadow: 0 14px 30px rgba(0, 0, 0, 0.08), 0 0 0 1px rgba(0, 0, 0, 0.06);
-            --margin-line: rgba(37, 99, 235, 0.45);
-            --accent: #2563eb;
-            --accent-hover: #1d4ed8;
-            --success: #16a34a;
-            --danger: #dc2626;
-            --warning: #d97706;
+            --paper-text: #202124;
+            --paper-shadow: 0 4px 16px rgba(0, 0, 0, 0.15), 0 1px 3px rgba(0, 0, 0, 0.1);
+            --margin-line: rgba(26, 115, 232, 0.5);
+            --text-primary: #202124;
+            --text-secondary: #5f6368;
+            --text-tertiary: #80868b;
+            --accent: #1a73e8;
+            --accent-hover: #174ea6;
+            --btn-print-bg: #1a73e8;
+            --btn-print-text: #ffffff;
+            --btn-cancel-border: #dadce0;
+            --btn-cancel-text: #1a73e8;
+            --input-bg: #ffffff;
+            --input-border: #dadce0;
+            --input-focus: #1a73e8;
+            --row-hover: rgba(0, 0, 0, 0.02);
+            --badge-bg: #f1f3f4;
+            --success: #1e8e3e;
+            --danger: #d93025;
+            --warning: #f9ab00;
         }
 
         * { box-sizing: border-box; margin: 0; padding: 0; }
-        
+
         body {
             background-color: var(--bg);
             color: var(--text-primary);
             font-family: var(--font);
-            font-size: 14px;
+            font-size: 13px;
             line-height: 1.5;
             -webkit-font-smoothing: antialiased;
-            min-height: 100vh;
+            height: 100vh;
+            overflow: hidden;
             display: flex;
             flex-direction: column;
             transition: var(--transition-theme);
         }
 
+        /* Top Header Bar */
         header {
+            height: 46px;
             border-bottom: 1px solid var(--border);
-            padding: 10px 24px;
+            padding: 0 18px;
             display: flex;
             align-items: center;
             justify-content: space-between;
             background: var(--surface);
-            position: sticky;
-            top: 0;
             z-index: 50;
+            flex-shrink: 0;
             gap: 16px;
         }
 
         .header-brand {
             display: flex;
             align-items: center;
-            gap: 12px;
+            gap: 10px;
         }
 
         .header-title {
-            font-size: 15px;
+            font-size: 13px;
             font-weight: 700;
-            letter-spacing: -0.01em;
+            letter-spacing: 0.03em;
             color: var(--text-primary);
             display: flex;
             align-items: center;
             gap: 6px;
+            text-transform: uppercase;
         }
 
         .header-title .tag {
@@ -360,9 +384,9 @@ INDEX_HTML = """<!DOCTYPE html>
             font-weight: 600;
             text-transform: uppercase;
             padding: 2px 6px;
-            border-radius: 4px;
+            border-radius: 3px;
             background: var(--surface-elevated);
-            color: var(--accent);
+            color: var(--text-secondary);
             border: 1px solid var(--border);
         }
 
@@ -373,7 +397,7 @@ INDEX_HTML = """<!DOCTYPE html>
             background: var(--surface-elevated);
             border: 1px solid var(--border);
             border-radius: var(--radius-sm);
-            padding: 4px 10px;
+            padding: 3px 8px;
             font-size: 12px;
         }
 
@@ -395,32 +419,32 @@ INDEX_HTML = """<!DOCTYPE html>
 
         .header-nav {
             display: flex;
-            gap: 2px;
-            background: var(--surface-elevated);
-            padding: 3px;
-            border-radius: var(--radius-md);
-            border: 1px solid var(--border);
+            gap: 3px;
+            align-items: center;
             overflow-x: auto;
         }
 
         .nav-btn {
             background: transparent;
-            border: none;
+            border: 1px solid transparent;
             color: var(--text-secondary);
             font-size: 12px;
             font-weight: 500;
-            padding: 6px 14px;
+            padding: 5px 12px;
             border-radius: var(--radius-sm);
             cursor: pointer;
             white-space: nowrap;
-            transition: all 0.15s ease;
+            transition: all 0.12s ease;
         }
 
-        .nav-btn:hover { color: var(--text-primary); }
-        .nav-btn.active {
-            background: var(--surface);
+        .nav-btn:hover {
+            background: var(--surface-elevated);
             color: var(--text-primary);
-            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        .nav-btn.active {
+            background: var(--surface-elevated);
+            color: var(--text-primary);
+            border-color: var(--border);
             font-weight: 600;
         }
 
@@ -434,170 +458,73 @@ INDEX_HTML = """<!DOCTYPE html>
             background: var(--surface-elevated);
             border: 1px solid var(--border);
             color: var(--text-secondary);
-            padding: 6px 10px;
+            padding: 4px 9px;
             border-radius: var(--radius-sm);
             cursor: pointer;
             font-size: 12px;
             display: flex;
             align-items: center;
             gap: 6px;
-            transition: all 0.15s;
+            transition: all 0.12s;
         }
-        .btn-theme:hover, .btn-lock:hover { color: var(--text-primary); border-color: var(--border-hover); }
+        .btn-theme:hover, .btn-lock:hover {
+            color: var(--text-primary);
+            border-color: var(--border-hover);
+        }
 
+        /* Main Viewport Container */
         main {
             flex: 1;
-            max-width: 1600px;
             width: 100%;
-            margin: 0 auto;
-            padding: 16px 20px 40px;
-        }
-
-        .tab-content { display: none; }
-        .tab-content.active { display: block; }
-
-        .card {
-            background: var(--surface);
-            border: 1px solid var(--border);
-            border-radius: var(--radius-lg);
-            padding: 20px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.03);
-        }
-
-        .grid-layout {
-            display: grid;
-            grid-template-columns: minmax(0, 1fr) 390px;
-            gap: 20px;
-            align-items: start;
-        }
-
-        @media (max-width: 1080px) {
-            .grid-layout { grid-template-columns: 1fr; }
-            header { flex-wrap: wrap; }
-        }
-
-        label {
-            display: block;
-            font-size: 11px;
-            font-weight: 600;
-            text-transform: uppercase;
-            letter-spacing: 0.04em;
-            color: var(--text-secondary);
-            margin-bottom: 6px;
-        }
-
-        input[type="text"], input[type="number"], input[type="password"], select {
-            width: 100%;
-            background: var(--surface-elevated);
-            border: 1px solid var(--border);
-            border-radius: var(--radius-sm);
-            padding: 8px 12px;
-            font-size: 13px;
-            color: var(--text-primary);
-            outline: none;
-            transition: border-color 0.15s ease;
-        }
-        input:focus, select:focus { border-color: var(--accent); }
-
-        .form-group { margin-bottom: 14px; }
-        .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-        .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
-
-        .margin-input-col {
+            height: calc(100vh - 46px);
+            margin: 0;
+            padding: 0;
             display: flex;
             flex-direction: column;
-            gap: 3px;
-            font-size: 11px;
-            color: var(--text-secondary);
+            overflow: hidden;
         }
 
-        .btn-primary {
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            gap: 8px;
-            width: 100%;
-            background: var(--accent);
-            color: #ffffff;
-            border: none;
-            padding: 11px 16px;
-            font-size: 13px;
-            font-weight: 600;
-            border-radius: var(--radius-md);
-            cursor: pointer;
-            transition: background 0.15s ease;
-        }
-        .btn-primary:hover { background: var(--accent-hover); }
-        .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
-
-        .btn-secondary {
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            gap: 6px;
-            background: var(--surface-elevated);
-            color: var(--text-primary);
-            border: 1px solid var(--border);
-            padding: 7px 12px;
-            font-size: 12px;
-            font-weight: 500;
-            border-radius: var(--radius-sm);
-            cursor: pointer;
-            transition: all 0.15s;
-        }
-        .btn-secondary:hover { border-color: var(--border-hover); }
-        .btn-secondary.active {
-            background: var(--accent);
-            color: #ffffff;
-            border-color: var(--accent);
-            font-weight: 600;
-        }
-
-        /* Cost Badge Card */
-        .cost-card {
-            background: var(--surface-elevated);
-            border: 1px solid var(--border);
-            border-radius: var(--radius-md);
-            padding: 12px 14px;
-            margin-bottom: 14px;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-        }
-        .cost-title { font-size: 12px; color: var(--text-secondary); }
-        .cost-amount { font-size: 18px; font-weight: 700; color: var(--accent); font-family: var(--font-mono); }
-
-        /* Drag & Drop Upload Zone */
-        .dropzone {
-            border: 2px dashed var(--border);
-            border-radius: var(--radius-lg);
-            padding: 24px 16px;
-            text-align: center;
-            background: var(--surface);
-            cursor: pointer;
-            transition: all 0.2s ease;
-            position: relative;
-        }
-        .dropzone:hover, .dropzone.dragover {
-            border-color: var(--accent);
-            background: var(--surface-elevated);
-        }
-        .dropzone input[type="file"] {
-            position: absolute;
-            inset: 0;
+        .tab-content {
+            display: none;
             width: 100%;
             height: 100%;
-            opacity: 0;
-            cursor: pointer;
+        }
+        .tab-content.active {
+            display: flex;
+            flex-direction: column;
         }
 
-        /* Large Preview Desk with Realistic Paper Sheet */
-        .preview-desk {
+        /* Chromium 2-Pane Dialog Layout */
+        .cr-layout {
+            display: flex;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+        }
+
+        @media (max-width: 900px) {
+            .cr-layout {
+                flex-direction: column;
+                overflow-y: auto;
+            }
+            .cr-desk {
+                min-height: 480px;
+                height: 55vh;
+            }
+            .cr-sidebar {
+                width: 100% !important;
+                max-width: 100% !important;
+                border-left: none !important;
+                border-top: 1px solid var(--border);
+                height: auto !important;
+            }
+        }
+
+        /* Left Desk Canvas Area */
+        .cr-desk {
+            flex: 1;
+            min-width: 0;
             background: var(--desk-bg);
-            border: 1px solid var(--border);
-            border-radius: var(--radius-lg);
-            height: calc(100vh - 120px);
-            min-height: 680px;
             display: flex;
             flex-direction: column;
             align-items: center;
@@ -605,54 +532,93 @@ INDEX_HTML = """<!DOCTYPE html>
             padding: 16px 20px;
             position: relative;
             overflow: hidden;
-            transition: var(--transition-theme);
+            user-select: none;
         }
 
-        .preview-desk-viewport {
+        .cr-desk-viewport {
             flex: 1;
             width: 100%;
             display: flex;
             align-items: center;
             justify-content: center;
-            overflow: hidden;
             position: relative;
+            overflow: hidden;
         }
 
-        .preview-top-toolbar {
+        .cr-desk-top-toolbar {
             width: 100%;
             display: flex;
             align-items: center;
             justify-content: space-between;
-            padding-bottom: 12px;
-            margin-bottom: 12px;
-            border-bottom: 1px solid var(--border);
+            margin-bottom: 8px;
+            z-index: 5;
+        }
+
+        .cr-doc-title {
+            font-size: 13px;
+            font-weight: 500;
+            color: #ffffff;
+            text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 420px;
+        }
+
+        .cr-desk-pagination {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            background: rgba(0, 0, 0, 0.45);
+            backdrop-filter: blur(4px);
+            padding: 3px 10px;
+            border-radius: var(--radius-sm);
+            font-size: 12px;
+            color: #ffffff;
+        }
+
+        .cr-page-btn {
+            background: transparent;
+            border: none;
+            color: #ffffff;
+            width: 22px;
+            height: 22px;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .cr-page-btn:hover {
+            background: rgba(255, 255, 255, 0.2);
         }
 
         .paper-sheet {
             background: var(--paper-bg);
             color: var(--paper-text);
             box-shadow: var(--paper-shadow);
-            border-radius: 3px;
+            border-radius: 2px;
             position: relative;
             display: flex;
             align-items: center;
             justify-content: center;
             overflow: hidden;
-            transition: width 0.25s cubic-bezier(0.16, 1, 0.3, 1), 
-                        height 0.25s cubic-bezier(0.16, 1, 0.3, 1),
+            transition: width 0.2s cubic-bezier(0.16, 1, 0.3, 1),
+                        height 0.2s cubic-bezier(0.16, 1, 0.3, 1),
                         filter 0.2s ease;
         }
 
         .printable-area {
             position: absolute;
             border: 1px dashed var(--margin-line);
-            border-radius: 2px;
+            border-radius: 1px;
             display: flex;
             align-items: center;
             justify-content: center;
             overflow: hidden;
             pointer-events: none;
-            transition: top 0.2s ease, bottom 0.2s ease, left 0.2s ease, right 0.2s ease;
+            transition: top 0.15s ease, bottom 0.15s ease, left 0.15s ease, right 0.15s ease;
         }
 
         .content-render-wrap {
@@ -674,83 +640,309 @@ INDEX_HTML = """<!DOCTYPE html>
             object-fit: cover;
         }
 
-        .preview-dimensions-tag {
-            margin-top: 14px;
+        .cr-desk-footer-pill {
+            margin-top: 8px;
             display: flex;
             align-items: center;
             gap: 8px;
             font-size: 11px;
             font-weight: 500;
-            color: var(--text-tertiary);
-            background: var(--surface-elevated);
-            padding: 4px 12px;
+            color: #e8eaed;
+            background: rgba(0, 0, 0, 0.45);
+            backdrop-filter: blur(4px);
+            padding: 4px 14px;
             border-radius: 9999px;
-            border: 1px solid var(--border);
         }
 
-        .pagination-controls {
+        .cr-empty-desk {
+            text-align: center;
+            color: #bdc1c6;
+            position: absolute;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 8px;
+            cursor: pointer;
+            padding: 24px;
+            border-radius: var(--radius-md);
+            transition: background 0.15s;
+        }
+        .cr-empty-desk:hover {
+            background: rgba(255, 255, 255, 0.04);
+        }
+
+        /* Right Settings Sidebar */
+        .cr-sidebar {
+            width: 330px;
+            min-width: 330px;
+            max-width: 340px;
+            background: var(--surface);
+            border-left: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+            overflow-y: auto;
+            overflow-x: hidden;
+            user-select: none;
+        }
+
+        .cr-sidebar-header {
+            padding: 16px 20px 12px;
+            display: flex;
+            align-items: baseline;
+            justify-content: space-between;
+            border-bottom: 1px solid var(--border-subtle);
+        }
+
+        .cr-sidebar-title {
+            font-size: 16px;
+            font-weight: 500;
+            color: var(--text-primary);
+        }
+
+        .cr-sidebar-sheet-count {
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+
+        .cr-row {
             display: flex;
             align-items: center;
-            gap: 6px;
-            font-size: 12px;
-            font-weight: 600;
+            justify-content: space-between;
+            padding: 9px 20px;
+            min-height: 42px;
+            transition: background 0.1s ease;
         }
-        .page-btn {
-            background: var(--surface-elevated);
-            border: 1px solid var(--border);
-            color: var(--text-primary);
-            width: 26px;
-            height: 26px;
-            border-radius: var(--radius-sm);
-            cursor: pointer;
+
+        .cr-row:hover {
+            background: var(--row-hover);
+        }
+
+        .cr-row-label {
+            font-size: 13px;
+            color: var(--text-secondary);
+            font-weight: 400;
+            flex: 1;
+            padding-right: 8px;
+        }
+
+        .cr-row-control {
+            width: 175px;
             display: flex;
+            justify-content: flex-end;
+            align-items: center;
+        }
+
+        .cr-select {
+            width: 100%;
+            background-color: var(--input-bg);
+            color: var(--text-primary);
+            border: 1px solid var(--input-border);
+            border-radius: 4px;
+            padding: 5px 24px 5px 10px;
+            font-size: 12px;
+            outline: none;
+            appearance: none;
+            background-image: url('data:image/svg+xml;charset=US-ASCII,<svg xmlns="http://www.w3.org/2000/svg" width="10" height="6" viewBox="0 0 10 6"><path fill="%239aa0a6" d="M0 0l5 5 5-5z"/></svg>');
+            background-repeat: no-repeat;
+            background-position: right 8px center;
+            cursor: pointer;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            overflow: hidden;
+        }
+        .cr-select:focus, .cr-input:focus {
+            border-color: var(--input-focus);
+        }
+
+        .cr-input {
+            width: 100%;
+            background-color: var(--input-bg);
+            color: var(--text-primary);
+            border: 1px solid var(--input-border);
+            border-radius: 4px;
+            padding: 5px 8px;
+            font-size: 12px;
+            outline: none;
+        }
+
+        .cr-input-number {
+            width: 70px;
+            text-align: left;
+        }
+
+        .cr-checkbox-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 13px;
+            color: var(--text-primary);
+            cursor: pointer;
+            width: 100%;
+        }
+
+        .cr-checkbox-row input[type="checkbox"] {
+            width: 15px;
+            height: 15px;
+            accent-color: var(--accent);
+            cursor: pointer;
+        }
+
+        /* More Settings Accordion */
+        .cr-more-toggle {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 20px;
+            color: var(--accent);
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            user-select: none;
+            transition: background 0.1s;
+            margin-top: 4px;
+            border-top: 1px solid var(--border-subtle);
+        }
+
+        .cr-more-toggle:hover {
+            background: var(--row-hover);
+        }
+
+        .cr-more-content {
+            display: none;
+            flex-direction: column;
+        }
+
+        .cr-more-content.open {
+            display: flex;
+        }
+
+        .cr-system-hint {
+            padding: 10px 20px 4px;
+            font-size: 12px;
+            color: var(--text-tertiary);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        /* Bottom Actions Bar */
+        .cr-bottom-bar {
+            margin-top: auto;
+            padding: 14px 20px;
+            border-top: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            gap: 10px;
+            background: var(--surface);
+            position: sticky;
+            bottom: 0;
+            z-index: 10;
+        }
+
+        .cr-btn-pill {
+            border-radius: 9999px;
+            font-size: 13px;
+            font-weight: 500;
+            padding: 6px 18px;
+            cursor: pointer;
+            display: inline-flex;
             align-items: center;
             justify-content: center;
-            font-size: 13px;
+            gap: 6px;
+            transition: all 0.15s ease;
+            outline: none;
         }
-        .page-btn:hover { border-color: var(--border-hover); }
 
+        .cr-btn-cancel {
+            background: transparent;
+            border: 1px solid var(--btn-cancel-border);
+            color: var(--btn-cancel-text);
+        }
 
+        .cr-btn-cancel:hover {
+            background: rgba(255, 255, 255, 0.08);
+        }
 
-        /* Tables */
-        .table-wrapper {
+        .cr-btn-print {
+            background: var(--btn-print-bg);
+            color: var(--btn-print-text);
+            border: none;
+            font-weight: 600;
+            padding: 6px 22px;
+        }
+
+        .cr-btn-print:hover {
+            filter: brightness(0.92);
+        }
+        .cr-btn-print:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        /* Generic Center Page Container for PIN, History, Settings */
+        .cr-page-container {
+            max-width: 1200px;
+            width: 100%;
+            margin: 20px auto;
+            padding: 0 20px 40px;
+            overflow-y: auto;
+            flex: 1;
+        }
+
+        .cr-card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-md);
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+
+        .cr-table-wrapper {
             width: 100%;
             overflow-x: auto;
             border: 1px solid var(--border);
-            border-radius: var(--radius-md);
+            border-radius: var(--radius-sm);
         }
+
         table {
             width: 100%;
             border-collapse: collapse;
             font-size: 13px;
             text-align: left;
         }
+
         th {
             background: var(--surface-elevated);
-            padding: 10px 14px;
+            padding: 9px 14px;
             font-size: 11px;
             font-weight: 600;
             text-transform: uppercase;
             color: var(--text-secondary);
             border-bottom: 1px solid var(--border);
         }
+
         td {
             padding: 10px 14px;
             border-bottom: 1px solid var(--border);
             color: var(--text-primary);
         }
-        tr:last-child td { border-bottom: none; }
 
-        /* Status Toast */
+        tr:last-child td { border-bottom: none; }
+        tr:hover td { background: var(--row-hover); }
+
+        /* Toast & Modal */
         .toast {
             position: fixed;
             bottom: 24px;
             right: 24px;
             background: var(--surface-elevated);
             border: 1px solid var(--border);
-            box-shadow: 0 10px 25px rgba(0,0,0,0.2);
-            border-radius: var(--radius-md);
-            padding: 12px 20px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.3);
+            border-radius: var(--radius-sm);
+            padding: 10px 18px;
             font-size: 13px;
             font-weight: 500;
             display: flex;
@@ -758,17 +950,16 @@ INDEX_HTML = """<!DOCTYPE html>
             gap: 10px;
             z-index: 100;
             transform: translateY(150%);
-            transition: transform 0.25s ease;
+            transition: transform 0.2s ease;
         }
         .toast.show { transform: translateY(0); }
         .toast.success { border-color: var(--success); }
         .toast.error { border-color: var(--danger); }
 
-        /* Modal */
         .modal-overlay {
             position: fixed;
             inset: 0;
-            background: rgba(0,0,0,0.6);
+            background: rgba(0,0,0,0.65);
             backdrop-filter: blur(4px);
             display: none;
             align-items: center;
@@ -779,11 +970,11 @@ INDEX_HTML = """<!DOCTYPE html>
         .modal-card {
             background: var(--surface);
             border: 1px solid var(--border);
-            border-radius: var(--radius-lg);
+            border-radius: var(--radius-md);
             padding: 24px;
-            max-width: 420px;
+            max-width: 400px;
             width: 90%;
-            box-shadow: 0 20px 40px rgba(0,0,0,0.4);
+            box-shadow: 0 20px 40px rgba(0,0,0,0.5);
         }
     </style>
 </head>
@@ -797,7 +988,7 @@ INDEX_HTML = """<!DOCTYPE html>
         </div>
         <div class="printer-select-wrapper">
             <span class="status-dot" id="headerStatusDot"></span>
-            <select id="headerPrinterSelect" style="border:none; background:transparent; padding:0; font-size:12px; font-weight:600;">
+            <select id="headerPrinterSelect" style="border:none; background:transparent; color:var(--text-primary); padding:0; font-size:12px; font-weight:500; outline:none; cursor:pointer;">
                 <option value="">Detecting printers...</option>
             </select>
         </div>
@@ -818,24 +1009,24 @@ INDEX_HTML = """<!DOCTYPE html>
 </header>
 
 <main>
-    <!-- TAB 1: ADVANCED PRINT (THE ONLY AND PERMANENT PRINT MODE) -->
+    <!-- TAB 1: EXACT CHROMIUM PRINT PREVIEW DIALOG -->
     <div class="tab-content active" id="tab-print">
-        <div class="grid-layout">
-            <!-- Left: Dynamic Virtual Desk & Animated Paper Sheet Preview -->
-            <div class="preview-desk" id="printPreviewDesk">
-                <div class="preview-top-toolbar" id="previewTopToolbar" style="display: none;">
-                    <div style="font-weight: 600; font-size: 13px;" id="previewDocTitle">Document.pdf</div>
-                    <div style="display: flex; align-items: center; gap: 12px;">
-                        <div class="pagination-controls" id="previewPagination" style="display: none;">
-                            <button type="button" class="page-btn" id="btnPrev">‹</button>
+        <div class="cr-layout">
+            <!-- Left: Virtual Desk Canvas Preview -->
+            <div class="cr-desk" id="printPreviewDesk">
+                <div class="cr-desk-top-toolbar" id="previewTopToolbar" style="display: none;">
+                    <div class="cr-doc-title" id="previewDocTitle">Document.pdf</div>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <div class="cr-desk-pagination" id="previewPagination" style="display: none;">
+                            <button type="button" class="cr-page-btn" id="btnPrev">‹</button>
                             <span id="pageIndicator">1 / 1</span>
-                            <button type="button" class="page-btn" id="btnNext">›</button>
+                            <button type="button" class="cr-page-btn" id="btnNext">›</button>
                         </div>
-                        <button type="button" class="btn-secondary" id="btnClearPreview" style="padding: 3px 8px; font-size: 11px;">✕ Clear</button>
+                        <button type="button" class="cr-btn-pill cr-btn-cancel" id="btnClearPreview" style="padding: 2px 10px; font-size: 11px;">✕ Clear</button>
                     </div>
                 </div>
 
-                <div class="preview-desk-viewport">
+                <div class="cr-desk-viewport" id="printDeskViewport">
                     <div class="paper-sheet" id="paperSheet" style="width: 440px; height: 622px;">
                         <div class="printable-area" id="printableArea">
                             <div class="content-render-wrap" id="renderWrap">
@@ -846,14 +1037,15 @@ INDEX_HTML = """<!DOCTYPE html>
                         </div>
                     </div>
 
-                    <div id="previewEmptyState" style="text-align: center; color: var(--text-tertiary); position: absolute;">
-                        <div style="font-size: 32px; margin-bottom: 6px;">📄</div>
-                        <div style="font-weight: 500;">No document loaded</div>
-                        <div style="font-size: 12px;">Drop any file on the right to inspect and preview</div>
+                    <div id="previewEmptyState" class="cr-empty-desk" onclick="document.getElementById('printFileInput').click()">
+                        <div style="font-size: 40px; margin-bottom: 4px; opacity: 0.85;">📄</div>
+                        <div style="font-weight: 500; font-size: 15px; color: var(--text-primary);">No document loaded</div>
+                        <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 8px;">Drop PDF, Word, Excel, or Image to inspect</div>
+                        <button type="button" class="cr-btn-pill cr-btn-cancel" style="font-size: 12px; pointer-events: none;">Choose File...</button>
                     </div>
                 </div>
 
-                <div class="preview-dimensions-tag" id="previewDimensionsTag" style="display: none;">
+                <div class="cr-desk-footer-pill" id="previewDimensionsTag" style="display: none;">
                     <span id="sheetFormatTag">A4 • 210 × 297 mm</span>
                     <span>•</span>
                     <span id="sheetOrientationTag">Portrait</span>
@@ -864,206 +1056,267 @@ INDEX_HTML = """<!DOCTYPE html>
                 </div>
             </div>
 
-            <!-- Right: Full Advanced Controls Panel (Permanent) -->
-            <div class="card">
-                <div class="form-group">
-                    <label>Document Ingestion</label>
-                    <div class="dropzone" id="printDropzone">
-                        <input type="file" id="printFileInput" accept=".pdf,.doc,.docx,.odt,.rtf,.txt,.csv,.xlsx,.xls,.pptx,.ppt,.png,.jpg,.jpeg,.webp,.heic,.heif,.avif,.tiff,.bmp">
-                        <div style="font-size: 22px; margin-bottom: 4px;">📂</div>
-                        <div style="font-weight: 600;" id="printFileName">Click or drop file here</div>
-                        <div style="font-size: 11px; color: var(--text-tertiary); margin-top: 4px;">
-                            PDF, Word, Excel, PPT, iPhone HEIC/AVIF, Images
+            <!-- Right: Exact Chromium Settings Sidebar -->
+            <div class="cr-sidebar">
+                <!-- Sidebar Header -->
+                <div class="cr-sidebar-header">
+                    <span class="cr-sidebar-title">Print</span>
+                    <span class="cr-sidebar-sheet-count">
+                        <span id="costSheets">0 sheets of paper</span> • <span id="costTotal" style="color: var(--accent); font-weight: 500;">₱0.00</span>
+                    </span>
+                </div>
+
+                <!-- Document Selection Row -->
+                <input type="file" id="printFileInput" accept=".pdf,.doc,.docx,.odt,.rtf,.txt,.csv,.xlsx,.xls,.pptx,.ppt,.png,.jpg,.jpeg,.webp,.heic,.heif,.avif,.tiff,.bmp" style="display: none;">
+                <div class="cr-row" style="border-bottom: 1px solid var(--border-subtle);">
+                    <span class="cr-row-label">Document</span>
+                    <div class="cr-row-control">
+                        <button type="button" class="cr-btn-pill cr-btn-cancel" id="btnSelectDoc" style="padding: 4px 10px; font-size: 11px; width: 100%; text-overflow: ellipsis; overflow: hidden; white-space: nowrap;" onclick="document.getElementById('printFileInput').click()">
+                            <span id="printFileName">Choose file...</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 1. Destination Row -->
+                <div class="cr-row">
+                    <span class="cr-row-label">Destination</span>
+                    <div class="cr-row-control">
+                        <select id="printDestination" class="cr-select">
+                            <option value="">Detecting...</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- 2. Pages Row -->
+                <div class="cr-row">
+                    <span class="cr-row-label">Pages</span>
+                    <div class="cr-row-control">
+                        <select id="printPagesSelect" class="cr-select">
+                            <option value="all" selected>All</option>
+                            <option value="custom">Custom</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Pages Custom Range (Hidden unless Custom is selected) -->
+                <div class="cr-row" id="customPageRangeRow" style="display: none; padding-top: 0;">
+                    <span class="cr-row-label" style="font-size: 11px; color: var(--text-tertiary);">e.g. 1-3, 5</span>
+                    <div class="cr-row-control">
+                        <input type="text" id="printPageRange" class="cr-input" placeholder="e.g. 1-3, 5">
+                    </div>
+                </div>
+
+                <!-- 3. Copies Row -->
+                <div class="cr-row">
+                    <span class="cr-row-label">Copies</span>
+                    <div class="cr-row-control">
+                        <input type="number" id="printCopies" class="cr-input cr-input-number" min="1" max="99" value="1">
+                    </div>
+                </div>
+
+                <!-- 4. Color Row -->
+                <div class="cr-row">
+                    <span class="cr-row-label">Color</span>
+                    <div class="cr-row-control">
+                        <select id="printColorModel" class="cr-select">
+                            <option value="RGB" selected>Color</option>
+                            <option value="KGray">Black and white</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Collapsible More Settings Accordion -->
+                <div class="cr-more-toggle" id="crMoreToggle">
+                    <span>More settings</span>
+                    <span id="crMoreArrow" style="font-size: 11px;">▾</span>
+                </div>
+
+                <div class="cr-more-content" id="crMoreContent">
+                    <!-- Paper size -->
+                    <div class="cr-row">
+                        <span class="cr-row-label">Paper size</span>
+                        <div class="cr-row-control">
+                            <select id="printPageSize" class="cr-select">
+                                <option value="A4" selected>A4</option>
+                                <option value="Letter">Letter</option>
+                                <option value="Legal">Legal</option>
+                                <option value="A5">A5</option>
+                                <option value="A6">A6</option>
+                                <option value="B5">B5</option>
+                                <option value="4x6in">4 × 6 in</option>
+                                <option value="5x7in">5 × 7 in</option>
+                                <option value="8x10">8 × 10 in</option>
+                                <option value="EnvelopeDL">Envelope DL</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- Orientation -->
+                    <div class="cr-row">
+                        <span class="cr-row-label">Orientation</span>
+                        <div class="cr-row-control">
+                            <select id="printOrientation" class="cr-select">
+                                <option value="auto" selected>Auto-detect</option>
+                                <option value="3">Portrait</option>
+                                <option value="4">Landscape</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- Scale -->
+                    <div class="cr-row">
+                        <span class="cr-row-label">Scale</span>
+                        <div class="cr-row-control">
+                            <select id="printScaling" class="cr-select">
+                                <option value="true" selected>Fit to printable area</option>
+                                <option value="false">Fit to paper (Fill/Crop)</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- Margins -->
+                    <div class="cr-row">
+                        <span class="cr-row-label">Margins</span>
+                        <div class="cr-row-control">
+                            <select id="printMarginMode" class="cr-select">
+                                <option value="printable" selected>Default</option>
+                                <option value="none">None (0 mm)</option>
+                                <option value="normal">Normal (12.7 mm)</option>
+                                <option value="custom">Custom...</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- Custom Margins Box -->
+                    <div id="customMarginBox" class="cr-row" style="display: none; flex-direction: column; align-items: stretch; gap: 8px; background: rgba(0,0,0,0.15); padding: 8px 20px;">
+                        <div style="font-size: 11px; color: var(--text-secondary);">Custom Margins (mm)</div>
+                        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px;">
+                            <div><span style="font-size: 10px; color: var(--text-tertiary);">Top</span><input type="number" id="mTop" class="cr-input" value="10" min="0" max="60"></div>
+                            <div><span style="font-size: 10px; color: var(--text-tertiary);">Bottom</span><input type="number" id="mBottom" class="cr-input" value="10" min="0" max="60"></div>
+                            <div><span style="font-size: 10px; color: var(--text-tertiary);">Left</span><input type="number" id="mLeft" class="cr-input" value="10" min="0" max="60"></div>
+                            <div><span style="font-size: 10px; color: var(--text-tertiary);">Right</span><input type="number" id="mRight" class="cr-input" value="10" min="0" max="60"></div>
+                        </div>
+                    </div>
+
+                    <!-- Resolution DPI -->
+                    <div class="cr-row">
+                        <span class="cr-row-label">Quality</span>
+                        <div class="cr-row-control">
+                            <select id="printDpi" class="cr-select">
+                                <option value="150">150 dpi (Draft)</option>
+                                <option value="300" selected>300 dpi</option>
+                                <option value="600">600 dpi</option>
+                                <option value="1200">1200 dpi</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- Print Quality Mode -->
+                    <div class="cr-row">
+                        <span class="cr-row-label">Print Quality</span>
+                        <div class="cr-row-control">
+                            <select id="printQuality" class="cr-select">
+                                <option value="Normal" selected>Normal</option>
+                                <option value="Best">Best Quality</option>
+                                <option value="Photo">High-Res Photo</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- Media Type -->
+                    <div class="cr-row">
+                        <span class="cr-row-label">Media type</span>
+                        <div class="cr-row-control">
+                            <select id="printMediaType" class="cr-select">
+                                <option value="Plain" selected>Plain Paper</option>
+                                <option value="Glossy">Glossy Photo</option>
+                                <option value="FastGlossy">Everyday Photo</option>
+                                <option value="CoatedMatte">Matte Paper</option>
+                                <option value="CoatedBrochure">Brochure</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- Two-sided (Duplex) -->
+                    <div class="cr-row">
+                        <span class="cr-row-label">Two-sided</span>
+                        <div class="cr-row-control" style="justify-content: flex-start;">
+                            <label class="cr-checkbox-row">
+                                <input type="checkbox" id="chkDuplex">
+                                <span style="font-size: 13px;">Print on both sides</span>
+                            </label>
+                        </div>
+                    </div>
+                    <!-- Duplex options if checked -->
+                    <div class="cr-row" id="duplexOptionsRow" style="display: none; padding-top: 0;">
+                        <span class="cr-row-label" style="font-size: 11px; color: var(--text-tertiary);">Flip style</span>
+                        <div class="cr-row-control">
+                            <select id="printDuplex" class="cr-select">
+                                <option value="DuplexNoTumble" selected>Flip on long edge</option>
+                                <option value="DuplexTumble">Flip on short edge</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- Confidential PIN Queue -->
+                    <div class="cr-row">
+                        <span class="cr-row-label">Confidential</span>
+                        <div class="cr-row-control" style="justify-content: flex-start;">
+                            <label class="cr-checkbox-row">
+                                <input type="checkbox" id="chkPinHold">
+                                <span style="font-size: 13px;">Hold in PIN Queue</span>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="cr-row" id="pinInputWrapper" style="display: none; padding-top: 0;">
+                        <span class="cr-row-label" style="font-size: 11px; color: var(--text-tertiary);">4-Digit PIN</span>
+                        <div class="cr-row-control">
+                            <input type="password" id="printPin" class="cr-input" maxlength="4" placeholder="••••" style="text-align: center; font-size: 16px; letter-spacing: 0.25em; font-family: var(--font-mono); width: 80px;">
                         </div>
                     </div>
                 </div>
 
-                <div class="cost-card">
-                    <div>
-                        <div class="cost-title">Pre-Flight Estimated Cost</div>
-                        <div style="font-size: 11px; color: var(--text-secondary);" id="costDetails">0 pages</div>
-                    </div>
-                    <div class="cost-amount" id="costTotal">₱0.00</div>
+                <!-- System / Spool Hint -->
+                <div class="cr-system-hint">
+                    <span id="costDetails">0 pages @ ₱2.00/pg</span>
+                    <span style="font-size: 11px; color: var(--text-tertiary);">CUPS IPP 2.0</span>
                 </div>
 
-                <!-- Paper & Layout Group -->
-                <div class="grid-2 form-group">
-                    <div>
-                        <label>Paper Size</label>
-                        <select id="printPageSize">
-                            <option value="A4" selected>A4 (210 × 297 mm)</option>
-                            <option value="Letter">Letter (8.5 × 11 in)</option>
-                            <option value="Legal">Legal (8.5 × 14 in)</option>
-                            <option value="A5">A5 (148 × 210 mm)</option>
-                            <option value="A6">A6 (105 × 148 mm)</option>
-                            <option value="B5">B5 (176 × 250 mm)</option>
-                            <option value="4x6in">4 × 6 in Photo</option>
-                            <option value="5x7in">5 × 7 in Photo</option>
-                            <option value="8x10">8 × 10 in Print</option>
-                            <option value="EnvelopeDL">Envelope DL</option>
-                        </select>
-                    </div>
-                    <div>
-                        <label>Orientation</label>
-                        <select id="printOrientation">
-                            <option value="auto" selected>Auto-detect</option>
-                            <option value="3">Portrait</option>
-                            <option value="4">Landscape</option>
-                        </select>
-                    </div>
+                <!-- Bottom Actions Bar -->
+                <div class="cr-bottom-bar">
+                    <button type="button" class="cr-btn-pill cr-btn-cancel" id="btnCancelPrint">Cancel</button>
+                    <button type="button" class="cr-btn-pill cr-btn-print" id="btnSubmitPrint">Print</button>
                 </div>
-
-                <!-- Margins Controls -->
-                <div class="form-group">
-                    <label>Margins</label>
-                    <select id="printMarginMode">
-                        <option value="printable" selected>Full Printable Area (Standard)</option>
-                        <option value="none">Zero / Borderless (0 mm)</option>
-                        <option value="normal">Normal (12.7 mm / 0.5 in)</option>
-                        <option value="custom">Custom Margins (mm)...</option>
-                    </select>
-                </div>
-
-                <!-- Custom Margins Box (Appears when Custom is selected) -->
-                <div id="customMarginBox" class="form-group" style="display: none;">
-                    <label style="font-size: 11px;">Custom Margins (mm)</label>
-                    <div class="grid-4">
-                        <div class="margin-input-col">
-                            <span>Top</span>
-                            <input type="number" id="mTop" value="10" min="0" max="60">
-                        </div>
-                        <div class="margin-input-col">
-                            <span>Bottom</span>
-                            <input type="number" id="mBottom" value="10" min="0" max="60">
-                        </div>
-                        <div class="margin-input-col">
-                            <span>Left</span>
-                            <input type="number" id="mLeft" value="10" min="0" max="60">
-                        </div>
-                        <div class="margin-input-col">
-                            <span>Right</span>
-                            <input type="number" id="mRight" value="10" min="0" max="60">
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Media Type & Quality -->
-                <div class="grid-2 form-group">
-                    <div>
-                        <label>Media Type</label>
-                        <select id="printMediaType">
-                            <option value="Plain" selected>Plain Paper</option>
-                            <option value="Glossy">Glossy Photo</option>
-                            <option value="FastGlossy">Everyday Photo</option>
-                            <option value="CoatedMatte">Matte Paper</option>
-                            <option value="CoatedBrochure">Brochure</option>
-                        </select>
-                    </div>
-                    <div>
-                        <label>Print Quality</label>
-                        <select id="printQuality">
-                            <option value="Normal" selected>Normal</option>
-                            <option value="Best">Best Quality</option>
-                            <option value="Photo">High-Res Photo</option>
-                        </select>
-                    </div>
-                </div>
-
-                <!-- DPI & Duplex -->
-                <div class="grid-2 form-group">
-                    <div>
-                        <label>Resolution (DPI)</label>
-                        <select id="printDpi">
-                            <option value="150">150 DPI (Fast)</option>
-                            <option value="300" selected>300 DPI (Standard)</option>
-                            <option value="600">600 DPI (Ultra Fine)</option>
-                            <option value="1200">1200 DPI (Extreme)</option>
-                        </select>
-                    </div>
-                    <div>
-                        <label>Duplex (Two-Sided)</label>
-                        <select id="printDuplex">
-                            <option value="None" selected>Single-Sided</option>
-                            <option value="DuplexNoTumble">Long-Edge Duplex</option>
-                            <option value="DuplexTumble">Short-Edge Duplex</option>
-                        </select>
-                    </div>
-                </div>
-
-                <!-- Color Mode & Scaling -->
-                <div class="grid-2 form-group">
-                    <div>
-                        <label>Color Mode</label>
-                        <select id="printColorModel">
-                            <option value="RGB" selected>Full Color (RGB)</option>
-                            <option value="KGray">Black & White (Grayscale)</option>
-                        </select>
-                    </div>
-                    <div>
-                        <label>Scaling</label>
-                        <select id="printScaling">
-                            <option value="true" selected>Fit to Printable Area</option>
-                            <option value="false">Fill / Crop Page</option>
-                        </select>
-                    </div>
-                </div>
-
-                <!-- Page Range & Copies -->
-                <div class="grid-2 form-group">
-                    <div>
-                        <label>Page Range</label>
-                        <input type="text" id="printPageRange" placeholder="e.g. 1-3, 5 (blank: all)">
-                    </div>
-                    <div>
-                        <label>Copies</label>
-                        <input type="number" id="printCopies" min="1" max="99" value="1">
-                    </div>
-                </div>
-
-                <!-- Confidential PIN Queue -->
-                <div class="form-group" style="padding-top: 6px;">
-                    <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; text-transform: none; font-size: 13px;">
-                        <input type="checkbox" id="chkPinHold">
-                        <span>Hold in Confidential PIN Queue</span>
-                    </label>
-                    <div id="pinInputWrapper" style="display: none; margin-top: 8px;">
-                        <label>Enter 4-Digit Release PIN</label>
-                        <input type="password" id="printPin" maxlength="4" placeholder="••••" style="text-align: center; font-size: 18px; letter-spacing: 0.3em; font-family: var(--font-mono);">
-                    </div>
-                </div>
-
-                <button class="btn-primary" id="btnSubmitPrint">
-                    <span>🖨️ Send to Printer</span>
-                </button>
             </div>
         </div>
     </div>
 
-    <!-- TAB 2: ID PHOTO MAKER (PRINT SHOP TAILORED) -->
+    <!-- TAB 2: ID PHOTO MAKER (MATCHING CHROMIUM WORKFLOW) -->
     <div class="tab-content" id="tab-idmaker">
-        <div class="grid-layout">
-            <!-- Left: Virtual Desk Live Tiled Sheet Preview -->
-            <div class="preview-desk" id="idPreviewDesk">
-                <div class="preview-top-toolbar" style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
-                    <div style="font-weight: 600; font-size: 13px;" id="idSheetTitleTag">4×6" Glossy Sheet • Combo Rush (2 pcs 2×2" + 16 pcs 1×1")</div>
+        <div class="cr-layout">
+            <!-- Left: ID Virtual Desk Live Sheet Preview -->
+            <div class="cr-desk" id="idPreviewDesk">
+                <div class="cr-desk-top-toolbar" style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+                    <div class="cr-doc-title" id="idSheetTitleTag">4×6" Glossy Sheet • Combo Rush (2 pcs 2×2" + 16 pcs 1×1")</div>
                     <div style="display: flex; gap: 8px;">
-                        <button type="button" class="btn-secondary" id="btnIdDownload" style="padding: 4px 10px; font-size: 11px;">💾 Save PNG</button>
-                        <button type="button" class="btn-primary" id="btnIdDirectPrint" style="padding: 4px 12px; font-size: 11px; width: auto;">🖨️ Print ID Sheet</button>
+                        <button type="button" class="cr-btn-pill cr-btn-cancel" id="btnIdDownload" style="padding: 3px 10px; font-size: 11px;">💾 Save PNG</button>
+                        <button type="button" class="cr-btn-pill cr-btn-print" id="btnIdDirectPrint" style="padding: 3px 14px; font-size: 11px;">🖨️ Print ID Sheet</button>
                     </div>
                 </div>
 
-                <div class="preview-desk-viewport">
-                    <div class="paper-sheet" id="idPaperSheet" style="display: flex; align-items: center; justify-content: center; background: #ffffff; box-shadow: 0 16px 40px rgba(0,0,0,0.5); border-radius: 4px; overflow: hidden; position: relative; margin: 0 auto;">
+                <div class="cr-desk-viewport">
+                    <div class="paper-sheet" id="idPaperSheet" style="display: flex; align-items: center; justify-content: center; background: #ffffff; border-radius: 2px; overflow: hidden; position: relative;">
                         <canvas id="idSheetCanvas" style="width: 100%; height: 100%; object-fit: contain; display: none;"></canvas>
                     </div>
-                    <div id="idEmptyState" style="text-align: center; color: var(--text-tertiary); padding: 24px; position: absolute;">
-                        <div style="font-size: 40px; margin-bottom: 8px;">📸</div>
-                        <div style="font-weight: 600; font-size: 14px;">Print Shop ID Studio Ready</div>
-                        <div style="font-size: 12px; margin-top: 4px;">Upload portrait photo on the right to auto-generate 1×1, 2×2, & passport packages</div>
+                    <div id="idEmptyState" class="cr-empty-desk" onclick="document.getElementById('idFileInput').click()">
+                        <div style="font-size: 40px; margin-bottom: 4px; opacity: 0.85;">📸</div>
+                        <div style="font-weight: 500; font-size: 15px; color: var(--text-primary);">Print Shop ID Studio Ready</div>
+                        <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 8px;">Upload portrait photo on right to auto-generate packages</div>
+                        <button type="button" class="cr-btn-pill cr-btn-cancel" style="font-size: 12px; pointer-events: none;">Choose Portrait...</button>
                     </div>
                 </div>
 
-                <div class="preview-dimensions-tag">
+                <div class="cr-desk-footer-pill">
                     <span id="idSheetSpecTag">4 × 6 in Photo Paper (101.6 × 152.4 mm)</span>
                     <span>•</span>
                     <span>300 DPI High Resolution</span>
@@ -1072,250 +1325,261 @@ INDEX_HTML = """<!DOCTYPE html>
                 </div>
             </div>
 
-            <!-- Right: ID Controls & Quick Photo Cropper -->
-            <div class="card" style="display: flex; flex-direction: column; gap: 16px;">
-                <!-- Step 1: Upload Photo -->
-                <div>
-                    <label style="font-weight: 700; font-size: 12px; text-transform: uppercase; color: var(--accent); margin-bottom: 6px; display: block;">Step 1: Portrait Photo</label>
-                    <div class="dropzone" id="idDropzone" style="padding: 18px 14px;">
-                        <input type="file" id="idFileInput" accept="image/*">
-                        <div style="font-size: 22px; margin-bottom: 4px;">📷</div>
-                        <div style="font-weight: 600; font-size: 12px;" id="idFileName">Click or drop customer portrait</div>
-                        <div style="font-size: 10px; color: var(--text-tertiary); margin-top: 2px;">Phone portrait, camera photo, JPG, PNG</div>
+            <!-- Right: ID Controls Sidebar -->
+            <div class="cr-sidebar">
+                <div class="cr-sidebar-header">
+                    <span class="cr-sidebar-title">ID Studio</span>
+                    <span class="cr-sidebar-sheet-count">High-Res 300 DPI</span>
+                </div>
+
+                <!-- Portrait Photo Ingestion -->
+                <input type="file" id="idFileInput" accept="image/*" style="display: none;">
+                <div class="cr-row" style="border-bottom: 1px solid var(--border-subtle);">
+                    <span class="cr-row-label">Portrait Photo</span>
+                    <div class="cr-row-control">
+                        <button type="button" class="cr-btn-pill cr-btn-cancel" id="btnSelectIdPhoto" style="padding: 4px 10px; font-size: 11px; width: 100%; text-overflow: ellipsis; overflow: hidden; white-space: nowrap;" onclick="document.getElementById('idFileInput').click()">
+                            <span id="idFileName">Choose portrait...</span>
+                        </button>
                     </div>
                 </div>
 
-                <!-- Step 2: Interactive Crop & Quick Adjustments -->
-                <div id="idEditControls" style="display: none; border-top: 1px solid var(--border); padding-top: 14px;">
-                    <label style="font-weight: 700; font-size: 12px; text-transform: uppercase; color: var(--accent); margin-bottom: 6px; display: block;">Step 2: Crop & Quick Adjustments</label>
-                    
-                    <!-- Crop Aspect Ratio -->
-                    <div style="margin-bottom: 10px;">
-                        <label style="font-size: 11px;">Crop Aspect Ratio</label>
-                        <div style="display: flex; gap: 6px; margin-top: 4px;">
-                            <button type="button" class="btn-secondary id-crop-btn active" data-aspect="1:1" style="flex:1; padding: 5px; font-size: 11px;">1:1 (Square - 1x1/2x2)</button>
-                            <button type="button" class="btn-secondary id-crop-btn" data-aspect="35:45" style="flex:1; padding: 5px; font-size: 11px;">35:45 (Passport)</button>
-                            <button type="button" class="btn-secondary" id="btnIdRotate" style="padding: 5px 10px; font-size: 11px;" title="Rotate 90 degrees">↻ 90°</button>
+                <!-- Crop & Adjustments (Visible when photo is loaded) -->
+                <div id="idEditControls" style="display: none;">
+                    <div class="cr-row">
+                        <span class="cr-row-label">Aspect ratio</span>
+                        <div class="cr-row-control" style="gap: 4px;">
+                            <button type="button" class="cr-btn-pill cr-btn-cancel id-crop-btn active" data-aspect="1:1" style="padding: 3px 8px; font-size: 11px;">1:1</button>
+                            <button type="button" class="cr-btn-pill cr-btn-cancel id-crop-btn" data-aspect="35:45" style="padding: 3px 8px; font-size: 11px;">35:45</button>
+                            <button type="button" class="cr-btn-pill cr-btn-cancel" id="btnIdRotate" style="padding: 3px 8px; font-size: 11px;" title="Rotate 90°">↻</button>
                         </div>
                     </div>
 
-                    <!-- Face Zoom & Vertical Alignment -->
-                    <div class="grid-2 form-group" style="margin-bottom: 8px;">
-                        <div>
-                            <label style="font-size: 11px;">Zoom Face: <span id="lblIdZoom">100%</span></label>
-                            <input type="range" id="idZoomRange" min="50" max="300" value="100" style="width: 100%;">
-                        </div>
-                        <div>
-                            <label style="font-size: 11px;">Vertical Align</label>
-                            <input type="range" id="idOffsetYRange" min="-100" max="100" value="0" style="width: 100%;">
+                    <div class="cr-row">
+                        <span class="cr-row-label">Face Zoom (<span id="lblIdZoom">100%</span>)</span>
+                        <div class="cr-row-control">
+                            <input type="range" id="idZoomRange" min="50" max="300" value="100" style="width: 100%; accent-color: var(--accent);">
                         </div>
                     </div>
 
-                    <!-- Brightness & Contrast -->
-                    <div class="grid-2 form-group" style="margin-bottom: 8px;">
-                        <div>
-                            <label style="font-size: 11px;">Brightness: <span id="lblIdBright">0</span></label>
-                            <input type="range" id="idBrightRange" min="-50" max="50" value="0" style="width: 100%;">
-                        </div>
-                        <div>
-                            <label style="font-size: 11px;">Contrast: <span id="lblIdContrast">0</span></label>
-                            <input type="range" id="idContrastRange" min="-50" max="50" value="0" style="width: 100%;">
+                    <div class="cr-row">
+                        <span class="cr-row-label">Vertical Align</span>
+                        <div class="cr-row-control">
+                            <input type="range" id="idOffsetYRange" min="-100" max="100" value="0" style="width: 100%; accent-color: var(--accent);">
                         </div>
                     </div>
 
-                    <!-- Formal ID Background Color Tone -->
-                    <div class="form-group" style="margin-bottom: 8px;">
-                        <label style="font-size: 11px;">Background Tone</label>
-                        <div style="display: flex; gap: 6px; margin-top: 4px;">
-                            <button type="button" class="btn-secondary id-bg-btn active" data-bg="original" style="flex:1; padding: 5px; font-size:11px;">Original</button>
-                            <button type="button" class="btn-secondary id-bg-btn" data-bg="white" style="flex:1; padding: 5px; font-size:11px;">⚪ White</button>
-                            <button type="button" class="btn-secondary id-bg-btn" data-bg="blue" style="flex:1; padding: 5px; font-size:11px; color:#3b82f6;">🔵 Blue</button>
-                            <button type="button" class="btn-secondary id-bg-btn" data-bg="red" style="flex:1; padding: 5px; font-size:11px; color:#ef4444;">🔴 Red</button>
+                    <div class="cr-row">
+                        <span class="cr-row-label">Brightness (<span id="lblIdBright">0</span>)</span>
+                        <div class="cr-row-control">
+                            <input type="range" id="idBrightRange" min="-50" max="50" value="0" style="width: 100%; accent-color: var(--accent);">
                         </div>
                     </div>
 
-                    <!-- Formal Name Tag Banner (School / PRC requirement) -->
-                    <div class="form-group" style="margin-bottom: 4px;">
-                        <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 12px; text-transform: none;">
-                            <input type="checkbox" id="chkIdNameTag">
-                            <span>Add Formal Name Tag Banner</span>
-                        </label>
-                        <div id="idNameTagBox" style="display: none; margin-top: 6px;">
-                            <input type="text" id="idNameTagText" placeholder="e.g. DELA CRUZ, JUAN P." style="text-transform: uppercase; font-size: 12px; letter-spacing: 0.05em; font-weight: 600;">
+                    <div class="cr-row">
+                        <span class="cr-row-label">Contrast (<span id="lblIdContrast">0</span>)</span>
+                        <div class="cr-row-control">
+                            <input type="range" id="idContrastRange" min="-50" max="50" value="0" style="width: 100%; accent-color: var(--accent);">
+                        </div>
+                    </div>
+
+                    <div class="cr-row">
+                        <span class="cr-row-label">Background</span>
+                        <div class="cr-row-control" style="gap: 3px;">
+                            <button type="button" class="cr-btn-pill cr-btn-cancel id-bg-btn active" data-bg="original" style="padding: 2px 6px; font-size: 10px;">Orig</button>
+                            <button type="button" class="cr-btn-pill cr-btn-cancel id-bg-btn" data-bg="white" style="padding: 2px 6px; font-size: 10px;">White</button>
+                            <button type="button" class="cr-btn-pill cr-btn-cancel id-bg-btn" data-bg="blue" style="padding: 2px 6px; font-size: 10px; color: #8ab4f8;">Blue</button>
+                            <button type="button" class="cr-btn-pill cr-btn-cancel id-bg-btn" data-bg="red" style="padding: 2px 6px; font-size: 10px; color: #f28b82;">Red</button>
+                        </div>
+                    </div>
+
+                    <div class="cr-row">
+                        <span class="cr-row-label">Formal Name Tag</span>
+                        <div class="cr-row-control" style="justify-content: flex-start;">
+                            <label class="cr-checkbox-row">
+                                <input type="checkbox" id="chkIdNameTag">
+                                <span style="font-size: 12px;">Add Banner</span>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="cr-row" id="idNameTagBox" style="display: none; padding-top: 0;">
+                        <span class="cr-row-label" style="font-size: 11px; color: var(--text-tertiary);">Name (Uppercase)</span>
+                        <div class="cr-row-control">
+                            <input type="text" id="idNameTagText" class="cr-input" placeholder="DELA CRUZ, JUAN P." style="text-transform: uppercase; font-size: 11px;">
                         </div>
                     </div>
                 </div>
 
-                <!-- Step 3: Package & Layout Settings -->
-                <div style="border-top: 1px solid var(--border); padding-top: 14px;">
-                    <label style="font-weight: 700; font-size: 12px; text-transform: uppercase; color: var(--accent); margin-bottom: 6px; display: block;">Step 3: Print Package & Sheet</label>
-                    
-                    <div class="form-group">
-                        <label>Package Template</label>
-                        <select id="idPackageSelect">
-                            <option value="rush_combo_a" selected>Combo Rush: 2 pcs 2×2" + 16 pcs 1×1" (Full Sheet Fill)</option>
-                            <option value="rush_combo_b">Combo All-in-One: 2 pcs 2×2" + 6 pcs Passport + 4 pcs 1×1" (Full Sheet Fill)</option>
-                            <option value="all_2x2">All 2 × 2 in (6 pcs Full Sheet Fill)</option>
-                            <option value="all_1x1">All 1 × 1 in (24 pcs Full Sheet Fill)</option>
-                            <option value="all_passport">All Passport Size (12 pcs Full Sheet Fill)</option>
-                            <option value="wallet">Wallet Size 2.5 × 3.5 in (4 pcs Full Sheet Fill)</option>
+                <!-- Package & Sheet Options -->
+                <div class="cr-row" style="border-top: 1px solid var(--border-subtle); margin-top: 4px;">
+                    <span class="cr-row-label">Package</span>
+                    <div class="cr-row-control">
+                        <select id="idPackageSelect" class="cr-select">
+                            <option value="rush_combo_a" selected>Combo Rush: 2 pcs 2×2" + 16 pcs 1×1"</option>
+                            <option value="rush_combo_b">Combo All: 2 pcs 2×2" + 6 Passport + 4 1×1"</option>
+                            <option value="all_2x2">All 2 × 2 in (6 pcs)</option>
+                            <option value="all_1x1">All 1 × 1 in (24 pcs)</option>
+                            <option value="all_passport">All Passport (12 pcs)</option>
+                            <option value="wallet">Wallet 2.5 × 3.5 in (4 pcs)</option>
                         </select>
                     </div>
+                </div>
 
-                    <div class="grid-2 form-group">
-                        <div>
-                            <label>Paper Size</label>
-                            <select id="idSheetPaperSize">
-                                <option value="4x6in" selected>4 × 6 in Photo Card</option>
-                                <option value="A4">A4 Photo Sheet</option>
-                            </select>
-                        </div>
-                        <div>
-                            <label>Copies</label>
-                            <input type="number" id="idCopies" min="1" max="50" value="1">
-                        </div>
+                <div class="cr-row">
+                    <span class="cr-row-label">Paper size</span>
+                    <div class="cr-row-control">
+                        <select id="idSheetPaperSize" class="cr-select">
+                            <option value="4x6in" selected>4 × 6 in Photo Card</option>
+                            <option value="A4">A4 Photo Sheet</option>
+                        </select>
                     </div>
+                </div>
 
-                    <div class="form-group">
-                        <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 12px; text-transform: none;">
+                <div class="cr-row">
+                    <span class="cr-row-label">Copies</span>
+                    <div class="cr-row-control">
+                        <input type="number" id="idCopies" class="cr-input cr-input-number" min="1" max="50" value="1">
+                    </div>
+                </div>
+
+                <div class="cr-row">
+                    <span class="cr-row-label">Cutting Guides</span>
+                    <div class="cr-row-control" style="justify-content: flex-start;">
+                        <label class="cr-checkbox-row">
                             <input type="checkbox" id="chkIdCutLines" checked>
-                            <span>Print Cutting Guides (Dashed border lines for trimming)</span>
+                            <span style="font-size: 12px;">Dashed lines</span>
                         </label>
                     </div>
+                </div>
 
-                    <button class="btn-primary" id="btnIdGeneratePrint" style="margin-top: 4px;">
-                        <span>🖨️ Send ID Sheet to Printer</span>
-                    </button>
+                <!-- Bottom Actions Bar -->
+                <div class="cr-bottom-bar">
+                    <button type="button" class="cr-btn-pill cr-btn-cancel" id="btnIdDownloadBottom">Save PNG</button>
+                    <button type="button" class="cr-btn-pill cr-btn-print" id="btnIdGeneratePrint">Print Sheet</button>
                 </div>
             </div>
         </div>
     </div>
 
-    <!-- TAB 3: PIN RELEASE -->
+    <!-- TAB 3: CONFIDENTIAL PIN RELEASE -->
     <div class="tab-content" id="tab-pin">
-        <div class="card">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
-                <div>
-                    <h2 style="font-size: 16px; font-weight: 700;">Confidential Print Queue</h2>
-                    <p style="font-size: 12px; color: var(--text-secondary);">Jobs held securely in memory until unlocked with your 4-digit PIN</p>
+        <div class="cr-page-container">
+            <div class="cr-card">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                    <div>
+                        <h2 style="font-size: 16px; font-weight: 600; color: var(--text-primary);">Confidential Print Queue</h2>
+                        <p style="font-size: 12px; color: var(--text-secondary);">Jobs held in memory until released with your 4-digit PIN</p>
+                    </div>
+                    <button class="cr-btn-pill cr-btn-cancel" id="btnRefreshPinList" style="font-size: 12px;">↻ Refresh</button>
                 </div>
-                <button class="btn-secondary" id="btnRefreshPinList">↻ Refresh Queue</button>
-            </div>
 
-            <div class="table-wrapper">
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Time Held</th>
-                            <th>Document Title</th>
-                            <th>Pages</th>
-                            <th>Copies</th>
-                            <th>Color Mode</th>
-                            <th>Est. Cost</th>
-                            <th>Action</th>
-                        </tr>
-                    </thead>
-                    <tbody id="pinTableBody">
-                        <tr><td colspan="7" style="text-align: center; color: var(--text-tertiary);">No confidential jobs held</td></tr>
-                    </tbody>
-                </table>
+                <div class="cr-table-wrapper">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Time Held</th>
+                                <th>Document Title</th>
+                                <th>Pages</th>
+                                <th>Copies</th>
+                                <th>Color</th>
+                                <th>Est. Cost</th>
+                                <th>Action</th>
+                            </tr>
+                        </thead>
+                        <tbody id="pinTableBody">
+                            <tr><td colspan="7" style="text-align: center; color: var(--text-tertiary);">No confidential jobs held</td></tr>
+                        </tbody>
+                    </table>
+                </div>
             </div>
         </div>
     </div>
 
-    <!-- TAB 3: HISTORY & ACCOUNTING -->
+    <!-- TAB 4: HISTORY & ACCOUNTING -->
     <div class="tab-content" id="tab-history">
-        <div class="card" style="margin-bottom: 20px;">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
-                <div>
-                    <h2 style="font-size: 16px; font-weight: 700;">Print Accounting & Audit Ledger</h2>
-                    <p style="font-size: 12px; color: var(--text-secondary);">Complete log of all print and released jobs</p>
+        <div class="cr-page-container">
+            <div class="cr-card">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                    <div>
+                        <h2 style="font-size: 16px; font-weight: 600; color: var(--text-primary);">Print Accounting & Audit Ledger</h2>
+                        <p style="font-size: 12px; color: var(--text-secondary);">Complete log of all print jobs processed</p>
+                    </div>
+                    <a href="/api/reports/export.csv" class="cr-btn-pill cr-btn-cancel" style="font-size: 12px; text-decoration: none;" download>📥 Export CSV</a>
                 </div>
-                <a href="/api/reports/export.csv" class="btn-secondary" download>📥 Export CSV Ledger</a>
-            </div>
 
-            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 20px;">
-                <div class="card" style="background: var(--surface-elevated); padding: 14px;">
-                    <div style="font-size: 11px; color: var(--text-secondary); text-transform: uppercase;">Total Jobs</div>
-                    <div style="font-size: 24px; font-weight: 700;" id="statTotalJobs">0</div>
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; margin-bottom: 20px;">
+                    <div style="background: var(--surface-elevated); padding: 14px; border-radius: var(--radius-sm); border: 1px solid var(--border);">
+                        <div style="font-size: 11px; color: var(--text-secondary); text-transform: uppercase;">Total Jobs</div>
+                        <div style="font-size: 22px; font-weight: 600; margin-top: 4px;" id="statTotalJobs">0</div>
+                    </div>
+                    <div style="background: var(--surface-elevated); padding: 14px; border-radius: var(--radius-sm); border: 1px solid var(--border);">
+                        <div style="font-size: 11px; color: var(--text-secondary); text-transform: uppercase;">Total Pages</div>
+                        <div style="font-size: 22px; font-weight: 600; margin-top: 4px;" id="statTotalPages">0</div>
+                    </div>
+                    <div style="background: var(--surface-elevated); padding: 14px; border-radius: var(--radius-sm); border: 1px solid var(--border);">
+                        <div style="font-size: 11px; color: var(--text-secondary); text-transform: uppercase;">Total Billed Cost</div>
+                        <div style="font-size: 22px; font-weight: 600; color: var(--accent); margin-top: 4px;" id="statTotalRevenue">₱0.00</div>
+                    </div>
                 </div>
-                <div class="card" style="background: var(--surface-elevated); padding: 14px;">
-                    <div style="font-size: 11px; color: var(--text-secondary); text-transform: uppercase;">Total Pages Printed</div>
-                    <div style="font-size: 24px; font-weight: 700;" id="statTotalPages">0</div>
-                </div>
-                <div class="card" style="background: var(--surface-elevated); padding: 14px;">
-                    <div style="font-size: 11px; color: var(--text-secondary); text-transform: uppercase;">Total Billed Cost</div>
-                    <div style="font-size: 24px; font-weight: 700; color: var(--accent);" id="statTotalRevenue">₱0.00</div>
-                </div>
-            </div>
 
-            <div class="table-wrapper">
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Date / Time</th>
-                            <th>Job Title</th>
-                            <th>Printer</th>
-                            <th>Pages</th>
-                            <th>Copies</th>
-                            <th>Mode</th>
-                            <th>Cost</th>
-                            <th>Status</th>
-                        </tr>
-                    </thead>
-                    <tbody id="historyTableBody">
-                        <tr><td colspan="8" style="text-align: center; color: var(--text-tertiary);">Loading audit records...</td></tr>
-                    </tbody>
-                </table>
+                <div class="cr-table-wrapper">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Timestamp</th>
+                                <th>Document</th>
+                                <th>Printer</th>
+                                <th>Pages</th>
+                                <th>Copies</th>
+                                <th>Color</th>
+                                <th>Cost</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody id="historyTableBody">
+                            <tr><td colspan="8" style="text-align: center; color: var(--text-tertiary);">No audit history recorded</td></tr>
+                        </tbody>
+                    </table>
+                </div>
             </div>
         </div>
     </div>
 
-    <!-- TAB 4: SETTINGS & APPLIANCE ADMIN -->
+    <!-- TAB 5: APPLIANCE SETTINGS -->
     <div class="tab-content" id="tab-settings">
-        <div class="grid-layout">
-            <div class="card">
-                <h3 style="font-size: 16px; font-weight: 600; margin-bottom: 16px;">Appliance System Telemetry</h3>
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px;">
-                    <div class="cost-card">
-                        <div>
-                            <div class="cost-title">CPU Load</div>
-                            <div id="telemetryCpu" style="font-weight: 600;">0.00</div>
-                        </div>
+        <div class="cr-page-container">
+            <div class="cr-card">
+                <h3 style="font-size: 16px; font-weight: 600; margin-bottom: 12px; color: var(--text-primary);">Hardware Health & Telemetry</h3>
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 12px;">
+                    <div style="background: var(--surface-elevated); padding: 12px; border-radius: var(--radius-sm); border: 1px solid var(--border);">
+                        <div style="font-size: 11px; color: var(--text-secondary);">CPU Load (1m)</div>
+                        <div id="telemetryCpu" style="font-size: 18px; font-weight: 600; margin-top: 4px;">0.00</div>
                     </div>
-                    <div class="cost-card">
-                        <div>
-                            <div class="cost-title">RAM Usage</div>
-                            <div id="telemetryRam" style="font-weight: 600;">0 / 0 MB</div>
-                        </div>
+                    <div style="background: var(--surface-elevated); padding: 12px; border-radius: var(--radius-sm); border: 1px solid var(--border);">
+                        <div style="font-size: 11px; color: var(--text-secondary);">RAM Usage</div>
+                        <div id="telemetryRam" style="font-size: 18px; font-weight: 600; margin-top: 4px;">0 / 0 MB</div>
                     </div>
-                    <div class="cost-card">
-                        <div>
-                            <div class="cost-title">S905X Temperature</div>
-                            <div id="telemetryTemp" style="font-weight: 600;">0°C</div>
-                        </div>
+                    <div style="background: var(--surface-elevated); padding: 12px; border-radius: var(--radius-sm); border: 1px solid var(--border);">
+                        <div style="font-size: 11px; color: var(--text-secondary);">CPU Temperature</div>
+                        <div id="telemetryTemp" style="font-size: 18px; font-weight: 600; margin-top: 4px;">0°C</div>
                     </div>
-                    <div class="cost-card">
-                        <div>
-                            <div class="cost-title">Storage Space</div>
-                            <div id="telemetryDisk" style="font-weight: 600;">0% Free</div>
-                        </div>
+                    <div style="background: var(--surface-elevated); padding: 12px; border-radius: var(--radius-sm); border: 1px solid var(--border);">
+                        <div style="font-size: 11px; color: var(--text-secondary);">Storage Free</div>
+                        <div id="telemetryDisk" style="font-size: 18px; font-weight: 600; margin-top: 4px;">0% Free</div>
                     </div>
                 </div>
                 <div style="font-size: 12px; color: var(--text-secondary);" id="telemetryUptime">Uptime: --</div>
             </div>
 
-            <div class="card">
-                <h3 style="font-size: 16px; font-weight: 600; margin-bottom: 12px;">Admin Management</h3>
+            <div class="cr-card">
+                <h3 style="font-size: 16px; font-weight: 600; margin-bottom: 12px; color: var(--text-primary);">Admin Management</h3>
                 <div id="adminLockedState">
                     <p style="font-size: 12px; color: var(--text-secondary); margin-bottom: 12px;">
-                        Appliance controls are password-protected to prevent unauthorized access.
+                        Appliance controls are password-protected.
                     </p>
-                    <div class="form-group">
-                        <label>Admin Password</label>
-                        <input type="password" id="adminPassInput" placeholder="Enter password (default: admin)">
+                    <div style="display: flex; gap: 8px; max-width: 320px;">
+                        <input type="password" id="adminPassInput" class="cr-input" placeholder="Password (default: admin)">
+                        <button class="cr-btn-pill cr-btn-print" id="btnUnlockAdmin">Unlock</button>
                     </div>
-                    <button class="btn-primary" id="btnUnlockAdmin">Unlock Appliance</button>
                 </div>
 
                 <div id="adminUnlockedState" style="display: none;">
@@ -1323,22 +1587,22 @@ INDEX_HTML = """<!DOCTYPE html>
                         ✓ Administrator Mode Active
                     </div>
 
-                    <div class="form-group">
-                        <label>Rate Card Configuration</label>
-                        <div style="display: flex; gap: 8px; margin-bottom: 8px;">
-                            <input type="text" id="adminRateBw" placeholder="B&W Page (₱)">
-                            <input type="text" id="adminRateColor" placeholder="Color Page (₱)">
+                    <div style="margin-bottom: 16px;">
+                        <label style="font-size: 11px; color: var(--text-secondary); text-transform: uppercase; font-weight: 600; display: block; margin-bottom: 6px;">Rate Card Configuration</label>
+                        <div style="display: flex; gap: 8px; max-width: 360px; margin-bottom: 8px;">
+                            <input type="text" id="adminRateBw" class="cr-input" placeholder="B&W Page (₱)">
+                            <input type="text" id="adminRateColor" class="cr-input" placeholder="Color Page (₱)">
                         </div>
-                        <button class="btn-secondary" id="btnSaveRates" style="width: 100%;">Save Rate Card</button>
+                        <button class="cr-btn-pill cr-btn-cancel" id="btnSaveRates" style="font-size: 12px;">Save Rate Card</button>
                     </div>
 
-                    <div class="form-group" style="padding-top: 12px; border-top: 1px solid var(--border);">
-                        <label>Hardware Power & Spool Actions</label>
-                        <div style="display: flex; flex-direction: column; gap: 8px;">
-                            <button class="btn-secondary" id="btnAdminRestartCups">🔄 Restart CUPS Spooler</button>
-                            <button class="btn-secondary" id="btnAdminPurgeCache">🧹 Purge Temporary Cache</button>
-                            <button class="btn-secondary" id="btnAdminReboot" style="color: var(--warning);">⚡ Reboot Appliance</button>
-                            <button class="btn-secondary" id="btnAdminShutdown" style="color: var(--danger);">🛑 Shut Down Appliance</button>
+                    <div style="padding-top: 14px; border-top: 1px solid var(--border);">
+                        <label style="font-size: 11px; color: var(--text-secondary); text-transform: uppercase; font-weight: 600; display: block; margin-bottom: 8px;">Hardware Power & Spool Actions</label>
+                        <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+                            <button class="cr-btn-pill cr-btn-cancel" id="btnAdminRestartCups">🔄 Restart CUPS Spooler</button>
+                            <button class="cr-btn-pill cr-btn-cancel" id="btnAdminPurgeCache">🧹 Purge Temporary Cache</button>
+                            <button class="cr-btn-pill cr-btn-cancel" id="btnAdminReboot" style="color: var(--warning);">⚡ Reboot Appliance</button>
+                            <button class="cr-btn-pill cr-btn-cancel" id="btnAdminShutdown" style="color: var(--danger);">🛑 Shut Down</button>
                         </div>
                     </div>
                 </div>
@@ -1350,15 +1614,15 @@ INDEX_HTML = """<!DOCTYPE html>
 <!-- PIN UNLOCK MODAL -->
 <div class="modal-overlay" id="pinModal">
     <div class="modal-card">
-        <h3 style="font-size: 16px; font-weight: 700; margin-bottom: 8px;">Release Confidential Job</h3>
+        <h3 style="font-size: 16px; font-weight: 600; margin-bottom: 8px;">Release Confidential Job</h3>
         <p style="font-size: 12px; color: var(--text-secondary); margin-bottom: 16px;" id="pinModalJobTitle">Document</p>
-        <div class="form-group">
-            <label>Enter 4-Digit Release PIN</label>
-            <input type="password" id="pinModalCode" maxlength="4" placeholder="••••" style="text-align: center; font-size: 24px; letter-spacing: 0.4em; font-family: var(--font-mono);">
+        <div style="margin-bottom: 14px;">
+            <label style="font-size: 11px; color: var(--text-secondary); text-transform: uppercase; display: block; margin-bottom: 6px;">Enter 4-Digit Release PIN</label>
+            <input type="password" id="pinModalCode" class="cr-input" maxlength="4" placeholder="••••" style="text-align: center; font-size: 22px; letter-spacing: 0.35em; font-family: var(--font-mono);">
         </div>
-        <div style="display: flex; gap: 10px;">
-            <button class="btn-secondary" id="btnCancelPinModal" style="flex:1;">Cancel</button>
-            <button class="btn-primary" id="btnConfirmReleasePin" style="flex:1;">Release Print</button>
+        <div style="display: flex; gap: 10px; justify-content: flex-end;">
+            <button class="cr-btn-pill cr-btn-cancel" id="btnCancelPinModal">Cancel</button>
+            <button class="cr-btn-pill cr-btn-print" id="btnConfirmReleasePin">Release Print</button>
         </div>
     </div>
 </div>
@@ -1406,7 +1670,7 @@ INDEX_HTML = """<!DOCTYPE html>
     // Theme toggle
     document.getElementById('btnThemeToggle').addEventListener('click', () => {
         const cur = document.documentElement.getAttribute('data-theme');
-        const next = cur === 'dark' ? 'light' : 'dark';
+        const next = (cur === 'gray' || cur === 'dark') ? 'light' : 'gray';
         document.documentElement.setAttribute('data-theme', next);
         localStorage.setItem('theme', next);
     });
@@ -1421,32 +1685,73 @@ INDEX_HTML = """<!DOCTYPE html>
         });
     });
 
+    // More settings accordion toggle
+    const crMoreToggle = document.getElementById('crMoreToggle');
+    const crMoreContent = document.getElementById('crMoreContent');
+    const crMoreArrow = document.getElementById('crMoreArrow');
+    if (crMoreToggle) {
+        crMoreToggle.addEventListener('click', () => {
+            const isOpen = crMoreContent.classList.toggle('open');
+            crMoreArrow.textContent = isOpen ? '▴' : '▾';
+        });
+    }
+
+    // Custom Pages dropdown toggle
+    document.getElementById('printPagesSelect').addEventListener('change', (e) => {
+        const isCustom = e.target.value === 'custom';
+        document.getElementById('customPageRangeRow').style.display = isCustom ? 'flex' : 'none';
+        if (!isCustom) {
+            document.getElementById('printPageRange').value = '';
+        }
+    });
+
+    // Duplex checkbox toggle
+    document.getElementById('chkDuplex').addEventListener('change', (e) => {
+        document.getElementById('duplexOptionsRow').style.display = e.target.checked ? 'flex' : 'none';
+        document.getElementById('printDuplex').value = e.target.checked ? 'DuplexNoTumble' : 'None';
+    });
+
     // Printer Discovery & Population
     async function loadPrinters() {
         try {
             const res = await fetch('/api/printers');
             const data = await res.json();
-            const select = document.getElementById('headerPrinterSelect');
-            select.innerHTML = '';
+            const selects = [document.getElementById('headerPrinterSelect'), document.getElementById('printDestination')];
+            
+            selects.forEach(select => {
+                if (!select) return;
+                select.innerHTML = '';
+                if (data.printers && data.printers.length > 0) {
+                    data.printers.forEach(p => {
+                        const opt = document.createElement('option');
+                        opt.value = p.name;
+                        opt.textContent = p.name + (p.is_default ? ' (Default)' : '');
+                        if (p.is_default) opt.selected = true;
+                        select.appendChild(opt);
+                    });
+                } else {
+                    select.innerHTML = '<option value="">No printers detected</option>';
+                }
+            });
+
             if (data.printers && data.printers.length > 0) {
-                data.printers.forEach(p => {
-                    const opt = document.createElement('option');
-                    opt.value = p.name;
-                    opt.textContent = p.name + (p.is_default ? ' (Default)' : '');
-                    if (p.is_default) opt.selected = true;
-                    select.appendChild(opt);
-                });
-                selectedPrinter = select.value;
+                selectedPrinter = selects[0].value;
                 document.getElementById('headerStatusDot').className = 'status-dot ' + (data.printers[0].status || 'idle');
-            } else {
-                select.innerHTML = '<option value="">No printers detected</option>';
             }
         } catch (e) {
             console.error(e);
         }
     }
+
     document.getElementById('headerPrinterSelect').addEventListener('change', (e) => {
         selectedPrinter = e.target.value;
+        const dest = document.getElementById('printDestination');
+        if (dest) dest.value = e.target.value;
+    });
+    document.getElementById('printDestination').addEventListener('change', (e) => {
+        selectedPrinter = e.target.value;
+        const hSel = document.getElementById('headerPrinterSelect');
+        if (hSel) hSel.value = e.target.value;
     });
 
     // ==========================================
@@ -1464,10 +1769,9 @@ INDEX_HTML = """<!DOCTYPE html>
             isLandscape = docNaturalAspect < 0.95;
         }
 
-        const desk = document.getElementById('printPreviewDesk') || document.querySelector('.preview-desk');
-        const deskViewport = desk ? (desk.querySelector('.preview-desk-viewport') || desk) : null;
-        const availW = deskViewport ? Math.max(deskViewport.clientWidth - 30, 480) : 600;
-        const availH = deskViewport ? Math.max(deskViewport.clientHeight - 30, 560) : 750;
+        const deskViewport = document.getElementById('printDeskViewport');
+        const availW = deskViewport ? Math.max(deskViewport.clientWidth - 40, 480) : 600;
+        const availH = deskViewport ? Math.max(deskViewport.clientHeight - 40, 520) : 750;
 
         let paperPhysW = isLandscape ? spec.height : spec.width;
         let paperPhysH = isLandscape ? spec.width : spec.height;
@@ -1540,8 +1844,11 @@ INDEX_HTML = """<!DOCTYPE html>
         const isColor = document.getElementById('printColorModel').value === 'RGB';
         const rate = isColor ? 5.00 : 2.00;
         const total = rate * inspectedPageCount * copies;
+        const totalSheets = inspectedPageCount * copies;
+
         document.getElementById('costDetails').textContent = `${inspectedPageCount} page(s) × ${copies} copy(ies) @ ₱${rate.toFixed(2)}/pg`;
         document.getElementById('costTotal').textContent = `₱${total.toFixed(2)}`;
+        document.getElementById('costSheets').textContent = `${totalSheets} sheet${totalSheets !== 1 ? 's' : ''} of paper`;
     }
 
     ['printPageSize', 'printOrientation', 'printMarginMode', 'printColorModel', 'printScaling', 'printCopies'].forEach(id => {
@@ -1552,9 +1859,29 @@ INDEX_HTML = """<!DOCTYPE html>
     });
 
     document.getElementById('printMarginMode').addEventListener('change', (e) => {
-        document.getElementById('customMarginBox').style.display = (e.target.value === 'custom') ? 'block' : 'none';
+        document.getElementById('customMarginBox').style.display = (e.target.value === 'custom') ? 'flex' : 'none';
         updatePreviewLayout();
     });
+
+    // Drag & Drop on Virtual Desk
+    const printDesk = document.getElementById('printPreviewDesk');
+    if (printDesk) {
+        printDesk.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            printDesk.style.outline = '2px dashed var(--accent)';
+        });
+        printDesk.addEventListener('dragleave', () => {
+            printDesk.style.outline = 'none';
+        });
+        printDesk.addEventListener('drop', (e) => {
+            e.preventDefault();
+            printDesk.style.outline = 'none';
+            if (e.dataTransfer.files && e.dataTransfer.files.length) {
+                document.getElementById('printFileInput').files = e.dataTransfer.files;
+                document.getElementById('printFileInput').dispatchEvent(new Event('change'));
+            }
+        });
+    }
 
     // File Ingestion & Rendering
     const fileInput = document.getElementById('printFileInput');
@@ -1654,24 +1981,28 @@ INDEX_HTML = """<!DOCTYPE html>
         if (pdfPage < pdfPagesTotal) { pdfPage++; renderPdfPage(pdfPage); }
     });
 
-    document.getElementById('btnClearPreview').addEventListener('click', () => {
+    function clearPreviewState() {
         fileInput.value = '';
         currentPdf = null;
         inspectedPageCount = 1;
-        document.getElementById('printFileName').textContent = 'Click or drop file here';
+        document.getElementById('printFileName').textContent = 'Choose file...';
         document.getElementById('previewTopToolbar').style.display = 'none';
-        document.getElementById('previewEmptyState').style.display = 'block';
+        document.getElementById('previewEmptyState').style.display = 'flex';
         document.getElementById('previewDimensionsTag').style.display = 'none';
         document.getElementById('pdfCanvas').style.display = 'none';
         document.getElementById('imgPreview').style.display = 'none';
         document.getElementById('txtPreview').style.display = 'none';
-        document.getElementById('costDetails').textContent = '0 pages';
+        document.getElementById('costDetails').textContent = '0 pages @ ₱2.00/pg';
         document.getElementById('costTotal').textContent = '₱0.00';
-    });
+        document.getElementById('costSheets').textContent = '0 sheets of paper';
+    }
+
+    document.getElementById('btnClearPreview').addEventListener('click', clearPreviewState);
+    document.getElementById('btnCancelPrint').addEventListener('click', clearPreviewState);
 
     document.getElementById('chkPinHold').addEventListener('change', (e) => {
-        document.getElementById('pinInputWrapper').style.display = e.target.checked ? 'block' : 'none';
-        document.getElementById('btnSubmitPrint').textContent = e.target.checked ? '🔒 Hold in Confidential Queue' : '🖨️ Send to Printer';
+        document.getElementById('pinInputWrapper').style.display = e.target.checked ? 'flex' : 'none';
+        document.getElementById('btnSubmitPrint').textContent = e.target.checked ? 'Hold in PIN' : 'Print';
     });
 
     document.getElementById('btnSubmitPrint').addEventListener('click', async () => {
@@ -1783,10 +2114,10 @@ INDEX_HTML = """<!DOCTYPE html>
             octx.fillStyle = '#ffffff';
             octx.fillRect(0, 0, photoW, photoH);
         } else if (idBgTint === 'blue') {
-            octx.fillStyle = '#1d4ed8'; // Royal ID blue
+            octx.fillStyle = '#1d4ed8';
             octx.fillRect(0, 0, photoW, photoH);
         } else if (idBgTint === 'red') {
-            octx.fillStyle = '#b91c1c'; // PRC crimson red
+            octx.fillStyle = '#b91c1c';
             octx.fillRect(0, 0, photoW, photoH);
         } else {
             octx.fillStyle = '#ffffff';
@@ -1860,10 +2191,10 @@ INDEX_HTML = """<!DOCTYPE html>
         sheetCanvas.height = sheetH;
 
         // Dynamically scale display preview to fill the viewport
-        const idDesk = document.getElementById('idPreviewDesk') || document.querySelectorAll('.preview-desk')[1];
-        const idViewport = idDesk ? (idDesk.querySelector('.preview-desk-viewport') || idDesk) : null;
-        const availW = idViewport ? Math.max(idViewport.clientWidth - 30, 460) : 560;
-        const availH = idViewport ? Math.max(idViewport.clientHeight - 30, 560) : 750;
+        const idDesk = document.getElementById('idPreviewDesk');
+        const idViewport = idDesk ? (idDesk.querySelector('.cr-desk-viewport') || idDesk) : null;
+        const availW = idViewport ? Math.max(idViewport.clientWidth - 40, 460) : 560;
+        const availH = idViewport ? Math.max(idViewport.clientHeight - 40, 520) : 750;
 
         let displayRatio = sheetH / sheetW;
         let dispW, dispH;
@@ -1948,7 +2279,6 @@ INDEX_HTML = """<!DOCTYPE html>
                 drawPhotoItem(startX + i * (size1x1 + gap1x1), y3, size1x1, size1x1);
             }
         } else if (pkg === 'all_2x2') {
-            // Full Sheet Fill: 6 pcs of 2x2" on 4x6"
             const size = isA4 ? 540 : 520;
             const cols = isA4 ? 4 : 2;
             const rows = isA4 ? 5 : 3;
@@ -1962,7 +2292,6 @@ INDEX_HTML = """<!DOCTYPE html>
                 }
             }
         } else if (pkg === 'all_1x1') {
-            // Full Sheet Fill: 24 pcs of 1x1" on 4x6"
             const size = isA4 ? 320 : 250;
             const cols = isA4 ? 6 : 4;
             const rows = isA4 ? 9 : 6;
@@ -1976,7 +2305,6 @@ INDEX_HTML = """<!DOCTYPE html>
                 }
             }
         } else if (pkg === 'all_passport') {
-            // Full Sheet Fill: 12 pcs of Passport on 4x6"
             const pw = isA4 ? 420 : 340;
             const ph = isA4 ? 540 : 400;
             const cols = isA4 ? 5 : 3;
@@ -1991,7 +2319,6 @@ INDEX_HTML = """<!DOCTYPE html>
                 }
             }
         } else if (pkg === 'wallet') {
-            // Full Sheet Fill: 4 pcs Wallet on 4x6"
             const ww = isA4 ? 750 : 520;
             const wh = isA4 ? 1050 : 780;
             const cols = 2;
@@ -2069,19 +2396,28 @@ INDEX_HTML = """<!DOCTYPE html>
     }
 
     // Attach ID Studio Event Listeners
-    const idDropzone = document.getElementById('idDropzone');
     const idFileInput = document.getElementById('idFileInput');
-    idDropzone.addEventListener('click', () => idFileInput.click());
     idFileInput.addEventListener('change', (e) => {
         if (e.target.files.length) loadIdImageFile(e.target.files[0]);
     });
-    idDropzone.addEventListener('dragover', (e) => { e.preventDefault(); idDropzone.style.borderColor = 'var(--accent)'; });
-    idDropzone.addEventListener('dragleave', () => { idDropzone.style.borderColor = 'var(--border)'; });
-    idDropzone.addEventListener('drop', (e) => {
-        e.preventDefault();
-        idDropzone.style.borderColor = 'var(--border)';
-        if (e.dataTransfer.files.length) loadIdImageFile(e.dataTransfer.files[0]);
-    });
+
+    const idDeskEl = document.getElementById('idPreviewDesk');
+    if (idDeskEl) {
+        idDeskEl.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            idDeskEl.style.outline = '2px dashed var(--accent)';
+        });
+        idDeskEl.addEventListener('dragleave', () => {
+            idDeskEl.style.outline = 'none';
+        });
+        idDeskEl.addEventListener('drop', (e) => {
+            e.preventDefault();
+            idDeskEl.style.outline = 'none';
+            if (e.dataTransfer.files && e.dataTransfer.files.length) {
+                loadIdImageFile(e.dataTransfer.files[0]);
+            }
+        });
+    }
 
     document.querySelectorAll('.id-crop-btn').forEach(btn => {
         btn.addEventListener('click', () => {
@@ -2121,7 +2457,7 @@ INDEX_HTML = """<!DOCTYPE html>
     });
 
     document.getElementById('chkIdNameTag').addEventListener('change', (e) => {
-        document.getElementById('idNameTagBox').style.display = e.target.checked ? 'block' : 'none';
+        document.getElementById('idNameTagBox').style.display = e.target.checked ? 'flex' : 'none';
         renderIdSheet();
     });
     document.getElementById('idNameTagText').addEventListener('input', () => renderIdSheet());
@@ -2139,6 +2475,8 @@ INDEX_HTML = """<!DOCTYPE html>
     document.getElementById('btnIdDirectPrint').addEventListener('click', printIdSheetDirect);
     document.getElementById('btnIdGeneratePrint').addEventListener('click', printIdSheetDirect);
     document.getElementById('btnIdDownload').addEventListener('click', downloadIdSheet);
+    document.getElementById('btnIdDownloadBottom').addEventListener('click', downloadIdSheet);
+
     window.addEventListener('resize', () => {
         updatePreviewLayout();
         if (typeof renderIdSheet === 'function') renderIdSheet();
@@ -2159,12 +2497,12 @@ INDEX_HTML = """<!DOCTYPE html>
                     const tr = document.createElement('tr');
                     tr.innerHTML = `
                         <td>${j.created_at}</td>
-                        <td style="font-weight: 600;">🔒 ${j.filename}</td>
+                        <td style="font-weight: 500;">🔒 ${j.filename}</td>
                         <td>${j.pages}</td>
                         <td>${j.copies}</td>
                         <td>${j.colormodel}</td>
-                        <td style="color: var(--accent); font-weight:600;">₱${j.cost.toFixed(2)}</td>
-                        <td><button class="btn-primary" style="padding: 4px 10px; font-size: 11px; width:auto;" onclick="openPinModal('${j.job_id}', '${j.filename}')">Release</button></td>
+                        <td style="color: var(--accent); font-weight: 500;">₱${j.cost.toFixed(2)}</td>
+                        <td><button class="cr-btn-pill cr-btn-print" style="padding: 2px 10px; font-size: 11px;" onclick="openPinModal('${j.job_id}', '${j.filename}')">Release</button></td>
                     `;
                     tbody.appendChild(tr);
                 });
@@ -2227,13 +2565,13 @@ INDEX_HTML = """<!DOCTYPE html>
                     const tr = document.createElement('tr');
                     tr.innerHTML = `
                         <td>${j.timestamp}</td>
-                        <td style="font-weight: 600;">${j.title}</td>
+                        <td style="font-weight: 500;">${j.title}</td>
                         <td>${j.printer}</td>
                         <td>${j.pages}</td>
                         <td>${j.copies}</td>
                         <td>${j.colormodel}</td>
-                        <td style="color: var(--accent); font-weight:600;">${j.cost}</td>
-                        <td><span style="font-size: 11px; padding: 2px 6px; border-radius: 4px; background: var(--surface-elevated);">${j.status}</span></td>
+                        <td style="color: var(--accent); font-weight: 500;">${j.cost}</td>
+                        <td><span style="font-size: 11px; padding: 2px 6px; border-radius: 3px; background: var(--surface-elevated);">${j.status}</span></td>
                     `;
                     tbody.appendChild(tr);
                 });
@@ -2316,8 +2654,7 @@ INDEX_HTML = """<!DOCTYPE html>
     updatePreviewLayout();
 </script>
 </body>
-</html>
-"""
+</html>"""
 
 @app.route('/')
 def index():
