@@ -596,15 +596,26 @@ INDEX_HTML = """<!DOCTYPE html>
             background: var(--desk-bg);
             border: 1px solid var(--border);
             border-radius: var(--radius-lg);
-            min-height: 620px;
+            height: calc(100vh - 120px);
+            min-height: 680px;
             display: flex;
             flex-direction: column;
             align-items: center;
-            justify-content: center;
-            padding: 20px;
+            justify-content: space-between;
+            padding: 16px 20px;
             position: relative;
             overflow: hidden;
             transition: var(--transition-theme);
+        }
+
+        .preview-desk-viewport {
+            flex: 1;
+            width: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+            position: relative;
         }
 
         .preview-top-toolbar {
@@ -811,7 +822,7 @@ INDEX_HTML = """<!DOCTYPE html>
     <div class="tab-content active" id="tab-print">
         <div class="grid-layout">
             <!-- Left: Dynamic Virtual Desk & Animated Paper Sheet Preview -->
-            <div class="preview-desk">
+            <div class="preview-desk" id="printPreviewDesk">
                 <div class="preview-top-toolbar" id="previewTopToolbar" style="display: none;">
                     <div style="font-weight: 600; font-size: 13px;" id="previewDocTitle">Document.pdf</div>
                     <div style="display: flex; align-items: center; gap: 12px;">
@@ -824,20 +835,22 @@ INDEX_HTML = """<!DOCTYPE html>
                     </div>
                 </div>
 
-                <div class="paper-sheet" id="paperSheet" style="width: 440px; height: 622px;">
-                    <div class="printable-area" id="printableArea">
-                        <div class="content-render-wrap" id="renderWrap">
-                            <canvas id="pdfCanvas" style="display: none;"></canvas>
-                            <img id="imgPreview" style="display: none;" alt="Preview">
-                            <div id="txtPreview" style="display: none; padding: 20px; font-size: 12px; color: #333; overflow: hidden; width:100%; height:100%; word-break: break-all;"></div>
+                <div class="preview-desk-viewport">
+                    <div class="paper-sheet" id="paperSheet" style="width: 440px; height: 622px;">
+                        <div class="printable-area" id="printableArea">
+                            <div class="content-render-wrap" id="renderWrap">
+                                <canvas id="pdfCanvas" style="display: none;"></canvas>
+                                <img id="imgPreview" style="display: none;" alt="Preview">
+                                <div id="txtPreview" style="display: none; padding: 20px; font-size: 12px; color: #333; overflow: hidden; width:100%; height:100%; word-break: break-all;"></div>
+                            </div>
                         </div>
                     </div>
-                </div>
 
-                <div id="previewEmptyState" style="text-align: center; color: var(--text-tertiary); margin-top: 14px;">
-                    <div style="font-size: 32px; margin-bottom: 6px;">📄</div>
-                    <div style="font-weight: 500;">No document loaded</div>
-                    <div style="font-size: 12px;">Drop any file on the right to inspect and preview</div>
+                    <div id="previewEmptyState" style="text-align: center; color: var(--text-tertiary); position: absolute;">
+                        <div style="font-size: 32px; margin-bottom: 6px;">📄</div>
+                        <div style="font-weight: 500;">No document loaded</div>
+                        <div style="font-size: 12px;">Drop any file on the right to inspect and preview</div>
+                    </div>
                 </div>
 
                 <div class="preview-dimensions-tag" id="previewDimensionsTag" style="display: none;">
@@ -1030,18 +1043,20 @@ INDEX_HTML = """<!DOCTYPE html>
     <div class="tab-content" id="tab-idmaker">
         <div class="grid-layout">
             <!-- Left: Virtual Desk Live Tiled Sheet Preview -->
-            <div class="preview-desk">
+            <div class="preview-desk" id="idPreviewDesk">
                 <div class="preview-top-toolbar" style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
-                    <div style="font-weight: 600; font-size: 13px;" id="idSheetTitleTag">4×6" Glossy Sheet • Combo Rush (2 pcs 2×2" + 8 pcs 1×1")</div>
+                    <div style="font-weight: 600; font-size: 13px;" id="idSheetTitleTag">4×6" Glossy Sheet • Combo Rush (2 pcs 2×2" + 16 pcs 1×1")</div>
                     <div style="display: flex; gap: 8px;">
                         <button type="button" class="btn-secondary" id="btnIdDownload" style="padding: 4px 10px; font-size: 11px;">💾 Save PNG</button>
                         <button type="button" class="btn-primary" id="btnIdDirectPrint" style="padding: 4px 12px; font-size: 11px; width: auto;">🖨️ Print ID Sheet</button>
                     </div>
                 </div>
 
-                <div class="paper-sheet" id="idPaperSheet" style="width: 440px; height: 660px; display: flex; align-items: center; justify-content: center; background: #ffffff; box-shadow: 0 16px 40px rgba(0,0,0,0.5); border-radius: 4px; overflow: hidden; position: relative; margin: 0 auto;">
-                    <canvas id="idSheetCanvas" style="max-width: 100%; max-height: 100%; object-fit: contain; display: none;"></canvas>
-                    <div id="idEmptyState" style="text-align: center; color: var(--text-tertiary); padding: 24px;">
+                <div class="preview-desk-viewport">
+                    <div class="paper-sheet" id="idPaperSheet" style="display: flex; align-items: center; justify-content: center; background: #ffffff; box-shadow: 0 16px 40px rgba(0,0,0,0.5); border-radius: 4px; overflow: hidden; position: relative; margin: 0 auto;">
+                        <canvas id="idSheetCanvas" style="width: 100%; height: 100%; object-fit: contain; display: none;"></canvas>
+                    </div>
+                    <div id="idEmptyState" style="text-align: center; color: var(--text-tertiary); padding: 24px; position: absolute;">
                         <div style="font-size: 40px; margin-bottom: 8px;">📸</div>
                         <div style="font-weight: 600; font-size: 14px;">Print Shop ID Studio Ready</div>
                         <div style="font-size: 12px; margin-top: 4px;">Upload portrait photo on the right to auto-generate 1×1, 2×2, & passport packages</div>
@@ -1138,12 +1153,12 @@ INDEX_HTML = """<!DOCTYPE html>
                     <div class="form-group">
                         <label>Package Template</label>
                         <select id="idPackageSelect">
-                            <option value="rush_combo_a" selected>Combo Rush: 2 pcs 2×2" + 8 pcs 1×1" (Best Seller)</option>
-                            <option value="rush_combo_b">Combo All-in-One: 2 pcs 2×2" + 4 pcs Passport + 4 pcs 1×1"</option>
-                            <option value="all_2x2">All 2 × 2 in (Passport / Visa Grid)</option>
-                            <option value="all_1x1">All 1 × 1 in Grid</option>
-                            <option value="all_passport">All Passport Size (35 × 45 mm)</option>
-                            <option value="wallet">Wallet Size (2.5 × 3.5 in)</option>
+                            <option value="rush_combo_a" selected>Combo Rush: 2 pcs 2×2" + 16 pcs 1×1" (Full Sheet Fill)</option>
+                            <option value="rush_combo_b">Combo All-in-One: 2 pcs 2×2" + 6 pcs Passport + 4 pcs 1×1" (Full Sheet Fill)</option>
+                            <option value="all_2x2">All 2 × 2 in (6 pcs Full Sheet Fill)</option>
+                            <option value="all_1x1">All 1 × 1 in (24 pcs Full Sheet Fill)</option>
+                            <option value="all_passport">All Passport Size (12 pcs Full Sheet Fill)</option>
+                            <option value="wallet">Wallet Size 2.5 × 3.5 in (4 pcs Full Sheet Fill)</option>
                         </select>
                     </div>
 
@@ -1449,19 +1464,22 @@ INDEX_HTML = """<!DOCTYPE html>
             isLandscape = docNaturalAspect < 0.95;
         }
 
-        const maxDeskWidth = 460;
-        const maxDeskHeight = 560;
+        const desk = document.getElementById('printPreviewDesk') || document.querySelector('.preview-desk');
+        const deskViewport = desk ? (desk.querySelector('.preview-desk-viewport') || desk) : null;
+        const availW = deskViewport ? Math.max(deskViewport.clientWidth - 30, 480) : 600;
+        const availH = deskViewport ? Math.max(deskViewport.clientHeight - 30, 560) : 750;
+
         let paperPhysW = isLandscape ? spec.height : spec.width;
         let paperPhysH = isLandscape ? spec.width : spec.height;
         let paperRatio = paperPhysH / paperPhysW;
 
         let sheetW, sheetH;
-        if (maxDeskWidth * paperRatio <= maxDeskHeight) {
-            sheetW = maxDeskWidth;
-            sheetH = Math.round(maxDeskWidth * paperRatio);
+        if (availW * paperRatio <= availH) {
+            sheetW = availW;
+            sheetH = Math.round(availW * paperRatio);
         } else {
-            sheetH = maxDeskHeight;
-            sheetW = Math.round(maxDeskHeight / paperRatio);
+            sheetH = availH;
+            sheetW = Math.round(availH / paperRatio);
         }
 
         const paperSheet = document.getElementById('paperSheet');
@@ -1834,14 +1852,34 @@ INDEX_HTML = """<!DOCTYPE html>
         const paperSize = document.getElementById('idSheetPaperSize').value;
         const isA4 = paperSize === 'A4';
 
-        // 300 DPI resolutions
+        // 300 DPI high-resolution canvas buffer
         const sheetW = isA4 ? 2480 : 1200;
         const sheetH = isA4 ? 3508 : 1800;
 
         sheetCanvas.width = sheetW;
         sheetCanvas.height = sheetH;
 
-        // Paper base
+        // Dynamically scale display preview to fill the viewport
+        const idDesk = document.getElementById('idPreviewDesk') || document.querySelectorAll('.preview-desk')[1];
+        const idViewport = idDesk ? (idDesk.querySelector('.preview-desk-viewport') || idDesk) : null;
+        const availW = idViewport ? Math.max(idViewport.clientWidth - 30, 460) : 560;
+        const availH = idViewport ? Math.max(idViewport.clientHeight - 30, 560) : 750;
+
+        let displayRatio = sheetH / sheetW;
+        let dispW, dispH;
+        if (availW * displayRatio <= availH) {
+            dispW = availW;
+            dispH = Math.round(availW * displayRatio);
+        } else {
+            dispH = availH;
+            dispW = Math.round(availH / displayRatio);
+        }
+
+        const paperSheetEl = document.getElementById('idPaperSheet');
+        paperSheetEl.style.width = dispW + 'px';
+        paperSheetEl.style.height = dispH + 'px';
+
+        // Paper background
         ctx.fillStyle = '#ffffff';
         ctx.fillRect(0, 0, sheetW, sheetH);
 
@@ -1864,65 +1902,57 @@ INDEX_HTML = """<!DOCTYPE html>
         }
 
         if (pkg === 'rush_combo_a') {
-            // Combo Rush: 2 pcs 2x2" + 8 pcs 1x1"
+            // Full Sheet Fill: 2 pcs 2x2" + 16 pcs 1x1"
             const size2x2 = isA4 ? 900 : 520;
             const startX = isA4 ? 260 : 60;
             const gap = isA4 ? 80 : 40;
-            const y1 = isA4 ? 200 : 80;
+            const y1 = isA4 ? 120 : 50;
             drawPhotoItem(startX, y1, size2x2, size2x2);
             drawPhotoItem(startX + size2x2 + gap, y1, size2x2, size2x2);
 
             const size1x1 = isA4 ? 430 : 250;
             const gap1x1 = isA4 ? 40 : 26;
             const startX1 = isA4 ? 260 : 60;
-            const y2 = y1 + size2x2 + (isA4 ? 120 : 60);
+            const startY = y1 + size2x2 + (isA4 ? 80 : 40);
 
-            for (let i = 0; i < 4; i++) {
-                drawPhotoItem(startX1 + i * (size1x1 + gap1x1), y2, size1x1, size1x1);
-            }
-            for (let i = 0; i < 4; i++) {
-                drawPhotoItem(startX1 + i * (size1x1 + gap1x1), y2 + size1x1 + gap1x1, size1x1, size1x1);
+            const numRows = isA4 ? 6 : 4;
+            for (let r = 0; r < numRows; r++) {
+                for (let c = 0; c < 4; c++) {
+                    drawPhotoItem(startX1 + c * (size1x1 + gap1x1), startY + r * (size1x1 + gap1x1), size1x1, size1x1);
+                }
             }
         } else if (pkg === 'rush_combo_b') {
-            // Combo All-in-One: 2 pcs 2x2" + 4 pcs Passport + 4 pcs 1x1"
+            // Full Sheet Fill: 2 pcs 2x2" + 6 pcs Passport + 4 pcs 1x1"
             const size2x2 = isA4 ? 900 : 520;
             const startX = isA4 ? 260 : 60;
             const gap = isA4 ? 80 : 40;
-            const y1 = isA4 ? 160 : 60;
+            const y1 = isA4 ? 100 : 50;
             drawPhotoItem(startX, y1, size2x2, size2x2);
             drawPhotoItem(startX + size2x2 + gap, y1, size2x2, size2x2);
 
-            const pw = isA4 ? 430 : 240;
-            const ph = isA4 ? 550 : 310;
+            const pw = isA4 ? 430 : 340;
+            const ph = isA4 ? 550 : 430;
             const pgap = isA4 ? 40 : 30;
-            const y2 = y1 + size2x2 + (isA4 ? 80 : 50);
-            for (let i = 0; i < 4; i++) {
-                drawPhotoItem(startX + i * (pw + pgap), y2, pw, ph);
+            const y2 = y1 + size2x2 + (isA4 ? 60 : 35);
+            const pStartX = Math.round((sheetW - (3 * pw + 2 * pgap)) / 2);
+            for (let r = 0; r < 2; r++) {
+                for (let c = 0; c < 3; c++) {
+                    drawPhotoItem(pStartX + c * (pw + pgap), y2 + r * (ph + pgap), pw, ph);
+                }
             }
 
-            const size1x1 = isA4 ? 430 : 240;
-            const y3 = y2 + ph + (isA4 ? 80 : 50);
+            const size1x1 = isA4 ? 430 : 250;
+            const gap1x1 = isA4 ? 40 : 26;
+            const y3 = y2 + 2 * (ph + pgap) + (isA4 ? 40 : 20);
             for (let i = 0; i < 4; i++) {
-                drawPhotoItem(startX + i * (size1x1 + pgap), y3, size1x1, size1x1);
+                drawPhotoItem(startX + i * (size1x1 + gap1x1), y3, size1x1, size1x1);
             }
         } else if (pkg === 'all_2x2') {
+            // Full Sheet Fill: 6 pcs of 2x2" on 4x6"
             const size = isA4 ? 540 : 520;
             const cols = isA4 ? 4 : 2;
             const rows = isA4 ? 5 : 3;
             const gap = isA4 ? 40 : 40;
-            const startX = Math.round((sheetW - (cols * size + (cols - 1) * gap)) / 2);
-            const startY = isA4 ? 160 : 80;
-
-            for (let r = 0; r < rows; r++) {
-                for (let c = 0; c < cols; c++) {
-                    drawPhotoItem(startX + c * (size + gap), startY + r * (size + gap), size, size);
-                }
-            }
-        } else if (pkg === 'all_1x1') {
-            const size = isA4 ? 320 : 250;
-            const cols = isA4 ? 6 : 4;
-            const rows = isA4 ? 9 : 6;
-            const gap = isA4 ? 28 : 26;
             const startX = Math.round((sheetW - (cols * size + (cols - 1) * gap)) / 2);
             const startY = isA4 ? 120 : 60;
 
@@ -1931,14 +1961,29 @@ INDEX_HTML = """<!DOCTYPE html>
                     drawPhotoItem(startX + c * (size + gap), startY + r * (size + gap), size, size);
                 }
             }
+        } else if (pkg === 'all_1x1') {
+            // Full Sheet Fill: 24 pcs of 1x1" on 4x6"
+            const size = isA4 ? 320 : 250;
+            const cols = isA4 ? 6 : 4;
+            const rows = isA4 ? 9 : 6;
+            const gap = isA4 ? 28 : 28;
+            const startX = Math.round((sheetW - (cols * size + (cols - 1) * gap)) / 2);
+            const startY = isA4 ? 100 : 50;
+
+            for (let r = 0; r < rows; r++) {
+                for (let c = 0; c < cols; c++) {
+                    drawPhotoItem(startX + c * (size + gap), startY + r * (size + gap), size, size);
+                }
+            }
         } else if (pkg === 'all_passport') {
-            const pw = isA4 ? 420 : 320;
-            const ph = isA4 ? 540 : 410;
+            // Full Sheet Fill: 12 pcs of Passport on 4x6"
+            const pw = isA4 ? 420 : 340;
+            const ph = isA4 ? 540 : 400;
             const cols = isA4 ? 5 : 3;
-            const rows = isA4 ? 5 : 3;
-            const gap = isA4 ? 40 : 40;
+            const rows = isA4 ? 5 : 4;
+            const gap = isA4 ? 30 : 25;
             const startX = Math.round((sheetW - (cols * pw + (cols - 1) * gap)) / 2);
-            const startY = isA4 ? 150 : 80;
+            const startY = isA4 ? 100 : 50;
 
             for (let r = 0; r < rows; r++) {
                 for (let c = 0; c < cols; c++) {
@@ -1946,13 +1991,20 @@ INDEX_HTML = """<!DOCTYPE html>
                 }
             }
         } else if (pkg === 'wallet') {
+            // Full Sheet Fill: 4 pcs Wallet on 4x6"
             const ww = isA4 ? 750 : 520;
-            const wh = isA4 ? 1050 : 730;
-            const startX = isA4 ? 300 : 70;
+            const wh = isA4 ? 1050 : 780;
+            const cols = 2;
+            const rows = 2;
             const gap = isA4 ? 100 : 40;
-            const y1 = isA4 ? 300 : 120;
-            drawPhotoItem(startX, y1, ww, wh);
-            drawPhotoItem(startX + ww + gap, y1, ww, wh);
+            const startX = Math.round((sheetW - (cols * ww + (cols - 1) * gap)) / 2);
+            const startY = isA4 ? 150 : 60;
+
+            for (let r = 0; r < rows; r++) {
+                for (let c = 0; c < cols; c++) {
+                    drawPhotoItem(startX + c * (ww + gap), startY + r * (wh + gap), ww, wh);
+                }
+            }
         }
 
         document.getElementById('idEmptyState').style.display = 'none';
@@ -2087,6 +2139,11 @@ INDEX_HTML = """<!DOCTYPE html>
     document.getElementById('btnIdDirectPrint').addEventListener('click', printIdSheetDirect);
     document.getElementById('btnIdGeneratePrint').addEventListener('click', printIdSheetDirect);
     document.getElementById('btnIdDownload').addEventListener('click', downloadIdSheet);
+    window.addEventListener('resize', () => {
+        updatePreviewLayout();
+        if (typeof renderIdSheet === 'function') renderIdSheet();
+    });
+
 
     // ==========================================
     // CONFIDENTIAL PIN QUEUE
