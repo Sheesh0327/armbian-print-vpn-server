@@ -1,100 +1,219 @@
-# 🖨️ Turnkey Commercial Print Appliance & Server Gateway
+# Turnkey Commercial Print Appliance and Server Gateway
 
-Turn any low-cost ARM SBC or TV box (such as the **ZTE B860H** with Amlogic S905X, 1GB RAM) running **Armbian Linux** into a commercial-grade, driverless print kiosk, full-fledged Canva design workstation, and network server.
-
-![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)
-![Platform: Armbian / Debian](https://img.shields.io/badge/Platform-Armbian%20%7C%20Debian-red.svg)
-![Arch: ARM64](https://img.shields.io/badge/Arch-ARM64-green.svg)
-![Memory Footprint: <400MB](https://img.shields.io/badge/RAM%20Idle-~380MB-brightgreen.svg)
+Turn low-cost ARM SBCs and TV boxes (such as the ZTE B860H with Amlogic S905X, 1 GB RAM) running Armbian Linux into a hardened commercial print appliance, client-side design kiosk, and integrated driverless print gateway.
 
 ---
 
-## 🌟 Commercial Capabilities Overview
+## System Architecture and Network Placement
 
-### 1. 🖨️ Permanent Advanced Web Print Portal (`Port 80`)
-- **Direct Access**: Accessible at **`http://printserver.local`** or `http://10.0.0.95`.
-- **Dynamic Multi-Printer Auto-Discovery**: Automatically queries connected USB or network IPP printers (`HP`, `Canon`, `Epson`, `Brother`, thermal label printers) with real-time status and default queue auto-selection.
-- **Universal Document & Mobile Ingestion**:
-  - **PDF & Office Suite**: Native headless conversion for `.pdf`, `.docx`, `.doc`, `.xlsx`, `.xls`, `.pptx`, `.ppt`, `.odt`, `.rtf`, `.csv`, `.txt`.
-  - **Modern Smartphone Formats**: iPhone `.heic`/`.heif` and modern `.avif`, `.webp`, `.png`, `.jpg`, `.tiff`.
-- **Permanent Advanced Controls Suite**:
-  - Exact Paper Sizes (`A4`, `Letter`, `Legal`, `A5`, `A6`, `B5`, `4×6"`, `5×7"`, `8×10"`, `Envelope DL`).
-  - Dynamic Physical Paper Preview matching physical dimensions with multi-page navigation (`‹` `1 / N` `›`).
-  - Millimetric Margins Engine: `Printable Area`, `Borderless (0 mm)`, `Normal (12.7 mm)`, or `Custom mm` (Top, Bottom, Left, Right).
-  - Media types (`Plain`, `Glossy`, `Matte`, `Brochure`) & Print Quality (`Normal`, `Best`, `Photo`).
-  - Resolution / DPI (`150`, `300`, `600`, `1200 DPI`).
-  - Duplex (`Single-Sided`, `Long-Edge`, `Short-Edge`) & Orientation (`Auto`, `Portrait`, `Landscape`).
-  - Scaling (`Fit to Printable Area`, `Fill / Crop Page`) & Page Range (`1-3, 5`).
-- **Pre-Flight Accounting & Cost Estimator**:
-  - Real-time page counting via `pdfinfo`.
-  - Live cost calculation configured in Philippine Pesos (`₱`) (default: ₱2.00/page B&W, ₱5.00/page Color).
+The print server sits on the downstream local network behind a gateway router (OpenWrt) separating upstream modem clients and isolated guest Wi-Fi clients.
 
-### 2. 🎨 Full-Fledged Browser-Offloaded Canva Clone Studio
-- **100% Client-Side Architecture (0 MB Added to Server RAM)**:
-  - Powered by Fabric.js, client-side HTML5 Canvas, jsPDF, and QRCode.js.
-  - All graphic compositing, layer dragging, and typography rendering execute on the client's GPU and RAM.
-- **Canva Workstation Features**:
-  - **Icon Rail & Sliding Drawer**: Quick switching between `Design / Templates`, `Shapes / Elements`, `Text / Typography`, `Uploads`, `QR Code Generator`, and `Freehand Pen Draw`.
-  - **1-Click Pre-Built Canva Templates**:
-    - Promotional Sale & Clearance Flyer (bold header, 50% badge, offer box, address footer).
-    - Corporate Memorandum & Official Notice (letterhead, date, subject line, body text, signature block).
-    - Guest Wi-Fi Sign & QR (network credentials with embedded scan-to-connect QR code).
-    - Certificate of Recognition & Achievement (ornate gold borders, award text, ribbon seal).
-    - 2×2 ID Photo Sheet (automatically tiles 6x framed passport photos with cut guides on an A4 sheet).
-  - **Vector Shapes & Enterprise Stamps**: Rectangles, circles, stars, arrows, triangles, and 1-click `APPROVED`, `CONFIDENTIAL`, `PAID`, `URGENT`, `DRAFT`, and `Authorized Signature Line` stamps.
-  - **Contextual Dynamic Toolbar**: Top toolbar automatically adapts based on the active selection (font family, font size, text color, bold/italic for text; fill/stroke for shapes; grayscale, sepia, contrast, invert filters for images).
-  - **Direct 300 DPI Spooling**: Browser renders a crisp 300 DPI canvas blob client-side and submits directly to `/api/print` in one tap. Also supports downloading as pristine PDF or PNG.
+```
+       [ISP Modem / Upstream Subnet: 192.168.1.0/24]
+                            |
+                 (WAN: 192.168.1.13)
+             [OpenWrt Gateway / Router]
+                 (LAN: 10.0.0.1/24)
+                            |
+         +------------------+------------------+
+         |                                     |
+   [Downstream LAN: 10.0.0.0/24]        [Guest Wi-Fi (openNDS): 10.0.30.0/24]
+   - Print Server: 10.0.0.95:80          - Strictly isolated via OpenWrt firewall
+   - Workstation PC: 10.0.0.112          - Cannot route or connect to 10.0.0.95
+   - CUPS Server: 10.0.0.95:631          - Prints via OpenWrt Router API hook
+```
 
-### 3. 🔒 Confidential Pull-Printing (PIN-Release Queue)
-- **Secure Staging Spool**: Jobs marked confidential are encrypted and held in `/var/spool/webprint/pinned/`. The printer stays silent until unlocked.
-- **PIN Unlock**: User walks up to the printer, enters their 4-digit PIN in the portal, and releases the job to the tray.
-- **Auto-Purge Security**: Unclaimed PIN jobs automatically expire and delete after 24 hours.
-
-### 4. 📊 Print Accounting & Audit Ledger
-- **Complete Job Audit Trail**: Tracks timestamp, document title, printer, page count, copies, color mode, cost (`₱`), and client IP.
-- **Revenue & Volume Analytics**: Real-time summary cards for total jobs, total pages, and total billed cost.
-- **Exportable Reports**: One-click download of the complete audit log in CSV format (`/api/reports/export.csv`).
-
-### 5. 🛡️ Password-Protected Appliance Administration
-- **Admin Security**: Hardware actions are protected by administrator password (default: `admin`).
-- **System Controls**: Safe web-based Reboot, Shutdown, CUPS Service Restart, Cache & Temp Spool Purging, Rate Card Editor (B&W/Color pricing), and Admin Password Manager.
-
-### 6. 📁 SANE Flatbed Scanner & Network Shares
-- **Web Scanner (`/scan`)**: Scan documents to PDF, PNG, or JPEG at 75–600 DPI.
-- **Samba File Sharing**: Scans auto-saved to `\\printserver.local\Public\Scans`.
-- **Automated Daily Backups**: Daily 3:00 AM server snapshots stored in `\\printserver.local\Public\backups`.
-
-### 7. 🛡️ Network Ad-Blocking & Remote VPN
-- **AdGuard Home**: Running on port `3000` & `53` with balanced filter lists.
-- **Tailscale Mesh VPN**: Remote printing and admin access from anywhere at `http://100.104.185.40`.
+### Network Access Rules
+1. **Downstream LAN (`10.0.0.0/24`)**: Full access to the Web Print portal (Port 80) and raw IPP printing (Port 631). CUPS web administration (`https://10.0.0.95:631/admin`) is restricted to localhost and `10.0.0.0/24`.
+2. **Upstream Modem Network (`192.168.1.0/24`)**: Accesses Port 80 and Port 631 forwarded via OpenWrt DNAT rules. Avahi reflector on OpenWrt advertises the printer to modem devices. CUPS administrative endpoints reject upstream connections.
+3. **Guest Wi-Fi Network (`10.0.30.0/24`)**: Direct layer-3 access to `10.0.0.95` is blocked by firewall forwarding drop rules. Guest print jobs are handled by the router calling the internal Router API (`/api/router/*`) over the trusted LAN interface.
 
 ---
 
-## 🚀 Installation & Deployment
+## Core Capabilities
+
+### 1. Web Print Portal (Port 80)
+- **Production WSGI Service**: Runs Gunicorn bound to `0.0.0.0:80` under the unprivileged system user `webprint` (group `lp`) utilizing Linux ambient capabilities (`CAP_NET_BIND_SERVICE`).
+- **Dynamic CUPS Auto-Discovery**: Automatically enumerates connected USB and IPP network printers (`lpstat -e`) with real-time status reporting.
+- **Strict Input Validation**:
+  - Copies bounded between 1 and 99.
+  - Page ranges verified against `^[0-9,\- ]+$`.
+  - Printers strictly matched against enumerated active CUPS queues.
+  - Page sizes, media types, print qualities, color models, duplex modes, and resolutions validated against fixed server-side allow-lists before passing to `lp -o`. Raw form values are never passed to the print spooler.
+  - Maximum upload size enforced at 50 MB, and maximum page count enforced at 50 pages per job.
+- **Universal Document Ingestion**:
+  - PDF, plain text, and Office formats (`.docx`, `.xlsx`, `.pptx`, `.odt`, `.rtf`).
+  - Mobile image formats (`.heic`, `.heif`, `.avif`, `.webp`, `.png`, `.jpg`).
+- **Vendored PDF Preview Engine**:
+  - Mozilla PDF.js v3.11.174 vendored locally (`webprint/static/pdf.min.js` and `webprint/static/pdf.worker.min.js`) for reliable, air-gapped document rendering without external CDN dependencies.
+- **Public Portal Toggle**: Set `PUBLIC_PRINT=off` in the environment to disable general walk-up uploads while preserving the router paid-print pipeline.
+
+### 2. Client-Side Canva Design Studio
+- **Zero Server RAM Footprint**:
+  - Powered by client-side HTML5 Canvas, Fabric.js, jsPDF, and QRCode.js.
+  - All graphic rendering, typography calculations, image filters, and vector manipulation execute inside the client browser.
+- **Built-in Templates and Tools**:
+  - Pre-built templates: Promotional flyers, corporate memos, guest Wi-Fi connection signs, certificates of recognition, and 2x2 passport ID photo grids.
+  - Vector stamp assets: `APPROVED`, `CONFIDENTIAL`, `PAID`, `URGENT`, and `DRAFT`.
+  - Direct 300 DPI canvas rasterization sent straight to the print spooler.
+
+### 3. Encrypted Confidential Pull-Printing (PIN Queue)
+- **Cryptographic Storage**: Held print files are encrypted at rest using AES-256-GCM. The encryption key is generated at install time in `/var/lib/webprint/secret.key` with file mode `0600` (readable only by user `webprint`).
+- **6-Digit PIN Security**: PINs are strictly 6 digits (`000000` to `999999`). Only a salted HMAC-SHA256 digest is stored in the SQLite database.
+- **Brute-Force Protection**: 
+  - Maximum 5 failed PIN attempts per job; reaching the threshold immediately wipes the encrypted spool file and purges the job from the database.
+  - IP-based rate limiting (10 attempts per minute per client IP).
+  - Unclaimed jobs automatically purge after 24 hours.
+
+### 4. Accounting and Audit Ledger
+- **Transaction Logging**: Records timestamp, job name, printer, page count, copies, color mode, billing amount, client IP, and source (`direct` vs `wifi`).
+- **Protected Administration**:
+  - Ledger view (`/api/reports/ledger`), CSV export (`/api/reports/export.csv`), and PIN queue management (`/api/pin/list`) require an active admin session.
+  - Hardware controls (reboot, shutdown, CUPS restart, spool purge) require admin credentials.
+
+### 5. Authentication and Hardened Access Control
+- **No Default Passwords**: `setup.sh` generates a cryptographically random admin password upon initial installation and displays it once to the terminal.
+- **Salted Password Hashing**: Passwords stored using `scrypt` hashing via Werkzeug security.
+- **Rate-Limited Logins**: 5 failed login attempts per minute per IP triggers temporary lockout.
+- **Constant-Time Verification**: Session authentication tokens verified using `hmac.compare_digest`.
+
+### 6. Sandboxed Document Conversion
+- **Privilege Separation**: Conversions execute under the unprivileged `webprint` system account.
+- **Isolated User Profiles**: LibreOffice conversions run with an isolated, per-job profile directory (`-env:UserInstallation=file:///tmp/lo_<job>`).
+- **Restricted ImageMagick Policy**: Installed policy (`/etc/ImageMagick-6/policy.xml`) explicitly disables dangerous coders (`MVG`, `MSL`, `URL`, `HTTPS`, `HTTP`, `FTP`, `EPHEMERAL`, `PS`, `EPS`).
+- **Execution Timeouts**: ImageMagick limited to 30 seconds; LibreOffice limited to 45 seconds. Per-job temporary files are strictly cleaned up inside `finally` blocks.
+- **Safe Directory Purges**: Python `shutil` and `os` primitives used for spool cleanup instead of shell invocations.
+
+### 7. OpenWrt Paid Wi-Fi Router Integration
+A dedicated API enables automated, coin-operated, or voucher-based print integration with an upstream OpenWrt captive portal (e.g. openNDS / PisoWiFi):
+- **Source Verification**: Requests are accepted only from router IP `10.0.0.1`.
+- **Shared Secret Authentication**: Requires an `X-Router-Key` HTTP header matching the secret in `/etc/webprint/router.key` (mode `0600`).
+- **Endpoints**:
+  - `POST /api/router/job`: Uploads document, converts format, counts pages, and stages the job as `HELD` (max 15-minute expiration). Returns `{job_id, pages, color, expires_at}`.
+  - `POST /api/router/release`: Releases and prints a held job upon confirmed payment. Idempotent.
+  - `POST /api/router/cancel`: Immediately deletes the held job and staging file.
+  - `GET /api/router/status?job_id=...`: Returns current state (`queued`, `printing`, `done`, `failed`, `paper_out`, `offline`).
+  - `GET /api/router/health`: Reports CUPS daemon health, default printer status, and alert states.
+- **Audit Logging**: All completed router print jobs are recorded in the accounting ledger with `source="wifi"`.
+
+### 8. Automated Daily Backups
+- **Service and Timer**: Handled via `backup-webprint.service` and `backup-webprint.timer`.
+- **Schedule**: Triggers daily at 03:00.
+- **Data Protection**: Archives the SQLite database (`/var/lib/webprint/webprint.db`), encryption keys (`/etc/webprint`), and CUPS configuration into `/var/backups/webprint/` with file mode `0600`.
+- **Retention**: Automatically purges archives older than 14 days.
+
+---
+
+## Installation and Deployment
+
+### 1. Automated Installation
+Clone the repository on the Armbian appliance and run the installer:
 
 ```bash
-# Clone the repository
 git clone https://github.com/Sheesh0327/armbian-print-vpn-server.git
 cd armbian-print-vpn-server
-
-# Run the automated appliance setup
-sudo chmod +x setup.sh
+sudo chmod +x setup.sh scripts/backup-server.sh
 sudo ./setup.sh
+```
+
+During installation:
+- System packages (`cups`, `gunicorn`, `poppler-utils`, `libreoffice-writer-nogui`, `imagemagick`, `python3-cryptography`) are installed.
+- Unprivileged user `webprint` is created and added to group `lp`.
+- Cryptographic keys (`secret.key` and `router.key`) are generated with mode `0600`.
+- A random admin password is generated and displayed once on the console. Save this password securely.
+- The Gunicorn systemd service and daily backup timer are enabled and started.
+
+### 2. Service Management
+```bash
+# Check Web Print service status
+sudo systemctl status webprint.service
+
+# View Web Print logs
+sudo journalctl -u webprint.service -f
+
+# Check daily backup timer status
+sudo systemctl status backup-webprint.timer
 ```
 
 ---
 
-## 🌐 Network Service Directory
+## Network Service Directory
 
-| Service | Access URL | Purpose |
+| Service | Access URL / Port | Security and Restrictions |
 | :--- | :--- | :--- |
-| **Print Appliance Portal** | [`http://printserver.local`](http://printserver.local) | Direct print, Canva clone studio, PIN queue, scanner |
-| **AdGuard Home** | [`http://printserver.local:3000`](http://printserver.local:3000) | Network ad-blocking dashboard |
-| **Samba File Share** | `\\printserver.local\Public` | Shared network folder & scan storage |
-| **CUPS Admin** | [`https://printserver.local:631`](https://printserver.local:631) | Raw hardware and queue administration |
-| **Tailscale Remote VPN** | `http://100.104.185.40` | Secure remote access over cellular / WAN |
+| **Web Print Portal** | `http://printserver.local` (Port 80) | Unprivileged Gunicorn, rate-limited, input-validated |
+| **CUPS Printing (IPP)** | `http://printserver.local:631/printers/...` | Shared queues accessible by LAN and upstream modem |
+| **CUPS Admin** | `https://printserver.local:631/admin` | Restricted to localhost and LAN `10.0.0.0/24` |
+| **Router API** | `http://10.0.0.95:80/api/router/*` | Restricted to IP `10.0.0.1` + `X-Router-Key` header |
+| **Daily Backups** | `/var/backups/webprint/` | Mode `0600`, root/webprint private directory |
 
 ---
 
-## 📜 License
+## Optional Modules
+
+The following supplementary modules are optional and not installed by the core setup script to maintain a minimal attack surface and conserve memory on 1 GB devices:
+
+### 1. Samba File Sharing (Optional)
+If Windows network folder sharing is needed for document exchange:
+```bash
+sudo apt-get install -y samba
+# Configure /etc/samba/smb.conf with appropriate access controls
+sudo systemctl restart smbd
+```
+
+### 2. SANE Network Scanner (Optional)
+If an all-in-one USB flatbed scanner is attached:
+```bash
+sudo apt-get install -y sane sane-utils
+# Enumerate scanners
+scanimage -L
+```
+
+### 3. AdGuard Home (Optional)
+For appliance-level DNS caching or ad-blocking:
+- Install separately following official Armbian AdGuard instructions.
+- Ensure AdGuard does not bind to Port 80 or interfere with mDNS resolution on Port 5353.
+
+### 4. Tailscale Remote Mesh VPN (Optional)
+To securely access the print appliance over the internet:
+- Install Tailscale via `curl -fsSL https://tailscale.com/install.sh | sh`.
+- Authenticate: `sudo tailscale up`.
+- **Security Guidance**:
+  - Do **not** advertise exit node functionality (`--advertise-exit-node`).
+  - If subnet routing is required, advertise only the appliance itself (`--advertise-routes=10.0.0.95/32`), never the wider LAN or guest network.
+  - Configure Tailscale Access Control Lists (ACLs) in the admin console to restrict access exclusively to authorized user devices.
+
+---
+
+## Verification and Testing
+
+Execute the test suite to verify validators, rate limiting, authentication, and the router API:
+
+```bash
+# Run automated tests
+pytest tests/
+```
+
+### Test Checklist
+1. **Upstream Modem Network Printing**:
+   - Connect a smartphone to the upstream modem network (`192.168.1.0/24`).
+   - Navigate to `http://192.168.1.13` (router WAN). Verify the portal loads and test-print a document.
+   - Verify that accessing `https://192.168.1.13:631/admin` is blocked or rejected.
+2. **Downstream LAN Printing**:
+   - From a Windows PC (`10.0.0.112`), navigate to `http://10.0.0.95` or `http://printserver.local`.
+   - Submit a 6-digit PIN job and verify pull-print release.
+3. **Guest Network Isolation Verification**:
+   - Connect a device to the guest Wi-Fi network (`10.0.30.0/24`).
+   - Attempt to load `http://10.0.0.95`. Confirm the connection times out and no packets reach the print server.
+
+---
+
+## Security Policy
+
+For vulnerability reporting procedures, threat models, and architectural boundaries, see [SECURITY.md](SECURITY.md).
+
+---
+
+## License
+
 Licensed under the [MIT License](LICENSE).

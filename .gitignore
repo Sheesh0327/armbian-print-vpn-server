@@ -7,6 +7,24 @@ __pycache__/
 env/
 venv/
 ENV/
+.pytest_cache/
+
+# Databases & Secrets
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+*.key
+secret.key
+router.key
+initial_admin_password.txt
+
+# Spool & Backups
+/var/spool/
+/var/lib/webprint/
+*.tar.gz
 
 # System / OS
 .DS_Store

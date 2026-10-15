@@ -1,0 +1,14 @@
+<policymap>
+  <!-- Security Hardened Policy for Web Print Appliance -->
+  <!-- Disables vulnerable and dangerous coders -->
+  <policy domain="coder" rights="none" pattern="MVG" />
+  <policy domain="coder" rights="none" pattern="MSL" />
+  <policy domain="coder" rights="none" pattern="URL" />
+  <policy domain="coder" rights="none" pattern="HTTPS" />
+  <policy domain="coder" rights="none" pattern="HTTP" />
+  <policy domain="coder" rights="none" pattern="FTP" />
+  <policy domain="coder" rights="none" pattern="EPHEMERAL" />
+  <policy domain="coder" rights="none" pattern="PS" />
+  <policy domain="coder" rights="none" pattern="EPS" />
+  <policy domain="path" rights="none" pattern="@*" />
+</policymap>

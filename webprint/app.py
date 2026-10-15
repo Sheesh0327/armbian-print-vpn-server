@@ -6,20 +6,190 @@ import json
 import re
 import sqlite3
 import hashlib
+import hmac
 import secrets
 import shutil
+import glob
 from datetime import datetime
 from flask import Flask, render_template_string, request, jsonify, Response
+from werkzeug.security import generate_password_hash, check_password_hash
+
+try:
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    HAS_CRYPTOGRAPHY = True
+except ImportError:
+    HAS_CRYPTOGRAPHY = False
 
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'static')
 app = Flask(__name__, static_folder=STATIC_DIR, static_url_path='/static')
-app.config['MAX_CONTENT_LENGTH'] = 150 * 1024 * 1024  # 150MB file size limit
+app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50MB file size limit
 
-DB_PATH = "/var/lib/webprint/webprint.db"
-SPOOL_PINNED_DIR = "/var/spool/webprint/pinned"
-TEMP_DIR_BASE = "/tmp/webprint"
+if os.name == 'nt' and 'WEBPRINT_DB' not in os.environ:
+    base_dir = os.path.join(tempfile.gettempdir(), 'webprint_dev')
+    DB_PATH = os.path.join(base_dir, 'webprint.db')
+    SECRET_KEY_PATH = os.path.join(base_dir, 'secret.key')
+    ROUTER_KEY_PATH = os.path.join(base_dir, 'router.key')
+    ROUTER_KEY_FALLBACK_PATH = os.path.join(base_dir, 'router_fallback.key')
+    SPOOL_PINNED_DIR = os.path.join(base_dir, 'pinned')
+    SPOOL_HELD_DIR = os.path.join(base_dir, 'held')
+else:
+    DB_PATH = os.environ.get('WEBPRINT_DB', '/var/lib/webprint/webprint.db')
+    SECRET_KEY_PATH = os.environ.get('WEBPRINT_SECRET_KEY', '/var/lib/webprint/secret.key')
+    ROUTER_KEY_PATH = os.environ.get('WEBPRINT_ROUTER_KEY', '/etc/webprint/router.key')
+    ROUTER_KEY_FALLBACK_PATH = '/var/lib/webprint/router.key'
+    SPOOL_PINNED_DIR = os.environ.get('WEBPRINT_SPOOL_PINNED', '/var/spool/webprint/pinned')
+    SPOOL_HELD_DIR = os.environ.get('WEBPRINT_SPOOL_HELD', '/var/spool/webprint/held')
+MAX_PAGES_PER_JOB = int(os.environ.get('MAX_PAGES_PER_JOB', 50))
+
+ALLOWED_EXTENSIONS = {
+    '.pdf', '.png', '.jpg', '.jpeg', '.webp', '.heic', '.heif',
+    '.avif', '.tiff', '.tif', '.bmp', '.docx', '.doc', '.odt',
+    '.rtf', '.txt', '.csv', '.xlsx', '.xls', '.pptx', '.ppt'
+}
+
+ALLOWED_PAGESIZES = {
+    'A4', 'Letter', 'Legal', 'A5', 'A6', 'B5', '4x6', '5x7', '8x10', 'Envelope_DL',
+    'Custom.4x6in', 'EnvDL'
+}
+ALLOWED_MEDIATYPES = {'Plain', 'Glossy', 'Matte', 'Brochure'}
+ALLOWED_QUALITIES = {'Draft', 'Normal', 'Best', 'Photo'}
+ALLOWED_COLORMODELS = {'RGB', 'CMYK', 'K', 'Gray', 'Color'}
+ALLOWED_DUPLEX = {'None', 'DuplexNoTumble', 'DuplexTumble'}
+ALLOWED_ORIENTATIONS = {'auto', '3', '4', 'portrait', 'landscape'}
+ALLOWED_RESOLUTIONS = {'150', '300', '600', '1200'}
+ALLOWED_MARGIN_MODES = {'printable', 'none', 'normal', 'custom'}
+
+class RateLimiter:
+    def __init__(self, max_requests: int, window_seconds: int):
+        self.max_requests = max_requests
+        self.window_seconds = window_seconds
+        self.history = {}
+
+    def is_allowed(self, client_ip: str) -> bool:
+        if not client_ip:
+            client_ip = 'unknown'
+        now = time.time()
+        cutoff = now - self.window_seconds
+        records = [t for t in self.history.get(client_ip, []) if t > cutoff]
+        if len(records) >= self.max_requests:
+            self.history[client_ip] = records
+            return False
+        records.append(now)
+        self.history[client_ip] = records
+        return True
+
+    def reset(self, client_ip: str = None):
+        if client_ip:
+            self.history.pop(client_ip, None)
+        else:
+            self.history.clear()
+
+admin_login_limiter = RateLimiter(max_requests=5, window_seconds=60)
+pin_release_limiter = RateLimiter(max_requests=10, window_seconds=60)
+public_print_limiter = RateLimiter(max_requests=10, window_seconds=60)
 
 ACTIVE_TOKENS = {}
+
+def verify_admin_token(token: str) -> bool:
+    if not token:
+        return False
+    now = time.time()
+    expired = [t for t, exp in ACTIVE_TOKENS.items() if exp <= now]
+    for t in expired:
+        ACTIVE_TOKENS.pop(t, None)
+
+    for active_token, exp in list(ACTIVE_TOKENS.items()):
+        if hmac.compare_digest(token, active_token) and exp > now:
+            return True
+    return False
+
+def get_or_create_secret_key() -> bytes:
+    if os.path.exists(SECRET_KEY_PATH):
+        try:
+            with open(SECRET_KEY_PATH, 'rb') as f:
+                key = f.read()
+                if len(key) == 32:
+                    return key
+        except Exception:
+            pass
+    key = secrets.token_bytes(32)
+    try:
+        os.makedirs(os.path.dirname(SECRET_KEY_PATH), exist_ok=True)
+        fd = os.open(SECRET_KEY_PATH, os.O_CREAT | os.O_WRONLY | os.O_TRUNC, 0o600)
+        with open(fd, 'wb') as f:
+            f.write(key)
+    except Exception:
+        pass
+    return key
+
+def get_router_key() -> str:
+    for path in [ROUTER_KEY_PATH, ROUTER_KEY_FALLBACK_PATH]:
+        if os.path.exists(path):
+            try:
+                with open(path, 'r') as f:
+                    k = f.read().strip()
+                    if k:
+                        return k
+            except Exception:
+                pass
+    env_key = os.environ.get('ROUTER_KEY', '')
+    if env_key:
+        return env_key.strip()
+    new_key = secrets.token_hex(32)
+    try:
+        os.makedirs(os.path.dirname(ROUTER_KEY_FALLBACK_PATH), exist_ok=True)
+        fd = os.open(ROUTER_KEY_FALLBACK_PATH, os.O_CREAT | os.O_WRONLY | os.O_TRUNC, 0o600)
+        with open(fd, 'w') as f:
+            f.write(new_key)
+    except Exception:
+        pass
+    return new_key
+
+def hash_pin(pin: str) -> str:
+    key = get_or_create_secret_key()
+    return hmac.new(key, pin.encode('utf-8'), hashlib.sha256).hexdigest()
+
+def encrypt_held_file(input_path: str, output_enc_path: str):
+    key = get_or_create_secret_key()
+    with open(input_path, 'rb') as f:
+        data = f.read()
+    if HAS_CRYPTOGRAPHY:
+        nonce = secrets.token_bytes(12)
+        aesgcm = AESGCM(key)
+        ct = aesgcm.encrypt(nonce, data, None)
+        with open(output_enc_path, 'wb') as f:
+            f.write(b"AESGCM1:" + nonce + ct)
+    else:
+        with open(output_enc_path, 'wb') as f:
+            f.write(b"RAW0600:" + data)
+    try:
+        os.chmod(output_enc_path, 0o600)
+    except Exception:
+        pass
+
+def decrypt_held_file(enc_path: str, output_path: str):
+    key = get_or_create_secret_key()
+    with open(enc_path, 'rb') as f:
+        payload = f.read()
+    if payload.startswith(b"AESGCM1:"):
+        if not HAS_CRYPTOGRAPHY:
+            raise RuntimeError("cryptography package required to decrypt held file")
+        nonce = payload[8:20]
+        ct = payload[20:]
+        aesgcm = AESGCM(key)
+        data = aesgcm.decrypt(nonce, ct, None)
+        with open(output_path, 'wb') as f:
+            f.write(data)
+    elif payload.startswith(b"RAW0600:"):
+        with open(output_path, 'wb') as f:
+            f.write(payload[8:])
+    else:
+        with open(output_path, 'wb') as f:
+            f.write(payload)
+    try:
+        os.chmod(output_path, 0o600)
+    except Exception:
+        pass
 
 def get_db():
     conn = sqlite3.connect(DB_PATH)
@@ -27,8 +197,13 @@ def get_db():
     return conn
 
 def init_db():
-    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-    os.makedirs(SPOOL_PINNED_DIR, exist_ok=True)
+    try:
+        os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+        os.makedirs(SPOOL_PINNED_DIR, exist_ok=True)
+        os.makedirs(SPOOL_HELD_DIR, exist_ok=True)
+    except Exception:
+        pass
+    get_or_create_secret_key()
     conn = get_db()
     with conn:
         conn.execute("""
@@ -50,6 +225,22 @@ def init_db():
                 options_json TEXT,
                 cost REAL,
                 created_at INTEGER,
+                expires_at INTEGER,
+                failed_attempts INTEGER DEFAULT 0
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS router_jobs (
+                job_id TEXT PRIMARY KEY,
+                file_path TEXT,
+                pages INTEGER,
+                copies INTEGER,
+                colormodel TEXT,
+                printer TEXT,
+                options_json TEXT,
+                status TEXT,
+                cups_job_id TEXT,
+                created_at INTEGER,
                 expires_at INTEGER
             )
         """)
@@ -65,18 +256,45 @@ def init_db():
                 colormodel TEXT,
                 cost REAL,
                 client_ip TEXT,
-                status TEXT
+                status TEXT,
+                source TEXT DEFAULT 'portal'
             )
         """)
+
+        try:
+            conn.execute("ALTER TABLE pinned_jobs ADD COLUMN failed_attempts INTEGER DEFAULT 0")
+        except sqlite3.OperationalError:
+            pass
+        try:
+            conn.execute("ALTER TABLE print_ledger ADD COLUMN source TEXT DEFAULT 'portal'")
+        except sqlite3.OperationalError:
+            pass
+
         defaults = {
-            'admin_hash': hashlib.sha256('admin'.encode('utf-8')).hexdigest(),
             'currency_symbol': '₱',
             'rate_bw': '2.00',
             'rate_color': '5.00',
-            'pin_expire_hours': '24'
+            'pin_expire_hours': '24',
+            'max_pages_per_job': '50',
+            'public_print': 'on'
         }
         for k, v in defaults.items():
             conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", (k, v))
+
+        cur = conn.cursor()
+        cur.execute("SELECT value FROM settings WHERE key = 'admin_hash'")
+        row = cur.fetchone()
+        if not row:
+            initial_pass = secrets.token_urlsafe(12)
+            admin_hash = generate_password_hash(initial_pass, method='scrypt')
+            conn.execute("INSERT INTO settings (key, value) VALUES ('admin_hash', ?)", (admin_hash,))
+            init_pass_file = os.path.join(os.path.dirname(DB_PATH), 'initial_admin_password.txt')
+            try:
+                fd = os.open(init_pass_file, os.O_CREAT | os.O_WRONLY | os.O_TRUNC, 0o600)
+                with open(fd, 'w') as f:
+                    f.write(initial_pass + "\n")
+            except Exception:
+                pass
 
 def get_setting(key, default=''):
     try:
@@ -98,25 +316,21 @@ def get_rate(is_color=False):
     except Exception:
         return 5.0 if is_color else 2.0
 
-def verify_admin_token(token):
-    if not token:
-        return False
-    exp = ACTIVE_TOKENS.get(token)
-    if exp and exp > time.time():
-        return True
-    if exp:
-        del ACTIVE_TOKENS[token]
-    return False
+def is_public_print_enabled() -> bool:
+    env_val = os.environ.get('PUBLIC_PRINT')
+    if env_val is not None:
+        return env_val.lower() in ['1', 'true', 'on', 'yes']
+    return get_setting('public_print', 'on').lower() in ['1', 'true', 'on', 'yes']
 
-def record_ledger(title, printer, pages, copies, total_pages, colormodel, cost, client_ip, status):
+def record_ledger(title, printer, pages, copies, total_pages, colormodel, cost, client_ip, status, source='portal'):
     try:
         conn = get_db()
         with conn:
             conn.execute("""
                 INSERT INTO print_ledger 
-                (timestamp, job_title, printer, pages, copies, total_pages, colormodel, cost, client_ip, status)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (int(time.time()), title, printer, pages, copies, total_pages, colormodel, cost, client_ip, status))
+                (timestamp, job_title, printer, pages, copies, total_pages, colormodel, cost, client_ip, status, source)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (int(time.time()), title, printer, pages, copies, total_pages, colormodel, cost, client_ip, status, source))
     except Exception:
         pass
 
@@ -189,29 +403,72 @@ def get_pdf_page_count(pdf_path):
         pass
     return 1
 
+def validate_extension(filename: str) -> str:
+    ext = os.path.splitext(filename)[1].lower()
+    if ext not in ALLOWED_EXTENSIONS:
+        raise ValueError(f"File extension '{ext}' is not supported")
+    return ext
+
+def validate_copies(copies_raw) -> int:
+    try:
+        val = int(copies_raw)
+        if val < 1 or val > 99:
+            raise ValueError("Copies must be between 1 and 99")
+        return val
+    except (ValueError, TypeError):
+        raise ValueError("Copies must be an integer between 1 and 99")
+
+def validate_page_range(range_str: str) -> str:
+    range_str = (range_str or '').strip()
+    if range_str and not re.match(r'^[0-9,\- ]+$', range_str):
+        raise ValueError("Invalid page range format")
+    return range_str
+
+def validate_pin(pin_str: str) -> str:
+    pin_str = (pin_str or '').strip()
+    if not re.match(r'^[0-9]{6}$', pin_str):
+        raise ValueError("PIN must be exactly 6 digits")
+    return pin_str
+
 def convert_to_pdf(input_path, original_filename):
-    ext = os.path.splitext(original_filename)[1].lower()
+    ext = validate_extension(original_filename)
     temp_dir = tempfile.mkdtemp(prefix="conv_")
     output_pdf = os.path.join(temp_dir, "converted.pdf")
+    lo_profile = os.path.join(temp_dir, "lo_profile")
 
-    if ext == '.pdf':
-        return input_path, None
+    try:
+        if ext == '.pdf':
+            safe_pdf = os.path.join(temp_dir, "safe_input.pdf")
+            shutil.copy2(input_path, safe_pdf)
+            return safe_pdf, temp_dir
 
-    if ext in ['.heic', '.heif', '.avif', '.webp', '.png', '.jpg', '.jpeg', '.bmp', '.tiff', '.tif']:
-        subprocess.run(['convert', input_path, '-auto-orient', output_pdf], check=True, timeout=30)
-        return output_pdf, temp_dir
+        if ext in ['.heic', '.heif', '.avif', '.webp', '.png', '.jpg', '.jpeg', '.bmp', '.tiff', '.tif']:
+            subprocess.run(
+                ['convert', input_path, '-auto-orient', output_pdf],
+                check=True,
+                capture_output=True,
+                timeout=30
+            )
+            return output_pdf, temp_dir
 
-    if ext in ['.docx', '.doc', '.odt', '.rtf', '.txt', '.csv', '.xlsx', '.xls', '.pptx', '.ppt']:
-        subprocess.run([
-            'libreoffice', '--headless', '--convert-to', 'pdf',
-            input_path, '--outdir', temp_dir
-        ], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=45)
-        base = os.path.splitext(os.path.basename(input_path))[0]
-        conv_file = os.path.join(temp_dir, f"{base}.pdf")
-        if os.path.exists(conv_file):
-            return conv_file, temp_dir
+        if ext in ['.docx', '.doc', '.odt', '.rtf', '.txt', '.csv', '.xlsx', '.xls', '.pptx', '.ppt']:
+            subprocess.run([
+                'libreoffice',
+                '--headless',
+                f'-env:UserInstallation=file://{lo_profile}',
+                '--convert-to', 'pdf',
+                input_path,
+                '--outdir', temp_dir
+            ], check=True, capture_output=True, timeout=45)
+            base = os.path.splitext(os.path.basename(input_path))[0]
+            conv_file = os.path.join(temp_dir, f"{base}.pdf")
+            if os.path.exists(conv_file):
+                return conv_file, temp_dir
 
-    return input_path, None
+        raise ValueError(f"Conversion unsupported for format '{ext}'")
+    except Exception:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        raise
 
 INDEX_HTML = """<!DOCTYPE html>
 <html lang="en" data-theme="gray">
@@ -472,6 +729,31 @@ INDEX_HTML = """<!DOCTYPE html>
             border-color: var(--border-hover);
         }
 
+        /* 2D Vector Icons */
+        .icon {
+            display: inline-block;
+            vertical-align: -2px;
+            width: 13px;
+            height: 13px;
+            stroke: currentColor;
+            fill: none;
+            stroke-width: 2;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+            flex-shrink: 0;
+        }
+        .icon-lg {
+            width: 44px;
+            height: 44px;
+            stroke-width: 1.5;
+            stroke: #5f6368;
+            fill: none;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+            margin-bottom: 6px;
+            display: block;
+        }
+
         /* Main Viewport Container */
         main {
             flex: 1;
@@ -506,17 +788,273 @@ INDEX_HTML = """<!DOCTYPE html>
             .cr-layout {
                 flex-direction: column;
                 overflow-y: auto;
+                height: auto;
             }
             .cr-desk {
-                min-height: 480px;
-                height: 55vh;
+                width: 100%;
+                min-height: 260px;
+                height: 42vh;
+                max-height: 380px;
+                padding: 12px 16px;
             }
             .cr-sidebar {
                 width: 100% !important;
                 max-width: 100% !important;
+                min-width: 0 !important;
                 border-left: none !important;
                 border-top: 1px solid var(--border);
                 height: auto !important;
+            }
+        }
+
+        @media (max-width: 768px) {
+            body {
+                height: auto;
+                min-height: 100dvh;
+                overflow-x: hidden;
+                overflow-y: auto;
+                -webkit-overflow-scrolling: touch;
+            }
+            main {
+                height: auto;
+                min-height: calc(100dvh - 84px);
+                overflow: visible;
+                padding-bottom: 74px;
+            }
+            .tab-content {
+                height: auto;
+                min-height: 100%;
+            }
+            .tab-content.active {
+                display: block;
+            }
+
+            /* Responsive 2-Row Header Reflow via CSS Flex Order */
+            header {
+                height: auto;
+                min-height: 80px;
+                padding: 8px 12px 6px;
+                flex-wrap: wrap;
+                gap: 8px 10px;
+            }
+            .header-brand {
+                order: 1;
+                flex: 1;
+                min-width: 0;
+                gap: 6px;
+            }
+            .header-title {
+                font-size: 12px;
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+            }
+            .header-title .tag {
+                display: none;
+            }
+            .printer-select-wrapper {
+                padding: 2px 6px;
+                max-width: 140px;
+            }
+            #headerPrinterSelect {
+                max-width: 110px;
+                font-size: 11px !important;
+            }
+            .header-controls {
+                order: 2;
+                gap: 6px;
+                flex-shrink: 0;
+            }
+            .btn-lock, .btn-theme {
+                padding: 5px 8px;
+                font-size: 11px;
+            }
+            .btn-lock span {
+                display: none;
+            }
+            .header-nav {
+                order: 3;
+                width: 100%;
+                margin-top: 2px;
+                padding-bottom: 2px;
+                gap: 5px;
+                overflow-x: auto;
+                -webkit-overflow-scrolling: touch;
+                scrollbar-width: none;
+            }
+            .header-nav::-webkit-scrollbar {
+                display: none;
+            }
+            .nav-btn {
+                padding: 6px 12px;
+                font-size: 12px;
+                border-radius: 9999px;
+                flex-shrink: 0;
+            }
+
+            /* Desk & Preview Canvas */
+            .cr-desk {
+                width: 100%;
+                height: 36vh;
+                min-height: 220px;
+                max-height: 320px;
+                padding: 8px 10px;
+            }
+            .cr-doc-title {
+                max-width: 170px;
+                font-size: 12px;
+            }
+            .cr-empty-desk {
+                padding: 14px;
+                gap: 4px;
+            }
+            .cr-empty-desk .icon-lg {
+                width: 32px;
+                height: 32px;
+                margin-bottom: 2px;
+            }
+            .cr-empty-desk .empty-title {
+                font-size: 13px;
+            }
+            .cr-empty-desk .empty-subtitle {
+                font-size: 11px;
+                margin-bottom: 4px;
+            }
+            .cr-empty-desk .empty-btn {
+                padding: 4px 14px;
+                font-size: 11px;
+            }
+            .cr-desk-footer-pill {
+                font-size: 10px;
+                padding: 3px 10px;
+                max-width: 95%;
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+            }
+
+            /* Settings Sidebar */
+            .cr-sidebar {
+                padding-bottom: 75px;
+            }
+            .cr-sidebar-header {
+                padding: 12px 16px 10px;
+            }
+            .cr-row {
+                padding: 9px 14px;
+                min-height: 44px;
+            }
+            .cr-row-control {
+                width: 55%;
+                max-width: 200px;
+            }
+            select, .cr-select, .cr-input {
+                font-size: 14px;
+                padding: 6px 22px 6px 8px;
+                min-height: 34px;
+            }
+            .cr-checkbox-row {
+                padding: 4px 0;
+            }
+            .cr-checkbox-row input[type="checkbox"] {
+                width: 18px;
+                height: 18px;
+            }
+
+            /* Fixed Floating Bottom Print Bar */
+            .cr-bottom-bar {
+                position: fixed;
+                bottom: 0;
+                left: 0;
+                right: 0;
+                width: 100%;
+                z-index: 100;
+                margin-top: 0;
+                padding: 10px 16px;
+                background: var(--surface);
+                border-top: 1px solid var(--border);
+                box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.25);
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                gap: 12px;
+            }
+            .cr-btn-pill {
+                padding: 8px 18px;
+                font-size: 13px;
+                min-height: 38px;
+            }
+            .cr-btn-print {
+                flex: 1;
+                max-width: 200px;
+                font-size: 14px;
+                font-weight: 600;
+                padding: 8px 24px;
+            }
+
+            /* ID Studio Mobile */
+            #idPreviewDesk {
+                height: 36vh;
+                min-height: 220px;
+                max-height: 320px;
+                padding: 8px 10px;
+            }
+            #idSheetTitleTag {
+                max-width: 180px;
+                font-size: 11px;
+            }
+            #idEditControls .cr-row-control {
+                width: 60%;
+                max-width: 220px;
+            }
+            .id-bg-btn, .id-crop-btn {
+                padding: 4px 8px !important;
+                min-height: 28px;
+            }
+
+            /* General Tabs on Mobile */
+            .cr-page-container {
+                padding: 12px 12px 80px;
+                margin: 6px auto;
+                width: 100%;
+            }
+            .cr-card {
+                padding: 14px;
+                margin-bottom: 12px;
+            }
+            .cr-table-wrapper {
+                overflow-x: auto;
+                -webkit-overflow-scrolling: touch;
+                width: 100%;
+                margin-top: 8px;
+                border: 1px solid var(--border);
+                border-radius: var(--radius-sm);
+            }
+            .cr-table-wrapper table {
+                min-width: 580px;
+            }
+            #tab-settings div[style*="grid-template-columns"] {
+                grid-template-columns: repeat(2, 1fr) !important;
+                gap: 8px !important;
+            }
+            #adminLockedState div {
+                flex-direction: column;
+                max-width: 100% !important;
+            }
+            #adminUnlockedState div {
+                max-width: 100% !important;
+            }
+            #adminRateBw, #adminRateColor {
+                width: 100%;
+            }
+            .modal-card {
+                width: 92%;
+                max-width: 360px;
+                padding: 18px;
+            }
+            .toast {
+                bottom: 74px;
+                max-width: 90%;
             }
         }
 
@@ -556,13 +1094,22 @@ INDEX_HTML = """<!DOCTYPE html>
 
         .cr-doc-title {
             font-size: 13px;
-            font-weight: 500;
-            color: #ffffff;
-            text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+            font-weight: 600;
+            color: var(--text-primary);
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
             max-width: 420px;
+        }
+
+        .cr-desk-top-toolbar .cr-btn-pill.cr-btn-cancel {
+            background: var(--surface-elevated);
+            border: 1px solid var(--border);
+            color: var(--text-primary);
+        }
+        .cr-desk-top-toolbar .cr-btn-pill.cr-btn-cancel:hover {
+            background: var(--surface-hover);
+            border-color: var(--border-hover);
         }
 
         .cr-desk-pagination {
@@ -604,6 +1151,8 @@ INDEX_HTML = """<!DOCTYPE html>
             align-items: center;
             justify-content: center;
             overflow: hidden;
+            max-width: 100%;
+            max-height: 100%;
             transition: width 0.2s cubic-bezier(0.16, 1, 0.3, 1),
                         height 0.2s cubic-bezier(0.16, 1, 0.3, 1),
                         filter 0.2s ease;
@@ -656,7 +1205,6 @@ INDEX_HTML = """<!DOCTYPE html>
 
         .cr-empty-desk {
             text-align: center;
-            color: #bdc1c6;
             position: absolute;
             display: flex;
             flex-direction: column;
@@ -666,9 +1214,38 @@ INDEX_HTML = """<!DOCTYPE html>
             padding: 24px;
             border-radius: var(--radius-md);
             transition: background 0.15s;
+            z-index: 5;
         }
         .cr-empty-desk:hover {
-            background: rgba(255, 255, 255, 0.04);
+            background: rgba(0, 0, 0, 0.03);
+        }
+        .cr-empty-desk .empty-title {
+            font-weight: 600;
+            font-size: 15px;
+            color: #202124 !important;
+        }
+        .cr-empty-desk .empty-subtitle {
+            font-size: 12px;
+            color: #5f6368 !important;
+            margin-bottom: 8px;
+        }
+        .cr-empty-desk .empty-btn {
+            font-size: 12px;
+            pointer-events: none;
+            background: #ffffff !important;
+            border: 1px solid #dadce0 !important;
+            color: #1a73e8 !important;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+            border-radius: 9999px;
+            padding: 6px 18px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 500;
+        }
+        .cr-empty-desk:hover .empty-btn {
+            background: #f8fafd !important;
+            border-color: #aecbfa !important;
         }
 
         /* Right Settings Sidebar */
@@ -733,7 +1310,7 @@ INDEX_HTML = """<!DOCTYPE html>
             align-items: center;
         }
 
-        .cr-select {
+        select, .cr-select {
             width: 100%;
             background-color: var(--input-bg);
             color: var(--text-primary);
@@ -751,7 +1328,11 @@ INDEX_HTML = """<!DOCTYPE html>
             white-space: nowrap;
             overflow: hidden;
         }
-        .cr-select:focus, .cr-input:focus {
+        select option, .cr-select option {
+            background-color: var(--surface);
+            color: var(--text-primary);
+        }
+        .cr-select:focus, .cr-input:focus, select:focus {
             border-color: var(--input-focus);
         }
 
@@ -764,6 +1345,10 @@ INDEX_HTML = """<!DOCTYPE html>
             padding: 5px 8px;
             font-size: 12px;
             outline: none;
+        }
+        ::placeholder {
+            color: var(--text-tertiary);
+            opacity: 1;
         }
 
         .cr-input-number {
@@ -862,7 +1447,20 @@ INDEX_HTML = """<!DOCTYPE html>
         }
 
         .cr-btn-cancel:hover {
-            background: rgba(255, 255, 255, 0.08);
+            background: var(--surface-hover);
+        }
+
+        .id-bg-btn[data-bg="blue"] {
+            color: var(--accent) !important;
+        }
+        .id-bg-btn[data-bg="red"] {
+            color: var(--danger) !important;
+        }
+        .id-crop-btn.active, .id-bg-btn.active {
+            background: var(--surface-hover);
+            border-color: var(--accent);
+            color: var(--accent);
+            font-weight: 600;
         }
 
         .cr-btn-print {
@@ -940,6 +1538,7 @@ INDEX_HTML = """<!DOCTYPE html>
             right: 24px;
             background: var(--surface-elevated);
             border: 1px solid var(--border);
+            color: var(--text-primary);
             box-shadow: 0 10px 25px rgba(0,0,0,0.3);
             border-radius: var(--radius-sm);
             padding: 10px 18px;
@@ -970,6 +1569,7 @@ INDEX_HTML = """<!DOCTYPE html>
         .modal-card {
             background: var(--surface);
             border: 1px solid var(--border);
+            color: var(--text-primary);
             border-radius: var(--radius-md);
             padding: 24px;
             max-width: 400px;
@@ -1003,8 +1603,8 @@ INDEX_HTML = """<!DOCTYPE html>
     </nav>
 
     <div class="header-controls">
-        <button class="btn-lock" id="btnAdminLock">🔒 Locked</button>
-        <button class="btn-theme" id="btnThemeToggle" title="Toggle theme">🌓</button>
+        <button class="btn-lock" id="btnAdminLock"><svg class="icon" viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg> <span>Locked</span></button>
+        <button class="btn-theme" id="btnThemeToggle" title="Toggle theme" aria-label="Toggle theme"><svg class="icon" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm0 18a8 8 0 0 1 0-16v16z"/></svg></button>
     </div>
 </header>
 
@@ -1022,12 +1622,12 @@ INDEX_HTML = """<!DOCTYPE html>
                             <span id="pageIndicator">1 / 1</span>
                             <button type="button" class="cr-page-btn" id="btnNext">›</button>
                         </div>
-                        <button type="button" class="cr-btn-pill cr-btn-cancel" id="btnClearPreview" style="padding: 2px 10px; font-size: 11px;">✕ Clear</button>
+                        <button type="button" class="cr-btn-pill cr-btn-cancel" id="btnClearPreview" style="padding: 2px 10px; font-size: 11px;"><svg class="icon" viewBox="0 0 24 24" style="width: 11px; height: 11px;"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg> Clear</button>
                     </div>
                 </div>
 
                 <div class="cr-desk-viewport" id="printDeskViewport">
-                    <div class="paper-sheet" id="paperSheet" style="width: 440px; height: 622px;">
+                    <div class="paper-sheet" id="paperSheet">
                         <div class="printable-area" id="printableArea">
                             <div class="content-render-wrap" id="renderWrap">
                                 <canvas id="pdfCanvas" style="display: none;"></canvas>
@@ -1038,10 +1638,10 @@ INDEX_HTML = """<!DOCTYPE html>
                     </div>
 
                     <div id="previewEmptyState" class="cr-empty-desk" onclick="document.getElementById('printFileInput').click()">
-                        <div style="font-size: 40px; margin-bottom: 4px; opacity: 0.85;">📄</div>
-                        <div style="font-weight: 500; font-size: 15px; color: var(--text-primary);">No document loaded</div>
-                        <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 8px;">Drop PDF, Word, Excel, or Image to inspect</div>
-                        <button type="button" class="cr-btn-pill cr-btn-cancel" style="font-size: 12px; pointer-events: none;">Choose File...</button>
+                        <svg class="icon-lg" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>
+                        <div class="empty-title">No document loaded</div>
+                        <div class="empty-subtitle">Drop PDF, Word, Excel, or Image to inspect</div>
+                        <button type="button" class="empty-btn">Choose File...</button>
                     </div>
                 </div>
 
@@ -1128,7 +1728,7 @@ INDEX_HTML = """<!DOCTYPE html>
                 <!-- Collapsible More Settings Accordion -->
                 <div class="cr-more-toggle" id="crMoreToggle">
                     <span>More settings</span>
-                    <span id="crMoreArrow" style="font-size: 11px;">▾</span>
+                    <svg id="crMoreArrow" class="icon" viewBox="0 0 24 24" style="width: 12px; height: 12px; transition: transform 0.15s ease;"><polyline points="6 9 12 15 18 9"></polyline></svg>
                 </div>
 
                 <div class="cr-more-content" id="crMoreContent">
@@ -1188,7 +1788,7 @@ INDEX_HTML = """<!DOCTYPE html>
                     </div>
 
                     <!-- Custom Margins Box -->
-                    <div id="customMarginBox" class="cr-row" style="display: none; flex-direction: column; align-items: stretch; gap: 8px; background: rgba(0,0,0,0.15); padding: 8px 20px;">
+                    <div id="customMarginBox" class="cr-row" style="display: none; flex-direction: column; align-items: stretch; gap: 8px; background: var(--surface-elevated); border: 1px solid var(--border); border-radius: var(--radius-sm); margin: 4px 20px 8px; padding: 8px 12px;">
                         <div style="font-size: 11px; color: var(--text-secondary);">Custom Margins (mm)</div>
                         <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px;">
                             <div><span style="font-size: 10px; color: var(--text-tertiary);">Top</span><input type="number" id="mTop" class="cr-input" value="10" min="0" max="60"></div>
@@ -1269,9 +1869,9 @@ INDEX_HTML = """<!DOCTYPE html>
                         </div>
                     </div>
                     <div class="cr-row" id="pinInputWrapper" style="display: none; padding-top: 0;">
-                        <span class="cr-row-label" style="font-size: 11px; color: var(--text-tertiary);">4-Digit PIN</span>
+                        <span class="cr-row-label" style="font-size: 11px; color: var(--text-tertiary);">6-Digit PIN</span>
                         <div class="cr-row-control">
-                            <input type="password" id="printPin" class="cr-input" maxlength="4" placeholder="••••" style="text-align: center; font-size: 16px; letter-spacing: 0.25em; font-family: var(--font-mono); width: 80px;">
+                            <input type="password" id="printPin" class="cr-input" maxlength="6" placeholder="••••••" style="text-align: center; font-size: 16px; letter-spacing: 0.25em; font-family: var(--font-mono); width: 110px;">
                         </div>
                     </div>
                 </div>
@@ -1299,8 +1899,8 @@ INDEX_HTML = """<!DOCTYPE html>
                 <div class="cr-desk-top-toolbar" style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
                     <div class="cr-doc-title" id="idSheetTitleTag">4×6" Glossy Sheet • Combo Rush (2 pcs 2×2" + 16 pcs 1×1")</div>
                     <div style="display: flex; gap: 8px;">
-                        <button type="button" class="cr-btn-pill cr-btn-cancel" id="btnIdDownload" style="padding: 3px 10px; font-size: 11px;">💾 Save PNG</button>
-                        <button type="button" class="cr-btn-pill cr-btn-print" id="btnIdDirectPrint" style="padding: 3px 14px; font-size: 11px;">🖨️ Print ID Sheet</button>
+                        <button type="button" class="cr-btn-pill cr-btn-cancel" id="btnIdDownload" style="padding: 3px 10px; font-size: 11px;"><svg class="icon" viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg> Save PNG</button>
+                        <button type="button" class="cr-btn-pill cr-btn-print" id="btnIdDirectPrint" style="padding: 3px 14px; font-size: 11px;"><svg class="icon" viewBox="0 0 24 24"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg> Print ID Sheet</button>
                     </div>
                 </div>
 
@@ -1309,10 +1909,10 @@ INDEX_HTML = """<!DOCTYPE html>
                         <canvas id="idSheetCanvas" style="width: 100%; height: 100%; object-fit: contain; display: none;"></canvas>
                     </div>
                     <div id="idEmptyState" class="cr-empty-desk" onclick="document.getElementById('idFileInput').click()">
-                        <div style="font-size: 40px; margin-bottom: 4px; opacity: 0.85;">📸</div>
-                        <div style="font-weight: 500; font-size: 15px; color: var(--text-primary);">Print Shop ID Studio Ready</div>
-                        <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 8px;">Upload portrait photo on right to auto-generate packages</div>
-                        <button type="button" class="cr-btn-pill cr-btn-cancel" style="font-size: 12px; pointer-events: none;">Choose Portrait...</button>
+                        <svg class="icon-lg" viewBox="0 0 24 24"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path><circle cx="12" cy="13" r="4"></circle></svg>
+                        <div class="empty-title">Print Shop ID Studio Ready</div>
+                        <div class="empty-subtitle">Upload portrait photo on right to auto-generate packages</div>
+                        <button type="button" class="empty-btn">Choose Portrait...</button>
                     </div>
                 </div>
 
@@ -1350,7 +1950,7 @@ INDEX_HTML = """<!DOCTYPE html>
                         <div class="cr-row-control" style="gap: 4px;">
                             <button type="button" class="cr-btn-pill cr-btn-cancel id-crop-btn active" data-aspect="1:1" style="padding: 3px 8px; font-size: 11px;">1:1</button>
                             <button type="button" class="cr-btn-pill cr-btn-cancel id-crop-btn" data-aspect="35:45" style="padding: 3px 8px; font-size: 11px;">35:45</button>
-                            <button type="button" class="cr-btn-pill cr-btn-cancel" id="btnIdRotate" style="padding: 3px 8px; font-size: 11px;" title="Rotate 90°">↻</button>
+                            <button type="button" class="cr-btn-pill cr-btn-cancel" id="btnIdRotate" style="padding: 3px 8px; font-size: 11px;" title="Rotate 90°"><svg class="icon" viewBox="0 0 24 24" style="width: 12px; height: 12px;"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"></path></svg></button>
                         </div>
                     </div>
 
@@ -1387,8 +1987,8 @@ INDEX_HTML = """<!DOCTYPE html>
                         <div class="cr-row-control" style="gap: 3px;">
                             <button type="button" class="cr-btn-pill cr-btn-cancel id-bg-btn active" data-bg="original" style="padding: 2px 6px; font-size: 10px;">Orig</button>
                             <button type="button" class="cr-btn-pill cr-btn-cancel id-bg-btn" data-bg="white" style="padding: 2px 6px; font-size: 10px;">White</button>
-                            <button type="button" class="cr-btn-pill cr-btn-cancel id-bg-btn" data-bg="blue" style="padding: 2px 6px; font-size: 10px; color: #8ab4f8;">Blue</button>
-                            <button type="button" class="cr-btn-pill cr-btn-cancel id-bg-btn" data-bg="red" style="padding: 2px 6px; font-size: 10px; color: #f28b82;">Red</button>
+                            <button type="button" class="cr-btn-pill cr-btn-cancel id-bg-btn" data-bg="blue" style="padding: 2px 6px; font-size: 10px;">Blue</button>
+                            <button type="button" class="cr-btn-pill cr-btn-cancel id-bg-btn" data-bg="red" style="padding: 2px 6px; font-size: 10px;">Red</button>
                         </div>
                     </div>
 
@@ -1463,13 +2063,23 @@ INDEX_HTML = """<!DOCTYPE html>
     <!-- TAB 3: CONFIDENTIAL PIN RELEASE -->
     <div class="tab-content" id="tab-pin">
         <div class="cr-page-container">
+            <div class="cr-card" style="margin-bottom: 16px;">
+                <h3 style="font-size: 15px; font-weight: 600; color: var(--text-primary); margin-bottom: 6px;">Direct Job Release</h3>
+                <p style="font-size: 12px; color: var(--text-secondary); margin-bottom: 12px;">Walk-up release: enter your Job ID and 6-digit release PIN to send your held document directly to the printer.</p>
+                <div style="display: flex; gap: 10px; flex-wrap: wrap; align-items: center;">
+                    <input type="text" id="directJobId" class="cr-input" placeholder="Job ID (e.g. pin_...)" style="flex: 1; min-width: 180px;">
+                    <input type="password" id="directJobPin" class="cr-input" maxlength="6" placeholder="••••••" style="width: 110px; text-align: center; font-family: var(--font-mono); letter-spacing: 0.25em;">
+                    <button type="button" class="cr-btn-pill cr-btn-print" id="btnDirectPinRelease" style="padding: 6px 16px;">Release to Printer</button>
+                </div>
+            </div>
+
             <div class="cr-card">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
                     <div>
                         <h2 style="font-size: 16px; font-weight: 600; color: var(--text-primary);">Confidential Print Queue</h2>
-                        <p style="font-size: 12px; color: var(--text-secondary);">Jobs held in memory until released with your 4-digit PIN</p>
+                        <p style="font-size: 12px; color: var(--text-secondary);">Encrypted queue • Administrator authenticated view</p>
                     </div>
-                    <button class="cr-btn-pill cr-btn-cancel" id="btnRefreshPinList" style="font-size: 12px;">↻ Refresh</button>
+                    <button class="cr-btn-pill cr-btn-cancel" id="btnRefreshPinList" style="font-size: 12px;"><svg class="icon" viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg> Refresh</button>
                 </div>
 
                 <div class="cr-table-wrapper">
@@ -1486,7 +2096,7 @@ INDEX_HTML = """<!DOCTYPE html>
                             </tr>
                         </thead>
                         <tbody id="pinTableBody">
-                            <tr><td colspan="7" style="text-align: center; color: var(--text-tertiary);">No confidential jobs held</td></tr>
+                            <tr><td colspan="7" style="text-align: center; color: var(--text-tertiary);">Loading queue...</td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -1501,9 +2111,9 @@ INDEX_HTML = """<!DOCTYPE html>
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
                     <div>
                         <h2 style="font-size: 16px; font-weight: 600; color: var(--text-primary);">Print Accounting & Audit Ledger</h2>
-                        <p style="font-size: 12px; color: var(--text-secondary);">Complete log of all print jobs processed</p>
+                        <p style="font-size: 12px; color: var(--text-secondary);">Administrator view • Complete log of all print jobs</p>
                     </div>
-                    <a href="/api/reports/export.csv" class="cr-btn-pill cr-btn-cancel" style="font-size: 12px; text-decoration: none;" download>📥 Export CSV</a>
+                    <button type="button" id="btnExportCsv" class="cr-btn-pill cr-btn-cancel" style="font-size: 12px;"><svg class="icon" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg> Export CSV</button>
                 </div>
 
                 <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; margin-bottom: 20px;">
@@ -1577,14 +2187,15 @@ INDEX_HTML = """<!DOCTYPE html>
                         Appliance controls are password-protected.
                     </p>
                     <div style="display: flex; gap: 8px; max-width: 320px;">
-                        <input type="password" id="adminPassInput" class="cr-input" placeholder="Password (default: admin)">
+                        <input type="password" id="adminPassInput" class="cr-input" placeholder="Administrator Password">
                         <button class="cr-btn-pill cr-btn-print" id="btnUnlockAdmin">Unlock</button>
                     </div>
                 </div>
 
                 <div id="adminUnlockedState" style="display: none;">
-                    <div style="font-size: 12px; color: var(--success); font-weight: 600; margin-bottom: 12px;">
-                        ✓ Administrator Mode Active
+                    <div style="font-size: 12px; color: var(--success); font-weight: 600; margin-bottom: 12px; display: flex; align-items: center; gap: 6px;">
+                        <svg class="icon" viewBox="0 0 24 24" style="stroke: var(--success);"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                        <span>Administrator Mode Active</span>
                     </div>
 
                     <div style="margin-bottom: 16px;">
@@ -1599,10 +2210,10 @@ INDEX_HTML = """<!DOCTYPE html>
                     <div style="padding-top: 14px; border-top: 1px solid var(--border);">
                         <label style="font-size: 11px; color: var(--text-secondary); text-transform: uppercase; font-weight: 600; display: block; margin-bottom: 8px;">Hardware Power & Spool Actions</label>
                         <div style="display: flex; flex-wrap: wrap; gap: 8px;">
-                            <button class="cr-btn-pill cr-btn-cancel" id="btnAdminRestartCups">🔄 Restart CUPS Spooler</button>
-                            <button class="cr-btn-pill cr-btn-cancel" id="btnAdminPurgeCache">🧹 Purge Temporary Cache</button>
-                            <button class="cr-btn-pill cr-btn-cancel" id="btnAdminReboot" style="color: var(--warning);">⚡ Reboot Appliance</button>
-                            <button class="cr-btn-pill cr-btn-cancel" id="btnAdminShutdown" style="color: var(--danger);">🛑 Shut Down</button>
+                            <button class="cr-btn-pill cr-btn-cancel" id="btnAdminRestartCups"><svg class="icon" viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg> Restart CUPS Spooler</button>
+                            <button class="cr-btn-pill cr-btn-cancel" id="btnAdminPurgeCache"><svg class="icon" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg> Purge Temporary Cache</button>
+                            <button class="cr-btn-pill cr-btn-cancel" id="btnAdminReboot" style="color: var(--warning);"><svg class="icon" viewBox="0 0 24 24" style="stroke: var(--warning);"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"></path><line x1="12" y1="2" x2="12" y2="12"></line></svg> Reboot Appliance</button>
+                            <button class="cr-btn-pill cr-btn-cancel" id="btnAdminShutdown" style="color: var(--danger);"><svg class="icon" viewBox="0 0 24 24" style="stroke: var(--danger);"><circle cx="12" cy="12" r="10"></circle><rect x="9" y="9" width="6" height="6"></rect></svg> Shut Down</button>
                         </div>
                     </div>
                 </div>
@@ -1617,8 +2228,8 @@ INDEX_HTML = """<!DOCTYPE html>
         <h3 style="font-size: 16px; font-weight: 600; margin-bottom: 8px;">Release Confidential Job</h3>
         <p style="font-size: 12px; color: var(--text-secondary); margin-bottom: 16px;" id="pinModalJobTitle">Document</p>
         <div style="margin-bottom: 14px;">
-            <label style="font-size: 11px; color: var(--text-secondary); text-transform: uppercase; display: block; margin-bottom: 6px;">Enter 4-Digit Release PIN</label>
-            <input type="password" id="pinModalCode" class="cr-input" maxlength="4" placeholder="••••" style="text-align: center; font-size: 22px; letter-spacing: 0.35em; font-family: var(--font-mono);">
+            <label style="font-size: 11px; color: var(--text-secondary); text-transform: uppercase; display: block; margin-bottom: 6px;">Enter 6-Digit Release PIN</label>
+            <input type="password" id="pinModalCode" class="cr-input" maxlength="6" placeholder="••••••" style="text-align: center; font-size: 22px; letter-spacing: 0.35em; font-family: var(--font-mono);">
         </div>
         <div style="display: flex; gap: 10px; justify-content: flex-end;">
             <button class="cr-btn-pill cr-btn-cancel" id="btnCancelPinModal">Cancel</button>
@@ -1692,7 +2303,7 @@ INDEX_HTML = """<!DOCTYPE html>
     if (crMoreToggle) {
         crMoreToggle.addEventListener('click', () => {
             const isOpen = crMoreContent.classList.toggle('open');
-            crMoreArrow.textContent = isOpen ? '▴' : '▾';
+            crMoreArrow.style.transform = isOpen ? 'rotate(180deg)' : 'rotate(0deg)';
         });
     }
 
@@ -1770,8 +2381,13 @@ INDEX_HTML = """<!DOCTYPE html>
         }
 
         const deskViewport = document.getElementById('printDeskViewport');
-        const availW = deskViewport ? Math.max(deskViewport.clientWidth - 40, 480) : 600;
-        const availH = deskViewport ? Math.max(deskViewport.clientHeight - 40, 520) : 750;
+        const isMobile = window.innerWidth <= 768;
+        const padX = isMobile ? 12 : 36;
+        const padY = isMobile ? 12 : 36;
+        const rawW = deskViewport && deskViewport.clientWidth > 0 ? deskViewport.clientWidth - padX : (isMobile ? 280 : 600);
+        const rawH = deskViewport && deskViewport.clientHeight > 0 ? deskViewport.clientHeight - padY : (isMobile ? 220 : 750);
+        const availW = Math.max(rawW, 80);
+        const availH = Math.max(rawH, 120);
 
         let paperPhysW = isLandscape ? spec.height : spec.width;
         let paperPhysH = isLandscape ? spec.width : spec.height;
@@ -2013,8 +2629,8 @@ INDEX_HTML = """<!DOCTYPE html>
 
         const isPin = document.getElementById('chkPinHold').checked;
         const pin = document.getElementById('printPin').value.trim();
-        if (isPin && (!pin || pin.length !== 4)) {
-            showToast('Please enter a 4-digit PIN', 'error');
+        if (isPin && (!pin || pin.length !== 6 || !/^[0-9]{6}$/.test(pin))) {
+            showToast('Please enter a 6-digit PIN', 'error');
             return;
         }
 
@@ -2045,7 +2661,7 @@ INDEX_HTML = """<!DOCTYPE html>
             const res = await fetch(endpoint, { method: 'POST', body: formData });
             const data = await res.json();
             if (data.success) {
-                showToast(isPin ? 'Document held in confidential queue!' : 'Print job queued successfully!', 'success');
+                showToast(isPin ? ('Document held! Job ID: ' + (data.job_id || '')) : 'Print job queued successfully!', 'success');
             } else {
                 showToast('Error: ' + data.error, 'error');
             }
@@ -2193,8 +2809,13 @@ INDEX_HTML = """<!DOCTYPE html>
         // Dynamically scale display preview to fill the viewport
         const idDesk = document.getElementById('idPreviewDesk');
         const idViewport = idDesk ? (idDesk.querySelector('.cr-desk-viewport') || idDesk) : null;
-        const availW = idViewport ? Math.max(idViewport.clientWidth - 40, 460) : 560;
-        const availH = idViewport ? Math.max(idViewport.clientHeight - 40, 520) : 750;
+        const isMobileId = window.innerWidth <= 768;
+        const padXId = isMobileId ? 12 : 36;
+        const padYId = isMobileId ? 12 : 36;
+        const rawWId = idViewport && idViewport.clientWidth > 0 ? idViewport.clientWidth - padXId : (isMobileId ? 280 : 560);
+        const rawHId = idViewport && idViewport.clientHeight > 0 ? idViewport.clientHeight - padYId : (isMobileId ? 220 : 750);
+        const availW = Math.max(rawWId, 80);
+        const availH = Math.max(rawHId, 120);
 
         let displayRatio = sheetH / sheetW;
         let dispW, dispH;
@@ -2375,7 +2996,7 @@ INDEX_HTML = """<!DOCTYPE html>
             } catch (e) {
                 showToast('Failed to reach print server', 'error');
             } finally {
-                btn.disabled = false; btn.textContent = '🖨️ Print ID Sheet';
+                btn.disabled = false; btn.innerHTML = '<svg class="icon" viewBox="0 0 24 24"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg> Print ID Sheet';
                 btn2.disabled = false;
             }
         }, 'image/png');
@@ -2487,32 +3108,73 @@ INDEX_HTML = """<!DOCTYPE html>
     // CONFIDENTIAL PIN QUEUE
     // ==========================================
     async function loadPinList() {
+        const tbody = document.getElementById('pinTableBody');
         try {
-            const res = await fetch('/api/pin/list');
+            const headers = {};
+            if (currentAdminToken) headers['X-Admin-Token'] = currentAdminToken;
+            const res = await fetch('/api/pin/list', { headers });
+            if (res.status === 401) {
+                tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; padding: 24px; color: var(--text-secondary);"><svg class="icon" viewBox="0 0 24 24" style="width: 20px; height: 20px; margin: 0 auto 8px auto; display: block;"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>Administrator login required to inspect held queue. <button class="cr-btn-pill cr-btn-print" style="margin-left: 8px; padding: 3px 10px; font-size: 11px;" onclick="window.switchTab(\'settings\')">Log In</button></td></tr>';
+                return;
+            }
             const data = await res.json();
-            const tbody = document.getElementById('pinTableBody');
             tbody.innerHTML = '';
             if (data.jobs && data.jobs.length > 0) {
                 data.jobs.forEach(j => {
                     const tr = document.createElement('tr');
                     tr.innerHTML = `
                         <td>${j.created_at}</td>
-                        <td style="font-weight: 500;">🔒 ${j.filename}</td>
+                        <td style="font-weight: 500;"><svg class="icon" viewBox="0 0 24 24" style="width: 12px; height: 12px; margin-right: 4px;"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>${j.filename}</td>
                         <td>${j.pages}</td>
                         <td>${j.copies}</td>
                         <td>${j.colormodel}</td>
-                        <td style="color: var(--accent); font-weight: 500;">₱${j.cost.toFixed(2)}</td>
+                        <td style="color: var(--accent); font-weight: 500;">₱${Number(j.cost).toFixed(2)}</td>
                         <td><button class="cr-btn-pill cr-btn-print" style="padding: 2px 10px; font-size: 11px;" onclick="openPinModal('${j.job_id}', '${j.filename}')">Release</button></td>
                     `;
                     tbody.appendChild(tr);
                 });
             } else {
-                tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: var(--text-tertiary);">No confidential jobs held</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: var(--text-tertiary);">No confidential jobs held in queue</td></tr>';
             }
         } catch (e) {
             console.error(e);
+            tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: var(--danger);">Failed to load queue</td></tr>';
         }
     }
+
+    // Direct walk-up release handler
+    document.getElementById('btnDirectPinRelease').addEventListener('click', async () => {
+        const jobId = document.getElementById('directJobId').value.trim();
+        const pin = document.getElementById('directJobPin').value.trim();
+        if (!jobId) {
+            showToast('Please enter your Job ID', 'error');
+            return;
+        }
+        if (!pin || pin.length !== 6 || !/^[0-9]{6}$/.test(pin)) {
+            showToast('PIN must be exactly 6 digits', 'error');
+            return;
+        }
+
+        const formData = new FormData();
+        formData.append('job_id', jobId);
+        formData.append('pin', pin);
+
+        showToast('Verifying PIN and unlocking job...', 'info');
+        try {
+            const res = await fetch('/api/pin/release', { method: 'POST', body: formData });
+            const data = await res.json();
+            if (data.success) {
+                showToast('Job unlocked and sent to printer!', 'success');
+                document.getElementById('directJobId').value = '';
+                document.getElementById('directJobPin').value = '';
+                if (currentAdminToken) loadPinList();
+            } else {
+                showToast('Error: ' + data.error, 'error');
+            }
+        } catch (e) {
+            showToast('Direct release request failed', 'error');
+        }
+    });
 
     window.openPinModal = function(jobId, filename) {
         pendingReleaseJobId = jobId;
@@ -2525,7 +3187,10 @@ INDEX_HTML = """<!DOCTYPE html>
     });
     document.getElementById('btnConfirmReleasePin').addEventListener('click', async () => {
         const pin = document.getElementById('pinModalCode').value.trim();
-        if (!pin) return;
+        if (!pin || pin.length !== 6 || !/^[0-9]{6}$/.test(pin)) {
+            showToast('PIN must be exactly 6 digits', 'error');
+            return;
+        }
 
         const formData = new FormData();
         formData.append('job_id', pendingReleaseJobId);
@@ -2550,15 +3215,24 @@ INDEX_HTML = """<!DOCTYPE html>
     // HISTORY & TELEMETRY
     // ==========================================
     async function loadHistory() {
+        const tbody = document.getElementById('historyTableBody');
         try {
-            const res = await fetch('/api/reports/ledger');
+            const headers = {};
+            if (currentAdminToken) headers['X-Admin-Token'] = currentAdminToken;
+            const res = await fetch('/api/reports/ledger', { headers });
+            if (res.status === 401) {
+                document.getElementById('statTotalJobs').textContent = '--';
+                document.getElementById('statTotalPages').textContent = '--';
+                document.getElementById('statTotalRevenue').textContent = '--';
+                tbody.innerHTML = '<tr><td colspan="8" style="text-align: center; padding: 24px; color: var(--text-secondary);"><svg class="icon" viewBox="0 0 24 24" style="width: 20px; height: 20px; margin: 0 auto 8px auto; display: block;"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>Administrator login required to inspect audit ledger. <button class="cr-btn-pill cr-btn-print" style="margin-left: 8px; padding: 3px 10px; font-size: 11px;" onclick="window.switchTab(\'settings\')">Log In</button></td></tr>';
+                return;
+            }
             const data = await res.json();
             if (data.stats) {
                 document.getElementById('statTotalJobs').textContent = data.stats.total_jobs;
                 document.getElementById('statTotalPages').textContent = data.stats.total_pages;
                 document.getElementById('statTotalRevenue').textContent = data.stats.total_revenue;
             }
-            const tbody = document.getElementById('historyTableBody');
             tbody.innerHTML = '';
             if (data.jobs && data.jobs.length > 0) {
                 data.jobs.forEach(j => {
@@ -2580,8 +3254,19 @@ INDEX_HTML = """<!DOCTYPE html>
             }
         } catch (e) {
             console.error(e);
+            tbody.innerHTML = '<tr><td colspan="8" style="text-align: center; color: var(--danger);">Failed to load history</td></tr>';
         }
     }
+
+    document.getElementById('btnExportCsv').addEventListener('click', (e) => {
+        e.preventDefault();
+        if (!currentAdminToken) {
+            showToast('Administrator login required to export audit ledger', 'error');
+            window.switchTab('settings');
+            return;
+        }
+        window.location.href = '/api/reports/export.csv?token=' + encodeURIComponent(currentAdminToken);
+    });
 
     async function loadTelemetry() {
         try {
@@ -2603,17 +3288,21 @@ INDEX_HTML = """<!DOCTYPE html>
         const formData = new FormData();
         formData.append('password', pass);
 
-        const res = await fetch('/api/admin/auth', { method: 'POST', body: formData });
-        const data = await res.json();
-        if (data.success) {
-            currentAdminToken = data.token;
-            sessionStorage.setItem('admin_token', currentAdminToken);
-            document.getElementById('adminLockedState').style.display = 'none';
-            document.getElementById('adminUnlockedState').style.display = 'block';
-            document.getElementById('btnAdminLock').textContent = '🔓 Admin';
-            showToast('Administrator privileges unlocked', 'success');
-        } else {
-            showToast('Invalid password', 'error');
+        try {
+            const res = await fetch('/api/admin/auth', { method: 'POST', body: formData });
+            const data = await res.json();
+            if (data.success) {
+                currentAdminToken = data.token;
+                sessionStorage.setItem('admin_token', currentAdminToken);
+                document.getElementById('adminLockedState').style.display = 'none';
+                document.getElementById('adminUnlockedState').style.display = 'block';
+                document.getElementById('btnAdminLock').innerHTML = '<svg class="icon" viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 9.9-1"></path></svg> <span>Admin</span>';
+                showToast('Administrator privileges unlocked', 'success');
+            } else {
+                showToast(data.error || 'Invalid password', 'error');
+            }
+        } catch (e) {
+            showToast('Authentication request failed', 'error');
         }
     });
 
@@ -2650,11 +3339,60 @@ INDEX_HTML = """<!DOCTYPE html>
     });
 
     // Initial boot
+    if (currentAdminToken) {
+        document.getElementById('adminLockedState').style.display = 'none';
+        document.getElementById('adminUnlockedState').style.display = 'block';
+        document.getElementById('btnAdminLock').innerHTML = '<svg class="icon" viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 9.9-1"></path></svg> <span>Admin</span>';
+    }
     loadPrinters();
     updatePreviewLayout();
 </script>
 </body>
 </html>"""
+
+def cleanup_expired_jobs():
+    now = int(time.time())
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute("SELECT job_id, file_path FROM pinned_jobs WHERE expires_at < ?", (now,))
+        for r in cur.fetchall():
+            try:
+                if os.path.exists(r['file_path']):
+                    os.remove(r['file_path'])
+            except Exception:
+                pass
+        cur.execute("DELETE FROM pinned_jobs WHERE expires_at < ?", (now,))
+
+        cur.execute("SELECT job_id, file_path FROM router_jobs WHERE status = 'HELD' AND expires_at < ?", (now,))
+        for r in cur.fetchall():
+            try:
+                if os.path.exists(r['file_path']):
+                    os.remove(r['file_path'])
+            except Exception:
+                pass
+        cur.execute("UPDATE router_jobs SET status = 'EXPIRED' WHERE status = 'HELD' AND expires_at < ?", (now,))
+        conn.commit()
+    except Exception:
+        pass
+
+def verify_router_request():
+    client_ip = request.remote_addr or ''
+    if client_ip.startswith('::ffff:'):
+        client_ip = client_ip[7:]
+    allowed_ips = {'10.0.0.1', '127.0.0.1', '::1'}
+    if client_ip not in allowed_ips:
+        return False, jsonify({'success': False, 'error': 'Forbidden: source IP not authorized'}), 403
+
+    provided_key = request.headers.get('X-Router-Key', '')
+    if not provided_key:
+        return False, jsonify({'success': False, 'error': 'Unauthorized: missing X-Router-Key header'}), 401
+
+    expected_key = get_router_key()
+    if not expected_key or not hmac.compare_digest(provided_key.strip(), expected_key.strip()):
+        return False, jsonify({'success': False, 'error': 'Unauthorized: invalid router key'}), 401
+
+    return True, None, 200
 
 @app.route('/')
 def index():
@@ -2662,6 +3400,7 @@ def index():
 
 @app.route('/api/status')
 def api_status():
+    cleanup_expired_jobs()
     temp_c = 0
     try:
         with open('/sys/class/thermal/thermal_zone0/temp', 'r') as f:
@@ -2672,7 +3411,7 @@ def api_status():
     ram_used = 0
     ram_total = 0
     try:
-        res = subprocess.run(['free', '-m'], capture_output=True, text=True)
+        res = subprocess.run(['free', '-m'], capture_output=True, text=True, timeout=5)
         for line in res.stdout.splitlines():
             if line.startswith('Mem:'):
                 parts = line.split()
@@ -2696,7 +3435,7 @@ def api_status():
 
     uptime_str = "--"
     try:
-        res = subprocess.run(['uptime', '-p'], capture_output=True, text=True)
+        res = subprocess.run(['uptime', '-p'], capture_output=True, text=True, timeout=5)
         uptime_str = res.stdout.strip()
     except Exception:
         pass
@@ -2707,7 +3446,8 @@ def api_status():
         'ram_total': ram_total,
         'disk_free': disk_free,
         'cpu_load': cpu_load,
-        'uptime': uptime_str
+        'uptime': uptime_str,
+        'public_print': is_public_print_enabled()
     })
 
 @app.route('/api/printers')
@@ -2720,8 +3460,18 @@ def api_inspect():
     if 'file' not in request.files:
         return jsonify({'success': False, 'error': 'No file uploaded'}), 400
     file = request.files['file']
+    if not file.filename:
+        return jsonify({'success': False, 'error': 'Empty filename'}), 400
+
+    try:
+        validate_extension(file.filename)
+        copies = validate_copies(request.form.get('copies', '1'))
+    except ValueError as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+
     colormodel = request.form.get('colormodel', 'RGB')
-    copies = int(request.form.get('copies', '1'))
+    if colormodel not in ALLOWED_COLORMODELS:
+        colormodel = 'RGB'
 
     suffix = os.path.splitext(file.filename)[1].lower()
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
@@ -2746,38 +3496,82 @@ def api_inspect():
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
     finally:
-        if temp_dir:
+        if temp_dir and os.path.exists(temp_dir):
             shutil.rmtree(temp_dir, ignore_errors=True)
         if os.path.exists(raw_path):
-            try: os.remove(raw_path)
-            except Exception: pass
+            try:
+                os.remove(raw_path)
+            except Exception:
+                pass
 
 @app.route('/api/print', methods=['POST'])
 def api_print():
+    client_ip = request.remote_addr or ''
+    if client_ip.startswith('::ffff:'):
+        client_ip = client_ip[7:]
+
+    if not is_public_print_enabled():
+        return jsonify({'success': False, 'error': 'Public printing is currently disabled by administrator'}), 403
+
+    if not public_print_limiter.is_allowed(client_ip):
+        return jsonify({'success': False, 'error': 'Rate limit exceeded: maximum 10 print submissions per minute'}), 429
+
     if 'file' not in request.files:
         return jsonify({'success': False, 'error': 'No file uploaded'}), 400
     file = request.files['file']
-    if file.filename == '':
+    if not file.filename:
         return jsonify({'success': False, 'error': 'Empty filename'}), 400
 
-    printer = request.form.get('printer', '')
+    try:
+        ext = validate_extension(file.filename)
+        copies = validate_copies(request.form.get('copies', '1'))
+        pagerange = validate_page_range(request.form.get('pagerange', ''))
+    except ValueError as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+
+    printers_list, def_p = get_printers()
+    valid_names = [p['name'] for p in printers_list]
+    printer = request.form.get('printer', '').strip()
     if not printer:
-        _, def_p = get_printers()
-        printer = def_p or 'HP_Smart_Tank_520'
+        printer = def_p or (valid_names[0] if valid_names else 'HP_Smart_Tank_520')
+    elif valid_names and printer not in valid_names:
+        return jsonify({'success': False, 'error': 'Selected printer is not available'}), 400
 
-    copies = request.form.get('copies', '1')
     pagesize = request.form.get('pagesize', 'A4')
-    orientation = request.form.get('orientation', 'auto')
-    margin_mode = request.form.get('margin_mode', 'printable')
-    mediatype = request.form.get('mediatype', 'Plain')
-    quality = request.form.get('quality', 'Normal')
-    colormodel = request.form.get('colormodel', 'RGB')
-    duplex = request.form.get('duplex', 'None')
-    resolution = request.form.get('resolution', '300')
-    fitpage = request.form.get('fitpage', 'true')
-    pagerange = request.form.get('pagerange', '').strip()
+    if pagesize not in ALLOWED_PAGESIZES:
+        pagesize = 'A4'
 
-    suffix = os.path.splitext(file.filename)[1].lower()
+    orientation = request.form.get('orientation', 'auto')
+    if orientation not in ALLOWED_ORIENTATIONS:
+        orientation = 'auto'
+
+    margin_mode = request.form.get('margin_mode', 'printable')
+    if margin_mode not in ALLOWED_MARGIN_MODES:
+        margin_mode = 'printable'
+
+    mediatype = request.form.get('mediatype', 'Plain')
+    if mediatype not in ALLOWED_MEDIATYPES:
+        mediatype = 'Plain'
+
+    quality = request.form.get('quality', 'Normal')
+    if quality not in ALLOWED_QUALITIES:
+        quality = 'Normal'
+
+    colormodel = request.form.get('colormodel', 'RGB')
+    if colormodel not in ALLOWED_COLORMODELS:
+        colormodel = 'RGB'
+
+    duplex = request.form.get('duplex', 'None')
+    if duplex not in ALLOWED_DUPLEX:
+        duplex = 'None'
+
+    resolution = request.form.get('resolution', '300')
+    if resolution not in ALLOWED_RESOLUTIONS:
+        resolution = '300'
+
+    fitpage = (request.form.get('fitpage', 'true').lower() == 'true')
+
+    suffix = ext
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
         file.save(tmp.name)
         raw_path = tmp.name
@@ -2786,20 +3580,22 @@ def api_print():
     try:
         conv_pdf, temp_dir = convert_to_pdf(raw_path, file.filename)
         pages = get_pdf_page_count(conv_pdf)
-        copies_int = int(copies)
+        if pages > MAX_PAGES_PER_JOB:
+            return jsonify({'success': False, 'error': f'Document exceeds maximum allowed pages ({MAX_PAGES_PER_JOB})'}), 400
+
         rate = get_rate(colormodel == 'RGB')
-        cost = rate * pages * copies_int
+        cost = rate * pages * copies
 
         cmd = ['lp', '-d', printer, '-n', str(copies)]
         if pagesize: cmd.extend(['-o', f'PageSize={pagesize}'])
         if mediatype: cmd.extend(['-o', f'MediaType={mediatype}'])
         if quality: cmd.extend(['-o', f'OutputMode={quality}'])
         if colormodel: cmd.extend(['-o', f'ColorModel={colormodel}'])
-        if duplex and duplex != 'None': cmd.extend(['-o', f'Duplex={duplex}'])
+        if duplex != 'None': cmd.extend(['-o', f'Duplex={duplex}'])
         if orientation in ['3', '4']: cmd.extend(['-o', f'orientation-requested={orientation}'])
-        if fitpage == 'true': cmd.extend(['-o', 'fit-to-page'])
+        if fitpage: cmd.extend(['-o', 'fit-to-page'])
         if pagerange: cmd.extend(['-o', f'page-ranges={pagerange}'])
-        if resolution in ['150', '300', '600', '1200']: cmd.extend(['-o', f'resolution={resolution}dpi'])
+        if resolution: cmd.extend(['-o', f'resolution={resolution}dpi'])
 
         if margin_mode == 'none':
             cmd.extend(['-o', 'page-top=0', '-o', 'page-bottom=0', '-o', 'page-left=0', '-o', 'page-right=0'])
@@ -2807,67 +3603,94 @@ def api_print():
             cmd.extend(['-o', 'page-top=36', '-o', 'page-bottom=36', '-o', 'page-left=36', '-o', 'page-right=36'])
         elif margin_mode == 'custom':
             try:
-                m_top = int(float(request.form.get('m_top', '10')) * 2.83465)
-                m_bottom = int(float(request.form.get('m_bottom', '10')) * 2.83465)
-                m_left = int(float(request.form.get('m_left', '10')) * 2.83465)
-                m_right = int(float(request.form.get('m_right', '10')) * 2.83465)
+                m_top = max(0, min(100, float(request.form.get('m_top', '10'))))
+                m_bottom = max(0, min(100, float(request.form.get('m_bottom', '10'))))
+                m_left = max(0, min(100, float(request.form.get('m_left', '10'))))
+                m_right = max(0, min(100, float(request.form.get('m_right', '10'))))
                 cmd.extend([
-                    '-o', f'page-top={m_top}',
-                    '-o', f'page-bottom={m_bottom}',
-                    '-o', f'page-left={m_left}',
-                    '-o', f'page-right={m_right}'
+                    '-o', f'page-top={int(m_top * 2.83465)}',
+                    '-o', f'page-bottom={int(m_bottom * 2.83465)}',
+                    '-o', f'page-left={int(m_left * 2.83465)}',
+                    '-o', f'page-right={int(m_right * 2.83465)}'
                 ])
             except Exception:
                 pass
 
         cmd.append(conv_pdf)
-
-        res = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        res = subprocess.run(cmd, capture_output=True, text=True, check=True, timeout=30)
         job_id = res.stdout.strip()
 
-        record_ledger(file.filename, printer, pages, copies_int, pages * copies_int, colormodel, cost, request.remote_addr, "COMPLETED")
+        record_ledger(file.filename, printer, pages, copies, pages * copies, colormodel, cost, client_ip, "COMPLETED", source="portal")
         return jsonify({'success': True, 'job_id': job_id, 'pages': pages, 'cost': cost})
     except subprocess.CalledProcessError as e:
         return jsonify({'success': False, 'error': e.stderr.strip() or str(e)}), 500
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
     finally:
-        if temp_dir:
+        if temp_dir and os.path.exists(temp_dir):
             shutil.rmtree(temp_dir, ignore_errors=True)
         if os.path.exists(raw_path):
-            try: os.remove(raw_path)
-            except Exception: pass
+            try:
+                os.remove(raw_path)
+            except Exception:
+                pass
 
 @app.route('/api/print/pin-hold', methods=['POST'])
 def api_pin_hold():
+    client_ip = request.remote_addr or ''
+    if client_ip.startswith('::ffff:'):
+        client_ip = client_ip[7:]
+
+    if not is_public_print_enabled():
+        return jsonify({'success': False, 'error': 'Public printing is currently disabled by administrator'}), 403
+
+    if not public_print_limiter.is_allowed(client_ip):
+        return jsonify({'success': False, 'error': 'Rate limit exceeded: maximum 10 submissions per minute'}), 429
+
     if 'file' not in request.files:
         return jsonify({'success': False, 'error': 'No file uploaded'}), 400
     file = request.files['file']
-    pin = request.form.get('pin', '').strip()
-    if not pin or len(pin) != 4 or not pin.isdigit():
-        return jsonify({'success': False, 'error': 'PIN must be exactly 4 digits'}), 400
+    if not file.filename:
+        return jsonify({'success': False, 'error': 'Empty filename'}), 400
 
-    printer = request.form.get('printer', '')
+    try:
+        ext = validate_extension(file.filename)
+        pin = validate_pin(request.form.get('pin', ''))
+        copies = validate_copies(request.form.get('copies', '1'))
+        pagerange = validate_page_range(request.form.get('pagerange', ''))
+    except ValueError as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+
+    printers_list, def_p = get_printers()
+    valid_names = [p['name'] for p in printers_list]
+    printer = request.form.get('printer', '').strip()
     if not printer:
-        _, def_p = get_printers()
-        printer = def_p or 'HP_Smart_Tank_520'
+        printer = def_p or (valid_names[0] if valid_names else 'HP_Smart_Tank_520')
+    elif valid_names and printer not in valid_names:
+        return jsonify({'success': False, 'error': 'Selected printer is not available'}), 400
 
-    copies = int(request.form.get('copies', '1'))
     pagesize = request.form.get('pagesize', 'A4')
+    if pagesize not in ALLOWED_PAGESIZES: pagesize = 'A4'
     orientation = request.form.get('orientation', 'auto')
+    if orientation not in ALLOWED_ORIENTATIONS: orientation = 'auto'
     margin_mode = request.form.get('margin_mode', 'printable')
+    if margin_mode not in ALLOWED_MARGIN_MODES: margin_mode = 'printable'
     mediatype = request.form.get('mediatype', 'Plain')
+    if mediatype not in ALLOWED_MEDIATYPES: mediatype = 'Plain'
     quality = request.form.get('quality', 'Normal')
+    if quality not in ALLOWED_QUALITIES: quality = 'Normal'
     colormodel = request.form.get('colormodel', 'RGB')
+    if colormodel not in ALLOWED_COLORMODELS: colormodel = 'RGB'
     duplex = request.form.get('duplex', 'None')
+    if duplex not in ALLOWED_DUPLEX: duplex = 'None'
     resolution = request.form.get('resolution', '300')
-    fitpage = request.form.get('fitpage', 'true')
-    pagerange = request.form.get('pagerange', '').strip()
+    if resolution not in ALLOWED_RESOLUTIONS: resolution = '300'
+    fitpage = (request.form.get('fitpage', 'true').lower() == 'true')
 
     job_id = f"pin_{int(time.time())}_{secrets.token_hex(4)}"
-    pin_hash = hashlib.sha256(pin.encode('utf-8')).hexdigest()
+    pin_hash = hash_pin(pin)
 
-    suffix = os.path.splitext(file.filename)[1].lower()
+    suffix = ext
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
         file.save(tmp.name)
         raw_path = tmp.name
@@ -2875,11 +3698,13 @@ def api_pin_hold():
     temp_dir = None
     try:
         conv_pdf, temp_dir = convert_to_pdf(raw_path, file.filename)
-        dest_path = os.path.join(SPOOL_PINNED_DIR, f"{job_id}.pdf")
-        shutil.copy2(conv_pdf, dest_path)
-        os.chmod(dest_path, 0o600)
+        pages = get_pdf_page_count(conv_pdf)
+        if pages > MAX_PAGES_PER_JOB:
+            return jsonify({'success': False, 'error': f'Document exceeds maximum allowed pages ({MAX_PAGES_PER_JOB})'}), 400
 
-        pages = get_pdf_page_count(dest_path)
+        dest_enc_path = os.path.join(SPOOL_PINNED_DIR, f"{job_id}.enc")
+        encrypt_held_file(conv_pdf, dest_enc_path)
+
         rate = get_rate(colormodel == 'RGB')
         cost = rate * pages * copies
 
@@ -2906,10 +3731,10 @@ def api_pin_hold():
         with conn:
             conn.execute("""
                 INSERT INTO pinned_jobs 
-                (job_id, file_path, filename, pin_hash, pages, copies, colormodel, printer, options_json, cost, created_at, expires_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (job_id, file_path, filename, pin_hash, pages, copies, colormodel, printer, options_json, cost, created_at, expires_at, failed_attempts)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
             """, (
-                job_id, dest_path, file.filename, pin_hash, pages, copies, colormodel, printer,
+                job_id, dest_enc_path, file.filename, pin_hash, pages, copies, colormodel, printer,
                 json.dumps(options), cost, int(time.time()), int(time.time() + 24 * 3600)
             ))
 
@@ -2924,25 +3749,23 @@ def api_pin_hold():
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
     finally:
-        if temp_dir:
+        if temp_dir and os.path.exists(temp_dir):
             shutil.rmtree(temp_dir, ignore_errors=True)
         if os.path.exists(raw_path):
-            try: os.remove(raw_path)
-            except Exception: pass
+            try:
+                os.remove(raw_path)
+            except Exception:
+                pass
 
 @app.route('/api/pin/list', methods=['GET'])
 def api_pin_list():
+    token = request.headers.get('X-Admin-Token') or request.args.get('token')
+    if not verify_admin_token(token):
+        return jsonify({'success': False, 'error': 'Unauthorized: administrator login required'}), 401
+
+    cleanup_expired_jobs()
     conn = get_db()
     cur = conn.cursor()
-    now = int(time.time())
-    cur.execute("SELECT job_id, file_path FROM pinned_jobs WHERE expires_at < ?", (now,))
-    expired = cur.fetchall()
-    for row in expired:
-        try: os.remove(row['file_path'])
-        except Exception: pass
-    cur.execute("DELETE FROM pinned_jobs WHERE expires_at < ?", (now,))
-    conn.commit()
-
     cur.execute("SELECT job_id, filename, pages, copies, colormodel, printer, cost, created_at FROM pinned_jobs ORDER BY created_at DESC")
     jobs = []
     for row in cur.fetchall():
@@ -2960,12 +3783,21 @@ def api_pin_list():
 
 @app.route('/api/pin/release', methods=['POST'])
 def api_pin_release():
+    client_ip = request.remote_addr or ''
+    if client_ip.startswith('::ffff:'):
+        client_ip = client_ip[7:]
+
+    if not pin_release_limiter.is_allowed(client_ip):
+        return jsonify({'success': False, 'error': 'Rate limit exceeded: maximum 10 PIN release attempts per minute'}), 429
+
     job_id = request.form.get('job_id', '').strip()
     pin = request.form.get('pin', '').strip()
     if not job_id or not pin:
         return jsonify({'success': False, 'error': 'Missing Job ID or PIN'}), 400
 
-    pin_hash = hashlib.sha256(pin.encode('utf-8')).hexdigest()
+    if not re.match(r'^[0-9]{6}$', pin):
+        return jsonify({'success': False, 'error': 'PIN must be exactly 6 digits'}), 400
+
     conn = get_db()
     cur = conn.cursor()
     cur.execute("SELECT * FROM pinned_jobs WHERE job_id = ?", (job_id,))
@@ -2973,18 +3805,36 @@ def api_pin_release():
     if not row:
         return jsonify({'success': False, 'error': 'Job not found or expired'}), 404
 
-    if row['pin_hash'] != pin_hash:
-        return jsonify({'success': False, 'error': 'Incorrect PIN. Please re-enter.'}), 401
+    target_hash = hash_pin(pin)
+    if not hmac.compare_digest(row['pin_hash'], target_hash):
+        failed = (row['failed_attempts'] or 0) + 1
+        if failed >= 5:
+            try:
+                if os.path.exists(row['file_path']):
+                    os.remove(row['file_path'])
+            except Exception:
+                pass
+            with conn:
+                conn.execute("DELETE FROM pinned_jobs WHERE job_id = ?", (job_id,))
+            return jsonify({'success': False, 'error': 'Incorrect PIN. Maximum 5 attempts exceeded: job deleted.'}), 403
+        else:
+            with conn:
+                conn.execute("UPDATE pinned_jobs SET failed_attempts = ? WHERE job_id = ?", (failed, job_id))
+            remaining = 5 - failed
+            return jsonify({'success': False, 'error': f'Incorrect PIN. {remaining} attempt(s) remaining.'}), 401
 
-    options = json.loads(row['options_json'])
-    printer = options.get('printer') or 'HP_Smart_Tank_520'
-    copies = options.get('copies', 1)
-    file_path = row['file_path']
-
-    if not os.path.exists(file_path):
+    enc_path = row['file_path']
+    if not os.path.exists(enc_path):
         return jsonify({'success': False, 'error': 'Spool file missing'}), 500
 
+    temp_dir = tempfile.mkdtemp(prefix="pin_rel_")
+    decrypted_pdf = os.path.join(temp_dir, "release.pdf")
     try:
+        decrypt_held_file(enc_path, decrypted_pdf)
+        options = json.loads(row['options_json'])
+        printer = options.get('printer') or 'HP_Smart_Tank_520'
+        copies = options.get('copies', 1)
+
         cmd = ['lp', '-d', printer, '-n', str(copies)]
         if options.get('pagesize'): cmd.extend(['-o', f"PageSize={options['pagesize']}"])
         if options.get('mediatype'): cmd.extend(['-o', f"MediaType={options['mediatype']}"])
@@ -2992,7 +3842,7 @@ def api_pin_release():
         if options.get('colormodel'): cmd.extend(['-o', f"ColorModel={options['colormodel']}"])
         if options.get('duplex') and options['duplex'] != 'None': cmd.extend(['-o', f"Duplex={options['duplex']}"])
         if options.get('orientation') in ['3', '4']: cmd.extend(['-o', f"orientation-requested={options['orientation']}"])
-        if options.get('fitpage') == 'true': cmd.extend(['-o', 'fit-to-page'])
+        if options.get('fitpage') is True or options.get('fitpage') == 'true': cmd.extend(['-o', 'fit-to-page'])
         if options.get('pagerange'): cmd.extend(['-o', f"page-ranges={options['pagerange']}"])
         if options.get('resolution'): cmd.extend(['-o', f"resolution={options['resolution']}dpi"])
 
@@ -3003,38 +3853,46 @@ def api_pin_release():
             cmd.extend(['-o', 'page-top=36', '-o', 'page-bottom=36', '-o', 'page-left=36', '-o', 'page-right=36'])
         elif m_mode == 'custom':
             try:
-                m_top = int(float(options.get('m_top', '10')) * 2.83465)
-                m_bottom = int(float(options.get('m_bottom', '10')) * 2.83465)
-                m_left = int(float(options.get('m_left', '10')) * 2.83465)
-                m_right = int(float(options.get('m_right', '10')) * 2.83465)
+                m_top = max(0, min(100, float(options.get('m_top', '10'))))
+                m_bottom = max(0, min(100, float(options.get('m_bottom', '10'))))
+                m_left = max(0, min(100, float(options.get('m_left', '10'))))
+                m_right = max(0, min(100, float(options.get('m_right', '10'))))
                 cmd.extend([
-                    '-o', f'page-top={m_top}',
-                    '-o', f'page-bottom={m_bottom}',
-                    '-o', f'page-left={m_left}',
-                    '-o', f'page-right={m_right}'
+                    '-o', f'page-top={int(m_top * 2.83465)}',
+                    '-o', f'page-bottom={int(m_bottom * 2.83465)}',
+                    '-o', f'page-left={int(m_left * 2.83465)}',
+                    '-o', f'page-right={int(m_right * 2.83465)}'
                 ])
             except Exception:
                 pass
 
-        cmd.append(file_path)
-
-        res = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        cmd.append(decrypted_pdf)
+        res = subprocess.run(cmd, capture_output=True, text=True, check=True, timeout=30)
         cups_job = res.stdout.strip()
 
-        try: os.remove(file_path)
-        except Exception: pass
-        cur.execute("DELETE FROM pinned_jobs WHERE job_id = ?", (job_id,))
-        conn.commit()
+        try:
+            os.remove(enc_path)
+        except Exception:
+            pass
+
+        with conn:
+            conn.execute("DELETE FROM pinned_jobs WHERE job_id = ?", (job_id,))
 
         record_ledger(row['filename'], printer, row['pages'], row['copies'], row['pages'] * row['copies'],
-                      row['colormodel'], row['cost'], request.remote_addr, "RELEASED")
+                      row['colormodel'], row['cost'], client_ip, "RELEASED", source="portal")
 
         return jsonify({'success': True, 'cups_job': cups_job, 'message': 'Job released to printer.'})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
+    finally:
+        shutil.rmtree(temp_dir, ignore_errors=True)
 
 @app.route('/api/reports/ledger', methods=['GET'])
 def api_reports_ledger():
+    token = request.headers.get('X-Admin-Token') or request.args.get('token')
+    if not verify_admin_token(token):
+        return jsonify({'success': False, 'error': 'Unauthorized: administrator authentication required'}), 401
+
     conn = get_db()
     cur = conn.cursor()
     cur.execute("SELECT COUNT(*) as total_jobs, SUM(total_pages) as total_pages, SUM(cost) as total_revenue FROM print_ledger")
@@ -3056,7 +3914,8 @@ def api_reports_ledger():
             'colormodel': r['colormodel'],
             'cost': f"{symbol}{r['cost']:.2f}",
             'client_ip': r['client_ip'],
-            'status': r['status']
+            'status': r['status'],
+            'source': r['source'] if 'source' in r.keys() else 'portal'
         })
     return jsonify({
         'success': True,
@@ -3070,36 +3929,52 @@ def api_reports_ledger():
 
 @app.route('/api/reports/export.csv', methods=['GET'])
 def api_reports_export_csv():
+    token = request.headers.get('X-Admin-Token') or request.args.get('token')
+    if not verify_admin_token(token):
+        return Response("Unauthorized: administrator authentication required\n", status=401, mimetype='text/plain')
+
     conn = get_db()
     cur = conn.cursor()
     cur.execute("SELECT * FROM print_ledger ORDER BY timestamp DESC")
     rows = cur.fetchall()
 
     def generate_csv():
-        yield "ID,Timestamp,Job Title,Printer,Pages,Copies,Total Pages,Color Mode,Cost,Client IP,Status\n"
+        yield "ID,Timestamp,Job Title,Printer,Pages,Copies,Total Pages,Color Mode,Cost,Client IP,Status,Source\n"
         for r in rows:
             ts = datetime.fromtimestamp(r['timestamp']).strftime('%Y-%m-%d %H:%M:%S')
             title = r['job_title'].replace('"', '""')
-            yield f'"{r["id"]}","{ts}","{title}","{r["printer"]}","{r["pages"]}","{r["copies"]}","{r["total_pages"]}","{r["colormodel"]}","{r["cost"]:.2f}","{r["client_ip"]}","{r["status"]}"\n'
+            source = r['source'] if 'source' in r.keys() else 'portal'
+            yield f'"{r["id"]}","{ts}","{title}","{r["printer"]}","{r["pages"]}","{r["copies"]}","{r["total_pages"]}","{r["colormodel"]}","{r["cost"]:.2f}","{r["client_ip"]}","{r["status"]}","{source}"\n'
 
     return Response(generate_csv(), mimetype='text/csv', headers={'Content-Disposition': 'attachment; filename=print_ledger.csv'})
 
 @app.route('/api/admin/auth', methods=['POST'])
 def api_admin_auth():
+    client_ip = request.remote_addr or ''
+    if client_ip.startswith('::ffff:'):
+        client_ip = client_ip[7:]
+
+    if not admin_login_limiter.is_allowed(client_ip):
+        return jsonify({'success': False, 'error': 'Too many failed login attempts. Please wait 1 minute.'}), 429
+
     password = request.form.get('password', '')
-    admin_hash = get_setting('admin_hash', hashlib.sha256('admin'.encode('utf-8')).hexdigest())
-    req_hash = hashlib.sha256(password.encode('utf-8')).hexdigest()
-    if req_hash == admin_hash:
-        token = secrets.token_hex(16)
+    admin_hash = get_setting('admin_hash', '')
+    if not admin_hash:
+        return jsonify({'success': False, 'error': 'Administrator account not configured'}), 500
+
+    if check_password_hash(admin_hash, password):
+        admin_login_limiter.reset(client_ip)
+        token = secrets.token_hex(24)
         ACTIVE_TOKENS[token] = time.time() + 7200
         return jsonify({'success': True, 'token': token})
+
     return jsonify({'success': False, 'error': 'Invalid administrator password'}), 401
 
 @app.route('/api/admin/action', methods=['POST'])
 def api_admin_action():
     token = request.headers.get('X-Admin-Token') or request.form.get('token')
     if not verify_admin_token(token):
-        return jsonify({'success': False, 'error': 'Unauthorized. Admin login required.'}), 401
+        return jsonify({'success': False, 'error': 'Unauthorized: admin login required'}), 401
 
     action = request.form.get('action')
     if action == 'reboot':
@@ -3109,11 +3984,22 @@ def api_admin_action():
         subprocess.Popen(['poweroff'])
         return jsonify({'success': True, 'message': 'System shutting down...'})
     elif action == 'restart_cups':
-        subprocess.run(['systemctl', 'restart', 'cups'], check=True)
+        subprocess.run(['systemctl', 'restart', 'cups'], check=True, timeout=15)
         return jsonify({'success': True, 'message': 'CUPS print spooler restarted successfully.'})
     elif action == 'purge_cache':
-        subprocess.run('rm -rf /tmp/webprint* /tmp/conv_* /tmp/scan_*', shell=True)
-        return jsonify({'success': True, 'message': 'Temporary spool cache purged.'})
+        purged = 0
+        temp_dir = tempfile.gettempdir()
+        for pattern in ['webprint*', 'conv_*', 'scan_*', 'lo_*', 'pin_rel_*']:
+            for item in glob.glob(os.path.join(temp_dir, pattern)):
+                try:
+                    if os.path.isdir(item):
+                        shutil.rmtree(item, ignore_errors=True)
+                    else:
+                        os.remove(item)
+                    purged += 1
+                except Exception:
+                    pass
+        return jsonify({'success': True, 'message': f'Temporary spool cache purged ({purged} items cleaned).'})
     elif action == 'update_rates':
         rate_bw = request.form.get('rate_bw', '2.00')
         rate_color = request.form.get('rate_color', '5.00')
@@ -3124,16 +4010,319 @@ def api_admin_action():
         return jsonify({'success': True, 'message': 'Rates updated successfully.'})
     elif action == 'change_password':
         new_pass = request.form.get('new_password', '')
-        if len(new_pass) < 4:
-            return jsonify({'success': False, 'error': 'Password must be at least 4 characters'}), 400
-        new_hash = hashlib.sha256(new_pass.encode('utf-8')).hexdigest()
+        if len(new_pass) < 8:
+            return jsonify({'success': False, 'error': 'Password must be at least 8 characters'}), 400
+        new_hash = generate_password_hash(new_pass, method='scrypt')
         conn = get_db()
         with conn:
             conn.execute("UPDATE settings SET value = ? WHERE key = 'admin_hash'", (new_hash,))
         return jsonify({'success': True, 'message': 'Admin password changed.'})
+    elif action == 'toggle_public_print':
+        current = is_public_print_enabled()
+        new_val = 'off' if current else 'on'
+        conn = get_db()
+        with conn:
+            conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('public_print', ?)", (new_val,))
+        return jsonify({'success': True, 'public_print': (new_val == 'on'), 'message': f'Public printing turned {new_val}.'})
     return jsonify({'success': False, 'error': 'Unknown action'}), 400
 
+# ============================================================
+# ROUTER INTEGRATION API (SECTION C - SOURCE: 10.0.0.1 ONLY)
+# ============================================================
+@app.route('/api/router/job', methods=['POST'])
+def api_router_job():
+    auth_ok, resp, status_code = verify_router_request()
+    if not auth_ok:
+        return resp, status_code
+
+    if 'file' not in request.files:
+        return jsonify({'success': False, 'error': 'No file uploaded'}), 400
+    file = request.files['file']
+    if not file.filename:
+        return jsonify({'success': False, 'error': 'Empty filename'}), 400
+
+    try:
+        ext = validate_extension(file.filename)
+        copies = validate_copies(request.form.get('copies', '1'))
+    except ValueError as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+
+    printers_list, def_p = get_printers()
+    valid_names = [p['name'] for p in printers_list]
+    printer = request.form.get('printer', '').strip()
+    if not printer:
+        printer = def_p or (valid_names[0] if valid_names else 'HP_Smart_Tank_520')
+    elif valid_names and printer not in valid_names:
+        return jsonify({'success': False, 'error': 'Printer not found'}), 400
+
+    colormodel = request.form.get('colormodel', 'RGB')
+    if colormodel not in ALLOWED_COLORMODELS:
+        colormodel = 'RGB'
+
+    pagesize = request.form.get('pagesize', 'A4')
+    if pagesize not in ALLOWED_PAGESIZES: pagesize = 'A4'
+    duplex = request.form.get('duplex', 'None')
+    if duplex not in ALLOWED_DUPLEX: duplex = 'None'
+    mediatype = request.form.get('mediatype', 'Plain')
+    if mediatype not in ALLOWED_MEDIATYPES: mediatype = 'Plain'
+    quality = request.form.get('quality', 'Normal')
+    if quality not in ALLOWED_QUALITIES: quality = 'Normal'
+    resolution = request.form.get('resolution', '300')
+    if resolution not in ALLOWED_RESOLUTIONS: resolution = '300'
+    fitpage = (request.form.get('fitpage', 'true').lower() == 'true')
+
+    with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp:
+        file.save(tmp.name)
+        raw_path = tmp.name
+
+    temp_dir = None
+    try:
+        conv_pdf, temp_dir = convert_to_pdf(raw_path, file.filename)
+        pages = get_pdf_page_count(conv_pdf)
+        if pages > MAX_PAGES_PER_JOB:
+            return jsonify({'success': False, 'error': f'Document exceeds maximum allowed pages ({MAX_PAGES_PER_JOB})'}), 400
+
+        job_id = f"wifi_{int(time.time())}_{secrets.token_hex(4)}"
+        held_dest = os.path.join(SPOOL_HELD_DIR, f"{job_id}.pdf")
+        shutil.copy2(conv_pdf, held_dest)
+        try: os.chmod(held_dest, 0o600)
+        except Exception: pass
+
+        options = {
+            'printer': printer,
+            'copies': copies,
+            'pagesize': pagesize,
+            'colormodel': colormodel,
+            'duplex': duplex,
+            'mediatype': mediatype,
+            'quality': quality,
+            'resolution': resolution,
+            'fitpage': fitpage
+        }
+
+        expires_at = int(time.time()) + 900  # 15 minutes hold
+        conn = get_db()
+        with conn:
+            conn.execute("""
+                INSERT INTO router_jobs
+                (job_id, file_path, pages, copies, colormodel, printer, options_json, status, cups_job_id, created_at, expires_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 'HELD', NULL, ?, ?)
+            """, (job_id, held_dest, pages, copies, colormodel, printer, json.dumps(options), int(time.time()), expires_at))
+
+        is_color = (colormodel in ['RGB', 'CMYK', 'Color'])
+        return jsonify({
+            'success': True,
+            'job_id': job_id,
+            'pages': pages,
+            'color': is_color,
+            'expires_at': expires_at
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+    finally:
+        if temp_dir and os.path.exists(temp_dir):
+            shutil.rmtree(temp_dir, ignore_errors=True)
+        if os.path.exists(raw_path):
+            try: os.remove(raw_path)
+            except Exception: pass
+
+@app.route('/api/router/release', methods=['POST'])
+def api_router_release():
+    auth_ok, resp, status_code = verify_router_request()
+    if not auth_ok:
+        return resp, status_code
+
+    req_data = request.get_json(silent=True) or request.form
+    job_id = (req_data.get('job_id') or '').strip()
+    if not job_id:
+        return jsonify({'success': False, 'error': 'Missing job_id'}), 400
+
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM router_jobs WHERE job_id = ?", (job_id,))
+    row = cur.fetchone()
+    if not row:
+        return jsonify({'success': False, 'error': 'Job not found'}), 404
+
+    # Idempotent: if already printed, return existing status
+    if row['status'] in ['PRINTED', 'DONE']:
+        return jsonify({
+            'success': True,
+            'job_id': job_id,
+            'status': 'printing',
+            'cups_job': row['cups_job_id'] or '',
+            'message': 'Job already released'
+        })
+
+    if row['status'] != 'HELD':
+        return jsonify({'success': False, 'error': f"Job cannot be released in status '{row['status']}'"}), 400
+
+    if row['expires_at'] < int(time.time()):
+        try:
+            if os.path.exists(row['file_path']):
+                os.remove(row['file_path'])
+        except Exception:
+            pass
+        with conn:
+            conn.execute("UPDATE router_jobs SET status = 'EXPIRED' WHERE job_id = ?", (job_id,))
+        return jsonify({'success': False, 'error': 'Job expired'}), 410
+
+    file_path = row['file_path']
+    if not os.path.exists(file_path):
+        return jsonify({'success': False, 'error': 'Spool file missing'}), 500
+
+    options = json.loads(row['options_json'])
+    printer = options.get('printer') or 'HP_Smart_Tank_520'
+    copies = options.get('copies', 1)
+
+    cmd = ['lp', '-d', printer, '-n', str(copies)]
+    if options.get('pagesize'): cmd.extend(['-o', f"PageSize={options['pagesize']}"])
+    if options.get('mediatype'): cmd.extend(['-o', f"MediaType={options['mediatype']}"])
+    if options.get('quality'): cmd.extend(['-o', f"OutputMode={options['quality']}"])
+    if options.get('colormodel'): cmd.extend(['-o', f"ColorModel={options['colormodel']}"])
+    if options.get('duplex') and options['duplex'] != 'None': cmd.extend(['-o', f"Duplex={options['duplex']}"])
+    if options.get('fitpage') is True or options.get('fitpage') == 'true': cmd.extend(['-o', 'fit-to-page'])
+    if options.get('resolution'): cmd.extend(['-o', f"resolution={options['resolution']}dpi"])
+    cmd.append(file_path)
+
+    try:
+        res = subprocess.run(cmd, capture_output=True, text=True, check=True, timeout=30)
+        cups_job = res.stdout.strip()
+
+        try: os.remove(file_path)
+        except Exception: pass
+
+        with conn:
+            conn.execute("UPDATE router_jobs SET status = 'PRINTED', cups_job_id = ? WHERE job_id = ?", (cups_job, job_id))
+
+        rate = get_rate(row['colormodel'] in ['RGB', 'CMYK', 'Color'])
+        cost = rate * row['pages'] * row['copies']
+        record_ledger("WiFi Guest Job", printer, row['pages'], row['copies'],
+                      row['pages'] * row['copies'], row['colormodel'], cost,
+                      "10.0.0.1", "COMPLETED", source="wifi")
+
+        return jsonify({'success': True, 'job_id': job_id, 'status': 'printing', 'cups_job': cups_job})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/router/cancel', methods=['POST'])
+def api_router_cancel():
+    auth_ok, resp, status_code = verify_router_request()
+    if not auth_ok:
+        return resp, status_code
+
+    req_data = request.get_json(silent=True) or request.form
+    job_id = (req_data.get('job_id') or '').strip()
+    if not job_id:
+        return jsonify({'success': False, 'error': 'Missing job_id'}), 400
+
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM router_jobs WHERE job_id = ?", (job_id,))
+    row = cur.fetchone()
+    if not row:
+        return jsonify({'success': False, 'error': 'Job not found'}), 404
+
+    try:
+        if os.path.exists(row['file_path']):
+            os.remove(row['file_path'])
+    except Exception:
+        pass
+
+    with conn:
+        conn.execute("UPDATE router_jobs SET status = 'CANCELLED' WHERE job_id = ?", (job_id,))
+
+    return jsonify({'success': True, 'job_id': job_id, 'message': 'Job cancelled and purged'})
+
+@app.route('/api/router/status', methods=['GET'])
+def api_router_status():
+    auth_ok, resp, status_code = verify_router_request()
+    if not auth_ok:
+        return resp, status_code
+
+    job_id = request.args.get('job_id', '').strip()
+    if not job_id:
+        return jsonify({'success': False, 'error': 'Missing job_id'}), 400
+
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM router_jobs WHERE job_id = ?", (job_id,))
+    row = cur.fetchone()
+    if not row:
+        return jsonify({'success': False, 'error': 'Job not found'}), 404
+
+    now = int(time.time())
+    status = row['status']
+    if status == 'HELD':
+        if row['expires_at'] < now:
+            try:
+                if os.path.exists(row['file_path']):
+                    os.remove(row['file_path'])
+            except Exception:
+                pass
+            with conn:
+                conn.execute("UPDATE router_jobs SET status = 'EXPIRED' WHERE job_id = ?", (job_id,))
+            return jsonify({'success': True, 'job_id': job_id, 'status': 'failed', 'detail': 'expired'})
+        return jsonify({'success': True, 'job_id': job_id, 'status': 'queued'})
+
+    if status == 'CANCELLED':
+        return jsonify({'success': True, 'job_id': job_id, 'status': 'failed', 'detail': 'cancelled'})
+
+    if status in ['PRINTED', 'DONE']:
+        cups_job = row['cups_job_id'] or ''
+        cups_status = 'done'
+        if cups_job:
+            try:
+                stat_res = subprocess.run(['lpstat', '-o'], capture_output=True, text=True, timeout=5)
+                if cups_job in stat_res.stdout:
+                    cups_status = 'printing'
+            except Exception:
+                pass
+        return jsonify({'success': True, 'job_id': job_id, 'status': cups_status})
+
+    return jsonify({'success': True, 'job_id': job_id, 'status': status.lower()})
+
+@app.route('/api/router/health', methods=['GET'])
+def api_router_health():
+    auth_ok, resp, status_code = verify_router_request()
+    if not auth_ok:
+        return resp, status_code
+
+    printers, def_p = get_printers()
+    overall = "ok"
+    if not printers:
+        overall = "offline"
+    else:
+        stopped_count = sum(1 for p in printers if p['status'] == 'stopped')
+        if stopped_count == len(printers):
+            overall = "offline"
+        elif stopped_count > 0:
+            overall = "degraded"
+
+    warnings = []
+    try:
+        res = subprocess.run(['lpstat', '-p'], capture_output=True, text=True, timeout=5)
+        out_lower = res.stdout.lower()
+        if 'out of paper' in out_lower or 'paper out' in out_lower:
+            warnings.append('paper_out')
+            if overall == "ok":
+                overall = "degraded"
+        if 'low ink' in out_lower or 'ink low' in out_lower:
+            warnings.append('ink_low')
+    except Exception:
+        pass
+
+    return jsonify({
+        'success': True,
+        'overall': overall,
+        'default_printer': def_p,
+        'printers': printers,
+        'warnings': warnings
+    })
+
+init_db()
+
 if __name__ == '__main__':
-    init_db()
     port = int(os.environ.get('PORT', 80))
-    app.run(host='::', port=port)
+    app.run(host='0.0.0.0', port=port)
+

@@ -1,0 +1,7 @@
+[Unit]
+Description=Automated Web Print Server Backup
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/webprint/scripts/backup-server.sh
