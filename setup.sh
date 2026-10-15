@@ -92,11 +92,12 @@ chmod 600 /var/lib/webprint/router.key
 ADMIN_PASSWORD=""
 if [[ ! -f /var/lib/webprint/webprint.db ]]; then
     ADMIN_PASSWORD="$(openssl rand -base64 12 | tr -dc 'a-zA-Z0-9' | head -c 16)"
-    python3 -c "
+    WEBPRINT_INIT_PW="${ADMIN_PASSWORD}" python3 -c "
 import sqlite3
 from werkzeug.security import generate_password_hash
 db_path = '/var/lib/webprint/webprint.db'
-h = generate_password_hash('${ADMIN_PASSWORD}', method='scrypt')
+import os
+h = generate_password_hash(os.environ['WEBPRINT_INIT_PW'], method='scrypt')
 conn = sqlite3.connect(db_path)
 with conn:
     conn.execute('CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)')
@@ -121,6 +122,15 @@ fi
 if grep -q "<Location /admin/log>" /etc/cups/cupsd.conf; then
     sed -i '/<Location \/admin\/log>/,/<\/Location>/c\<Location /admin/log>\n  AuthType Default\n  Require user @SYSTEM\n  Order allow,deny\n  Allow from 127.0.0.1\n  Allow from ::1\n  Allow from 10.0.0.0/24\n</Location>' /etc/cups/cupsd.conf
 fi
+
+# Printing (not admin) from the modem's network: the OpenWrt router forwards ports 80/631 and those clients arrive as
+# 192.168.1.x, which CUPS does not treat as local. Allow that subnet on the print queues only, never on /admin.
+UPSTREAM_SUBNET="${UPSTREAM_SUBNET:-192.168.1.0/24}"
+for loc in '/' '/printers'; do
+    if grep -q "<Location ${loc}>" /etc/cups/cupsd.conf && ! sed -n "/<Location ${loc//\//\\/}>/,/<\/Location>/p" /etc/cups/cupsd.conf | grep -q "${UPSTREAM_SUBNET}"; then
+        sed -i "/<Location ${loc//\//\\/}>/,/<\/Location>/ s|^\( *\)Order allow,deny|&\n\1Allow from ${UPSTREAM_SUBNET}|" /etc/cups/cupsd.conf
+    fi
+done
 
 systemctl restart cups
 systemctl enable --now cups

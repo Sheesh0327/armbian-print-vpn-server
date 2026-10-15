@@ -22,8 +22,7 @@ tar -czf "${TARGET_ARCHIVE}" \
     /etc/cups/cupsd.conf \
     /etc/cups/printers.conf \
     /etc/avahi/avahi-daemon.conf \
-    /etc/systemd/system/webprint.service \
-    /etc/sysctl.d/99-tailscale.conf 2>/dev/null || true
+    /etc/systemd/system/webprint.service 2>/dev/null || true
 
 chmod 600 "${TARGET_ARCHIVE}"
 

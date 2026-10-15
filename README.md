@@ -48,14 +48,8 @@ The print server sits on the downstream local network behind a gateway router (O
   - Mozilla PDF.js v3.11.174 vendored locally (`webprint/static/pdf.min.js` and `webprint/static/pdf.worker.min.js`) for reliable, air-gapped document rendering without external CDN dependencies.
 - **Public Portal Toggle**: Set `PUBLIC_PRINT=off` in the environment to disable general walk-up uploads while preserving the router paid-print pipeline.
 
-### 2. Client-Side Canva Design Studio
-- **Zero Server RAM Footprint**:
-  - Powered by client-side HTML5 Canvas, Fabric.js, jsPDF, and QRCode.js.
-  - All graphic rendering, typography calculations, image filters, and vector manipulation execute inside the client browser.
-- **Built-in Templates and Tools**:
-  - Pre-built templates: Promotional flyers, corporate memos, guest Wi-Fi connection signs, certificates of recognition, and 2x2 passport ID photo grids.
-  - Vector stamp assets: `APPROVED`, `CONFIDENTIAL`, `PAID`, `URGENT`, and `DRAFT`.
-  - Direct 300 DPI canvas rasterization sent straight to the print spooler.
+### 2. ID Photo Maker
+- Browser-side tool that lays out 1x1, 2x2 and passport photos on a sheet and sends it to the printer (no server load).
 
 ### 3. Encrypted Confidential Pull-Printing (PIN Queue)
 - **Cryptographic Storage**: Held print files are encrypted at rest using AES-256-GCM. The encryption key is generated at install time in `/var/lib/webprint/secret.key` with file mode `0600` (readable only by user `webprint`).
@@ -84,17 +78,21 @@ The print server sits on the downstream local network behind a gateway router (O
 - **Execution Timeouts**: ImageMagick limited to 30 seconds; LibreOffice limited to 45 seconds. Per-job temporary files are strictly cleaned up inside `finally` blocks.
 - **Safe Directory Purges**: Python `shutil` and `os` primitives used for spool cleanup instead of shell invocations.
 
-### 7. OpenWrt Paid Wi-Fi Router Integration
-A dedicated API enables automated, coin-operated, or voucher-based print integration with an upstream OpenWrt captive portal (e.g. openNDS / PisoWiFi):
-- **Source Verification**: Requests are accepted only from router IP `10.0.0.1`.
-- **Shared Secret Authentication**: Requires an `X-Router-Key` HTTP header matching the secret in `/etc/webprint/router.key` (mode `0600`).
+### 7. Wi-Fi Quick Print (OpenWrt PisoWiFi) and the Admin Review Queue
+This is **not** a replacement for the main print service. It is a small, autonomous quick-print for short documents (about 5 to 10 pages): a guest on the Wi-Fi uploads a file at the PisoWiFi portal, inserts coins, and the job is printed after the administrator checks it.
+
+Flow: upload (held, unpaid) -> coins counted by the router -> `release` -> job waits in the **Wi-Fi Quick Print Queue** in the admin console -> admin previews, then **Print** or **Reject** -> printer. Guests never reach `10.0.0.95`; the router relays everything.
+
+- **Source Verification**: Requests are accepted only from router IP `10.0.0.1` (or localhost).
+- **Shared Secret**: `X-Router-Key` header matching `/etc/webprint/router.key`. **Copy this key to the router** (for example `/etc/coinslot.d/print.key`, mode 600) once after installing; `setup.sh` generates it but cannot reach the router.
 - **Endpoints**:
-  - `POST /api/router/job`: Uploads document, converts format, counts pages, and stages the job as `HELD` (max 15-minute expiration). Returns `{job_id, pages, color, expires_at}`.
-  - `POST /api/router/release`: Releases and prints a held job upon confirmed payment. Idempotent.
-  - `POST /api/router/cancel`: Immediately deletes the held job and staging file.
-  - `GET /api/router/status?job_id=...`: Returns current state (`queued`, `printing`, `done`, `failed`, `paper_out`, `offline`).
-  - `GET /api/router/health`: Reports CUPS daemon health, default printer status, and alert states.
-- **Audit Logging**: All completed router print jobs are recorded in the accounting ledger with `source="wifi"`.
+  - `POST /api/router/job`: upload, convert, count pages, stage as `HELD` (15 minutes). Refuses files over the quick-print page limit (default 10). Returns `{job_id, pages, color, expires_at}`.
+  - `POST /api/router/release`: payment confirmed. With review on (default) the job becomes `awaiting_admin`; with review off it prints at once. Idempotent.
+  - `POST /api/router/cancel`: deletes an unprinted job (409 if already printed).
+  - `GET /api/router/status?job_id=...`: `queued` (not paid), `awaiting_admin`, `printing`, `done`, `rejected` (with reason), `failed` (expired/cancelled).
+  - `GET /api/router/health`: printer state, warnings (`paper_out`, `ink_low`), current page limit, review setting and rates.
+- **Admin console** (Settings tab, after unlocking): lists paid jobs with file name, pages, colour, price and minutes left; **Preview** opens the PDF in a new tab, **Print** sends it to CUPS, **Reject** removes it and the router credits the customer. A toast appears when a new paid job arrives. Settings there: review on/off, page limit, review window (default 30 minutes). A paid job nobody reviews in time expires and the router refunds it.
+- **Audit Logging**: printed router jobs are recorded in the ledger with `source="wifi"`, using the original file name.
 
 ### 8. Automated Daily Backups
 - **Service and Timer**: Handled via `backup-webprint.service` and `backup-webprint.timer`.
