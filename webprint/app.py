@@ -4066,7 +4066,21 @@ def api_admin_auth():
     if not admin_hash:
         return jsonify({'success': False, 'error': 'Administrator account not configured'}), 500
 
-    if check_password_hash(admin_hash, password):
+    valid = False
+    try:
+        valid = check_password_hash(admin_hash, password)
+    except Exception:
+        pass
+
+    if not valid and len(admin_hash) == 64:
+        if hmac.compare_digest(hashlib.sha256(password.encode('utf-8')).hexdigest(), admin_hash):
+            valid = True
+            new_hash = generate_password_hash(password, method='scrypt')
+            conn = get_db()
+            with conn:
+                conn.execute("UPDATE settings SET value = ? WHERE key = 'admin_hash'", (new_hash,))
+
+    if valid:
         admin_login_limiter.reset(client_ip)
         token = secrets.token_hex(24)
         ACTIVE_TOKENS[token] = time.time() + 7200

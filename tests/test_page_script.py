@@ -24,7 +24,7 @@ class TestPageScript(unittest.TestCase):
         self.assertTrue(scripts)
         for i, code in enumerate(scripts):
             path = os.path.join(test_dir, f'page{i}.js')
-            with open(path, 'w') as f:
+            with open(path, 'w', encoding='utf-8') as f:
                 f.write(code)
             res = subprocess.run(['node', '--check', path], capture_output=True, text=True)
             self.assertEqual(res.returncode, 0, res.stderr[:600])
