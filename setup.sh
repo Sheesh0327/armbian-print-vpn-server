@@ -57,6 +57,7 @@ fi
 
 mkdir -p /var/lib/webprint
 mkdir -p /var/spool/webprint/pinned
+mkdir -p /var/spool/webprint/inbox
 mkdir -p /var/backups/webprint
 mkdir -p /etc/webprint
 mkdir -p /opt/webprint/scripts
@@ -64,7 +65,7 @@ mkdir -p /opt/webprint/static
 
 chown -R webprint:lp /var/lib/webprint /var/spool/webprint
 chmod 750 /var/lib/webprint /var/spool/webprint
-chmod 700 /var/spool/webprint/pinned
+chmod 700 /var/spool/webprint/pinned /var/spool/webprint/inbox
 chmod 700 /var/backups/webprint
 chown root:webprint /etc/webprint
 chmod 750 /etc/webprint
@@ -76,6 +77,13 @@ if [[ ! -f /var/lib/webprint/secret.key ]]; then
     chown webprint:lp /var/lib/webprint/secret.key
     chmod 600 /var/lib/webprint/secret.key
 fi
+
+# Key the router uses to hand over files that Wi-Fi guests send (copy it to the router once, see README)
+if [[ ! -f /etc/webprint/send.key ]]; then
+    openssl rand -hex 32 > /etc/webprint/send.key
+fi
+chown root:webprint /etc/webprint/send.key
+chmod 640 /etc/webprint/send.key
 
 # Trusted home devices (the only addresses allowed to use the server). Never overwritten on re-runs.
 if [[ ! -f /etc/webprint/webprint.env ]]; then
@@ -189,6 +197,7 @@ echo -e "${CLR_GRN}=====================================================${CLR_RS
 echo -e "Web Print Portal:    http://${PRIMARY_IP}:80"
 echo -e "CUPS IPP Printing:   http://${PRIMARY_IP}:631/printers/<printer_name>"
 echo -e "CUPS Admin Panel:    https://${PRIMARY_IP}:631 (Local 10.0.0.0/24 subnet only)"
+echo -e "Guest file inbox key: /etc/webprint/send.key  (copy to the router as /etc/coinslot.d/send.key)"
 echo -e "Trusted devices:     ${TRUSTED_NETWORKS}  (edit /etc/webprint/webprint.env, then: systemctl restart webprint)"
 
 if [[ -n "${ADMIN_PASSWORD}" ]]; then

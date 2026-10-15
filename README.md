@@ -84,7 +84,15 @@ The print server sits on the downstream local network behind a gateway router (O
 - **Execution Timeouts**: ImageMagick limited to 30 seconds; LibreOffice limited to 45 seconds. Per-job temporary files are strictly cleaned up inside `finally` blocks.
 - **Safe Directory Purges**: Python `shutil` and `os` primitives used for spool cleanup instead of shell invocations.
 
-### 7. Automated Daily Backups
+### 7. Guest File Inbox (files sent from the Wi-Fi captive portal)
+A guest on the PisoWiFi network can tap **Send a file to the owner** on the portal and upload a document. It appears in the **Inbox** bar at the top of the Print tab. Nothing is ever printed automatically and there is no payment step.
+- **Guests never reach this server.** The router receives the file and relays it to `POST /api/inbox/upload` on `10.0.0.95`. That one endpoint accepts only the router address (`ROUTER_IP`, default `10.0.0.1`) with the shared key in `X-Router-Key`; every other request still follows the trusted-devices rule.
+- **Key**: `setup.sh` creates `/etc/webprint/send.key`. Copy its content once to the router as `/etc/coinslot.d/send.key` (mode 600). Without the key file the feature is off on both sides.
+- **Limits** (environment variables): `INBOX_MAX_MB` 10 per file, `INBOX_MAX_FILES` 50, `INBOX_TOTAL_MB` 300, `INBOX_TTL_HOURS` 24 (files are deleted after that). Only the document and image types the print portal supports; PDFs must really start with `%PDF`.
+- **Owner side**: unlock Admin (Settings tab) once, then open the Inbox bar: **Open for printing** loads the file into the normal print form, **Delete** removes it. Without the admin login the bar only shows how many files are waiting. The device address that sent each file is shown.
+- Files are stored with mode 600 and are converted only when you print them (the same sandboxed conversion as any upload). Treat them like email attachments from strangers.
+
+### 8. Automated Daily Backups
 - **Service and Timer**: Handled via `backup-webprint.service` and `backup-webprint.timer`.
 - **Schedule**: Triggers daily at 03:00.
 - **Data Protection**: Archives the SQLite database (`/var/lib/webprint/webprint.db`), encryption keys (`/etc/webprint`), and CUPS configuration into `/var/backups/webprint/` with file mode `0600`.

@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.2.0] - 2026-10-15
+
+### Added
+- **Guest file inbox**: files that Wi-Fi guests send from the captive portal (relayed by the router, no payment, nothing printed automatically) show up in an Inbox bar on the Print tab for the admin: Open for printing / Delete. New endpoints `/api/inbox/upload` (router + key only), `count`, `list`, `file`, `delete`; new `inbox` table and `/var/spool/webprint/inbox`; `setup.sh` creates `/etc/webprint/send.key`. Limits and expiry are configurable. Tests in `tests/test_inbox.py`.
+
 ## [2.1.0] - 2026-10-15
 
 ### Removed

@@ -11,6 +11,7 @@ import secrets
 import shutil
 import glob
 import ipaddress
+from urllib.parse import quote, unquote
 from datetime import datetime
 from flask import Flask, render_template_string, request, jsonify, Response
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -30,11 +31,23 @@ if os.name == 'nt' and 'WEBPRINT_DB' not in os.environ:
     DB_PATH = os.path.join(base_dir, 'webprint.db')
     SECRET_KEY_PATH = os.path.join(base_dir, 'secret.key')
     SPOOL_PINNED_DIR = os.path.join(base_dir, 'pinned')
+    SPOOL_INBOX_DIR = os.path.join(base_dir, 'inbox')
+    SEND_KEY_PATH = os.path.join(base_dir, 'send.key')
 else:
     DB_PATH = os.environ.get('WEBPRINT_DB', '/var/lib/webprint/webprint.db')
     SECRET_KEY_PATH = os.environ.get('WEBPRINT_SECRET_KEY', '/var/lib/webprint/secret.key')
     SPOOL_PINNED_DIR = os.environ.get('WEBPRINT_SPOOL_PINNED', '/var/spool/webprint/pinned')
+    SPOOL_INBOX_DIR = os.environ.get('WEBPRINT_SPOOL_INBOX', '/var/spool/webprint/inbox')
+    SEND_KEY_PATH = os.environ.get('WEBPRINT_SEND_KEY', '/etc/webprint/send.key')
 MAX_PAGES_PER_JOB = int(os.environ.get('MAX_PAGES_PER_JOB', 50))
+
+# Inbox: files that Wi-Fi guests send from the captive portal. The router relays them (guests never reach this server);
+# nothing is printed automatically. The owner sees them in the admin console and decides.
+ROUTER_IP = os.environ.get('ROUTER_IP', '10.0.0.1')
+INBOX_MAX_BYTES = int(os.environ.get('INBOX_MAX_MB', 10)) * 1024 * 1024
+INBOX_MAX_FILES = int(os.environ.get('INBOX_MAX_FILES', 50))
+INBOX_TOTAL_BYTES = int(os.environ.get('INBOX_TOTAL_MB', 300)) * 1024 * 1024
+INBOX_TTL_SECONDS = int(os.environ.get('INBOX_TTL_HOURS', 24)) * 3600
 
 # ------------------------------------------------------------
 # Trusted home devices only
@@ -75,6 +88,8 @@ def is_trusted_address(addr, networks=None):
 
 @app.before_request
 def only_trusted_devices():
+    if request.path == '/api/inbox/upload':
+        return None  # the router relays guest files; that endpoint checks the router address and key itself
     if not is_trusted_address(request.remote_addr):
         return Response('403 Forbidden: this print server is only for trusted home devices.\n', status=403, mimetype='text/plain')
 
@@ -214,6 +229,7 @@ def init_db():
     try:
         os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
         os.makedirs(SPOOL_PINNED_DIR, exist_ok=True)
+        os.makedirs(SPOOL_INBOX_DIR, exist_ok=True)
     except Exception:
         pass
     get_or_create_secret_key()
@@ -240,6 +256,16 @@ def init_db():
                 created_at INTEGER,
                 expires_at INTEGER,
                 failed_attempts INTEGER DEFAULT 0
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS inbox (
+                id TEXT PRIMARY KEY,
+                file_path TEXT,
+                filename TEXT,
+                size INTEGER,
+                device TEXT,
+                received_at INTEGER
             )
         """)
         conn.execute("""
@@ -1608,6 +1634,13 @@ INDEX_HTML = """<!DOCTYPE html>
 <main>
     <!-- TAB 1: EXACT CHROMIUM PRINT PREVIEW DIALOG -->
     <div class="tab-content active" id="tab-print">
+        <div id="inboxBar" style="display: none; margin: 0 0 10px 0; padding: 10px 14px; border: 1px solid var(--border); border-radius: 10px; font-size: 13px;">
+            <div style="display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap;">
+                <div><strong>Inbox</strong> <span id="inboxSummary" style="color: var(--text-secondary);"></span></div>
+                <button type="button" class="cr-btn-pill cr-btn-cancel" id="btnInboxToggle" style="padding: 3px 12px; font-size: 12px;">Show</button>
+            </div>
+            <div id="inboxList" style="display: none; flex-direction: column; gap: 6px; margin-top: 10px;"></div>
+        </div>
         <div class="cr-layout">
             <!-- Left: Virtual Desk Canvas Preview -->
             <div class="cr-desk" id="printPreviewDesk">
@@ -3335,6 +3368,92 @@ INDEX_HTML = """<!DOCTYPE html>
         if (confirm('Shut down print server appliance now?')) executeAdminAction('shutdown');
     });
 
+    // ==========================================
+    // INBOX: files sent by Wi-Fi guests through the captive portal
+    // ==========================================
+    let inboxTimer = null;
+    let inboxOpen = false;
+    let inboxLastCount = -1;
+
+    function formatBytes(n) {
+        if (n >= 1048576) return (n / 1048576).toFixed(1) + ' MB';
+        return Math.max(1, Math.round(n / 1024)) + ' KB';
+    }
+
+    async function loadInbox() {
+        const bar = document.getElementById('inboxBar');
+        try {
+            if (!currentAdminToken) {
+                const c = await (await fetch('/api/inbox/count')).json();
+                if (c.success && c.count > 0) {
+                    bar.style.display = 'block';
+                    document.getElementById('inboxSummary').textContent = c.count + ' file(s) waiting. Unlock Admin (Settings tab) to open them.';
+                    document.getElementById('btnInboxToggle').style.display = 'none';
+                } else {
+                    bar.style.display = 'none';
+                }
+                return;
+            }
+            const res = await fetch('/api/inbox/list', { headers: { 'X-Admin-Token': currentAdminToken } });
+            if (res.status === 401) { bar.style.display = 'none'; return; }
+            const data = await res.json();
+            if (!data.success) return;
+            bar.style.display = 'block';
+            document.getElementById('btnInboxToggle').style.display = '';
+            document.getElementById('inboxSummary').textContent = data.files.length
+                ? data.files.length + ' file(s) from Wi-Fi guests (kept ' + data.ttl_hours + ' h)'
+                : 'Empty. Guests can send files from the Wi-Fi portal.';
+            if (data.files.length > inboxLastCount && inboxLastCount >= 0) showToast('New file in the inbox: ' + data.files[0].filename, 'success');
+            inboxLastCount = data.files.length;
+            renderInbox(data.files);
+        } catch (e) {}
+    }
+
+    function renderInbox(files) {
+        const list = document.getElementById('inboxList');
+        list.style.display = (inboxOpen && files.length) ? 'flex' : 'none';
+        document.getElementById('btnInboxToggle').textContent = inboxOpen ? 'Hide' : 'Show';
+        list.textContent = '';
+        files.forEach(f => {
+            const row = document.createElement('div');
+            row.style.cssText = 'display:flex;flex-wrap:wrap;gap:8px;align-items:center;';
+            const info = document.createElement('div');
+            info.style.cssText = 'flex:1;min-width:180px;';
+            const name = document.createElement('div'); name.style.fontWeight = '600'; name.textContent = f.filename;
+            const meta = document.createElement('div'); meta.style.cssText = 'font-size:11px;color:var(--text-secondary);';
+            meta.textContent = formatBytes(f.size) + ' - received ' + f.received + (f.device ? ' - device ' + f.device : '');
+            info.appendChild(name); info.appendChild(meta);
+            const bUse = document.createElement('button'); bUse.type = 'button'; bUse.className = 'cr-btn-pill cr-btn-print'; bUse.textContent = 'Open for printing';
+            const bDel = document.createElement('button'); bDel.type = 'button'; bDel.className = 'cr-btn-pill cr-btn-cancel'; bDel.style.color = 'var(--danger)'; bDel.textContent = 'Delete';
+            bUse.addEventListener('click', async () => {
+                bUse.disabled = true;
+                try {
+                    const res = await fetch('/api/inbox/file?id=' + encodeURIComponent(f.id), { headers: { 'X-Admin-Token': currentAdminToken } });
+                    if (!res.ok) { showToast('File no longer available', 'error'); return; }
+                    const blob = await res.blob();
+                    const dt = new DataTransfer();
+                    dt.items.add(new File([blob], f.filename));
+                    fileInput.files = dt.files;
+                    fileInput.dispatchEvent(new Event('change'));
+                    showToast('Loaded ' + f.filename + '. Choose options, then Print.', 'success');
+                } catch (e) { showToast('Could not load the file', 'error'); }
+                bUse.disabled = false;
+            });
+            bDel.addEventListener('click', async () => {
+                if (!confirm('Delete ' + f.filename + ' from the inbox?')) return;
+                const fd = new FormData(); fd.append('id', f.id);
+                await fetch('/api/inbox/delete', { method: 'POST', headers: { 'X-Admin-Token': currentAdminToken }, body: fd });
+                loadInbox();
+            });
+            row.appendChild(info); row.appendChild(bUse); row.appendChild(bDel);
+            list.appendChild(row);
+        });
+    }
+
+    document.getElementById('btnInboxToggle').addEventListener('click', () => { inboxOpen = !inboxOpen; loadInbox(); });
+    loadInbox();
+    inboxTimer = setInterval(loadInbox, 10000);
+
     // Initial boot
     if (currentAdminToken) {
         document.getElementById('adminLockedState').style.display = 'none';
@@ -3360,6 +3479,14 @@ def cleanup_expired_jobs():
             except Exception:
                 pass
         cur.execute("DELETE FROM pinned_jobs WHERE expires_at < ?", (now,))
+        cur.execute("SELECT id, file_path FROM inbox WHERE received_at < ?", (now - INBOX_TTL_SECONDS,))
+        for r in cur.fetchall():
+            try:
+                if os.path.exists(r['file_path']):
+                    os.remove(r['file_path'])
+            except Exception:
+                pass
+        cur.execute("DELETE FROM inbox WHERE received_at < ?", (now - INBOX_TTL_SECONDS,))
         conn.commit()
     except Exception:
         pass
@@ -4002,6 +4129,130 @@ def api_admin_action():
             conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('public_print', ?)", (new_val,))
         return jsonify({'success': True, 'public_print': (new_val == 'on'), 'message': f'Public printing turned {new_val}.'})
     return jsonify({'success': False, 'error': 'Unknown action'}), 400
+
+# ============================================================
+# INBOX: FILES SENT BY WI-FI GUESTS (relayed by the OpenWrt router)
+# ============================================================
+def get_send_key() -> str:
+    try:
+        with open(SEND_KEY_PATH, 'r') as f:
+            return f.read().strip()
+    except Exception:
+        return os.environ.get('SEND_KEY', '').strip()
+
+def clean_filename(name: str) -> str:
+    base = os.path.basename((name or '').replace('\\', '/'))
+    base = ''.join(ch for ch in base if ch.isprintable() and ch not in '<>:"|?*')
+    return base.strip()[:80] or 'document'
+
+@app.route('/api/inbox/upload', methods=['POST'])
+def api_inbox_upload():
+    """Raw file body from the router. Only the router address with the shared key; never printed automatically."""
+    client_ip = request.remote_addr or ''
+    if client_ip.startswith('::ffff:'):
+        client_ip = client_ip[7:]
+    if client_ip not in (ROUTER_IP, '127.0.0.1', '::1'):
+        return jsonify({'success': False, 'error': 'Forbidden: source address not allowed'}), 403
+    expected = get_send_key()
+    if not expected:
+        return jsonify({'success': False, 'error': 'Inbox is not configured on this server'}), 503
+    provided = request.headers.get('X-Router-Key', '').strip()
+    if not provided or not hmac.compare_digest(provided, expected):
+        return jsonify({'success': False, 'error': 'Unauthorized'}), 401
+
+    length = request.content_length
+    if not length:
+        return jsonify({'success': False, 'error': 'Empty file'}), 400
+    if length > INBOX_MAX_BYTES:
+        return jsonify({'success': False, 'error': f'File is larger than {INBOX_MAX_BYTES // (1024 * 1024)} MB'}), 413
+
+    filename = clean_filename(unquote(request.headers.get('X-Filename', '')))
+    try:
+        ext = validate_extension(filename)
+    except ValueError as e:
+        return jsonify({'success': False, 'error': str(e)}), 415
+
+    data = request.get_data()
+    if len(data) != length:
+        return jsonify({'success': False, 'error': 'Incomplete upload'}), 400
+    if ext == '.pdf' and not data.startswith(b'%PDF'):
+        return jsonify({'success': False, 'error': 'Not a PDF file'}), 415
+
+    cleanup_expired_jobs()
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT COUNT(*) AS n, COALESCE(SUM(size), 0) AS total FROM inbox")
+    row = cur.fetchone()
+    if row['n'] >= INBOX_MAX_FILES or row['total'] + length > INBOX_TOTAL_BYTES:
+        return jsonify({'success': False, 'error': 'Inbox is full. Please try again later.'}), 507
+
+    file_id = f"in_{int(time.time())}_{secrets.token_hex(4)}"
+    path = os.path.join(SPOOL_INBOX_DIR, file_id + ext)
+    fd = os.open(path, os.O_CREAT | os.O_WRONLY | os.O_TRUNC, 0o600)
+    with open(fd, 'wb') as f:
+        f.write(data)
+    device = ''.join(ch for ch in request.headers.get('X-Device', '') if ch.isalnum() or ch in ':.-')[:40]
+    with conn:
+        conn.execute("INSERT INTO inbox (id, file_path, filename, size, device, received_at) VALUES (?, ?, ?, ?, ?, ?)",
+                     (file_id, path, filename, length, device, int(time.time())))
+    return jsonify({'success': True, 'id': file_id})
+
+@app.route('/api/inbox/count', methods=['GET'])
+def api_inbox_count():
+    cleanup_expired_jobs()
+    cur = get_db().cursor()
+    cur.execute("SELECT COUNT(*) AS n FROM inbox")
+    return jsonify({'success': True, 'count': cur.fetchone()['n']})
+
+@app.route('/api/inbox/list', methods=['GET'])
+def api_inbox_list():
+    if not verify_admin_token(request.headers.get('X-Admin-Token')):
+        return jsonify({'success': False, 'error': 'Unauthorized: administrator login required'}), 401
+    cleanup_expired_jobs()
+    cur = get_db().cursor()
+    cur.execute("SELECT * FROM inbox ORDER BY received_at DESC")
+    now = int(time.time())
+    files = [{
+        'id': r['id'], 'filename': r['filename'], 'size': r['size'], 'device': r['device'],
+        'received': datetime.fromtimestamp(r['received_at']).strftime('%H:%M:%S'),
+        'age_minutes': max(0, (now - r['received_at']) // 60)
+    } for r in cur.fetchall()]
+    return jsonify({'success': True, 'files': files, 'ttl_hours': INBOX_TTL_SECONDS // 3600})
+
+@app.route('/api/inbox/file', methods=['GET'])
+def api_inbox_file():
+    if not verify_admin_token(request.headers.get('X-Admin-Token')):
+        return jsonify({'success': False, 'error': 'Unauthorized: administrator login required'}), 401
+    cur = get_db().cursor()
+    cur.execute("SELECT * FROM inbox WHERE id = ?", (request.args.get('id', ''),))
+    row = cur.fetchone()
+    if not row or not os.path.exists(row['file_path']):
+        return jsonify({'success': False, 'error': 'File not found'}), 404
+    with open(row['file_path'], 'rb') as f:
+        data = f.read()
+    return Response(data, mimetype='application/octet-stream',
+                    headers={'Content-Disposition': 'attachment', 'X-Filename': quote(row['filename']),
+                             'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff'})
+
+@app.route('/api/inbox/delete', methods=['POST'])
+def api_inbox_delete():
+    if not verify_admin_token(request.headers.get('X-Admin-Token')):
+        return jsonify({'success': False, 'error': 'Unauthorized: administrator login required'}), 401
+    file_id = (request.form.get('id') or '').strip()
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM inbox WHERE id = ?", (file_id,))
+    row = cur.fetchone()
+    if not row:
+        return jsonify({'success': False, 'error': 'File not found'}), 404
+    try:
+        if os.path.exists(row['file_path']):
+            os.remove(row['file_path'])
+    except Exception:
+        pass
+    with conn:
+        conn.execute("DELETE FROM inbox WHERE id = ?", (file_id,))
+    return jsonify({'success': True})
 
 init_db()
 

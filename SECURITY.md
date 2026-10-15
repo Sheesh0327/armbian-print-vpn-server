@@ -89,6 +89,12 @@ The appliance is designed for mixed-trust physical and network environments wher
 - **Narrowing**: if visitors can join the modem's Wi-Fi, list single devices instead of `192.168.1.0/24` and give those devices fixed addresses (DHCP reservations) on the modem.
 - **Limits**: addresses can be spoofed on a shared Wi-Fi by a determined person. The allow-list keeps casual and accidental access out; it is not a replacement for the admin password or for separating networks.
 
+### F. Guest File Inbox
+- **One narrow door**: `/api/inbox/upload` is the only endpoint outside the trusted-devices rule. It accepts only `ROUTER_IP` (default `10.0.0.1`) or loopback, requires `X-Router-Key` (constant-time compare), and answers 503 when no key file exists.
+- **Guests are never connected to this server**: the router program receives the guest's upload, applies its own size and rate limits per device, and relays it.
+- **Containment**: extension allow-list, PDF signature check, per-file / count / total size limits, files stored mode 600 under random names, original name sanitized and shown with `textContent` only, download served as `attachment` with `nosniff`, automatic deletion after `INBOX_TTL_HOURS`, nothing printed without the owner's action.
+- **Residual risk**: a guest can send unwanted or harmful content to the owner. Everything is listed with the sending device address; do not open files you do not expect, and delete them.
+
 ---
 
 ## 4. Reporting a Vulnerability
