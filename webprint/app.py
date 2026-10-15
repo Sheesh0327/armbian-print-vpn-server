@@ -10,6 +10,7 @@ import hmac
 import secrets
 import shutil
 import glob
+import ipaddress
 from datetime import datetime
 from flask import Flask, render_template_string, request, jsonify, Response
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -28,18 +29,54 @@ if os.name == 'nt' and 'WEBPRINT_DB' not in os.environ:
     base_dir = os.path.join(tempfile.gettempdir(), 'webprint_dev')
     DB_PATH = os.path.join(base_dir, 'webprint.db')
     SECRET_KEY_PATH = os.path.join(base_dir, 'secret.key')
-    ROUTER_KEY_PATH = os.path.join(base_dir, 'router.key')
-    ROUTER_KEY_FALLBACK_PATH = os.path.join(base_dir, 'router_fallback.key')
     SPOOL_PINNED_DIR = os.path.join(base_dir, 'pinned')
-    SPOOL_HELD_DIR = os.path.join(base_dir, 'held')
 else:
     DB_PATH = os.environ.get('WEBPRINT_DB', '/var/lib/webprint/webprint.db')
     SECRET_KEY_PATH = os.environ.get('WEBPRINT_SECRET_KEY', '/var/lib/webprint/secret.key')
-    ROUTER_KEY_PATH = os.environ.get('WEBPRINT_ROUTER_KEY', '/etc/webprint/router.key')
-    ROUTER_KEY_FALLBACK_PATH = '/var/lib/webprint/router.key'
     SPOOL_PINNED_DIR = os.environ.get('WEBPRINT_SPOOL_PINNED', '/var/spool/webprint/pinned')
-    SPOOL_HELD_DIR = os.environ.get('WEBPRINT_SPOOL_HELD', '/var/spool/webprint/held')
 MAX_PAGES_PER_JOB = int(os.environ.get('MAX_PAGES_PER_JOB', 50))
+
+# ------------------------------------------------------------
+# Trusted home devices only
+# ------------------------------------------------------------
+# Only these networks / single addresses may use this server at all (portal, API and admin). Set TRUSTED_NETWORKS in
+# /etc/webprint/webprint.env, comma separated, e.g. "10.0.0.0/24,192.168.1.20,192.168.1.21". Loopback is always allowed.
+# Guest Wi-Fi (10.0.30.0/24) is not in the default list. Anything that cannot be parsed is ignored, never widened.
+DEFAULT_TRUSTED_NETWORKS = '10.0.0.0/24,192.168.1.0/24'
+
+def parse_trusted_networks(raw):
+    nets = []
+    for part in (raw or '').split(','):
+        part = part.strip()
+        if not part:
+            continue
+        try:
+            nets.append(ipaddress.ip_network(part, strict=False))
+        except ValueError:
+            continue
+    return nets
+
+TRUSTED_NETWORKS = parse_trusted_networks(os.environ.get('TRUSTED_NETWORKS', DEFAULT_TRUSTED_NETWORKS))
+LOOPBACK_NETWORKS = [ipaddress.ip_network('127.0.0.0/8'), ipaddress.ip_network('::1/128')]
+
+def is_trusted_address(addr, networks=None):
+    if not addr:
+        return False
+    if addr.startswith('::ffff:'):
+        addr = addr[7:]
+    try:
+        ip = ipaddress.ip_address(addr)
+    except ValueError:
+        return False
+    for net in LOOPBACK_NETWORKS + (TRUSTED_NETWORKS if networks is None else networks):
+        if ip.version == net.version and ip in net:
+            return True
+    return False
+
+@app.before_request
+def only_trusted_devices():
+    if not is_trusted_address(request.remote_addr):
+        return Response('403 Forbidden: this print server is only for trusted home devices.\n', status=403, mimetype='text/plain')
 
 ALLOWED_EXTENSIONS = {
     '.pdf', '.png', '.jpg', '.jpeg', '.webp', '.heic', '.heif',
@@ -122,29 +159,6 @@ def get_or_create_secret_key() -> bytes:
         pass
     return key
 
-def get_router_key() -> str:
-    for path in [ROUTER_KEY_PATH, ROUTER_KEY_FALLBACK_PATH]:
-        if os.path.exists(path):
-            try:
-                with open(path, 'r') as f:
-                    k = f.read().strip()
-                    if k:
-                        return k
-            except Exception:
-                pass
-    env_key = os.environ.get('ROUTER_KEY', '')
-    if env_key:
-        return env_key.strip()
-    new_key = secrets.token_hex(32)
-    try:
-        os.makedirs(os.path.dirname(ROUTER_KEY_FALLBACK_PATH), exist_ok=True)
-        fd = os.open(ROUTER_KEY_FALLBACK_PATH, os.O_CREAT | os.O_WRONLY | os.O_TRUNC, 0o600)
-        with open(fd, 'w') as f:
-            f.write(new_key)
-    except Exception:
-        pass
-    return new_key
-
 def hash_pin(pin: str) -> str:
     key = get_or_create_secret_key()
     return hmac.new(key, pin.encode('utf-8'), hashlib.sha256).hexdigest()
@@ -200,7 +214,6 @@ def init_db():
     try:
         os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
         os.makedirs(SPOOL_PINNED_DIR, exist_ok=True)
-        os.makedirs(SPOOL_HELD_DIR, exist_ok=True)
     except Exception:
         pass
     get_or_create_secret_key()
@@ -230,21 +243,6 @@ def init_db():
             )
         """)
         conn.execute("""
-            CREATE TABLE IF NOT EXISTS router_jobs (
-                job_id TEXT PRIMARY KEY,
-                file_path TEXT,
-                pages INTEGER,
-                copies INTEGER,
-                colormodel TEXT,
-                printer TEXT,
-                options_json TEXT,
-                status TEXT,
-                cups_job_id TEXT,
-                created_at INTEGER,
-                expires_at INTEGER
-            )
-        """)
-        conn.execute("""
             CREATE TABLE IF NOT EXISTS print_ledger (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 timestamp INTEGER,
@@ -269,22 +267,13 @@ def init_db():
             conn.execute("ALTER TABLE print_ledger ADD COLUMN source TEXT DEFAULT 'portal'")
         except sqlite3.OperationalError:
             pass
-        for col_def in ("filename TEXT", "paid_at INTEGER", "review_expires_at INTEGER", "reject_reason TEXT"):
-            try:
-                conn.execute("ALTER TABLE router_jobs ADD COLUMN " + col_def)
-            except sqlite3.OperationalError:
-                pass
-
         defaults = {
             'currency_symbol': '₱',
             'rate_bw': '2.00',
             'rate_color': '5.00',
             'pin_expire_hours': '24',
             'max_pages_per_job': '50',
-            'public_print': 'on',
-            'wifi_review': 'on',
-            'wifi_review_minutes': '30',
-            'wifi_max_pages': '10'
+            'public_print': 'on'
         }
         for k, v in defaults.items():
             conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", (k, v))
@@ -329,26 +318,6 @@ def is_public_print_enabled() -> bool:
     if env_val is not None:
         return env_val.lower() in ['1', 'true', 'on', 'yes']
     return get_setting('public_print', 'on').lower() in ['1', 'true', 'on', 'yes']
-
-def wifi_review_enabled() -> bool:
-    return get_setting('wifi_review', 'on') != 'off'
-
-def wifi_max_pages() -> int:
-    try:
-        return max(1, min(50, int(get_setting('wifi_max_pages', '10'))))
-    except ValueError:
-        return 10
-
-def wifi_review_minutes() -> int:
-    try:
-        return max(5, min(240, int(get_setting('wifi_review_minutes', '30'))))
-    except ValueError:
-        return 30
-
-def clean_filename(name: str) -> str:
-    base = os.path.basename((name or '').replace('\\', '/'))
-    base = ''.join(ch for ch in base if ch.isprintable())
-    return base[:80] or 'document'
 
 def record_ledger(title, printer, pages, copies, total_pages, colormodel, cost, client_ip, status, source='portal'):
     try:
@@ -2235,18 +2204,6 @@ INDEX_HTML = """<!DOCTYPE html>
                         <button class="cr-btn-pill cr-btn-cancel" id="btnSaveRates" style="font-size: 12px;">Save Rate Card</button>
                     </div>
 
-                    <div style="margin-bottom: 16px; padding-top: 14px; border-top: 1px solid var(--border);">
-                        <label style="font-size: 11px; color: var(--text-secondary); text-transform: uppercase; font-weight: 600; display: block; margin-bottom: 8px;">Wi-Fi Quick Print Queue <span id="wifiQueueCount" style="color: var(--warning);"></span></label>
-                        <p style="font-size: 12px; color: var(--text-secondary); margin-bottom: 10px;">Customers who paid at the Wi-Fi portal appear here. Preview the document, then send it to the printer or reject it (the customer is credited).</p>
-                        <div id="wifiQueueList" style="display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px;"></div>
-                        <div style="display: flex; flex-wrap: wrap; gap: 10px; align-items: center; font-size: 12px;">
-                            <label><input type="checkbox" id="wifiReviewOn"> Review before printing</label>
-                            <label>Max pages <input type="text" id="wifiMaxPages" class="cr-input" style="width: 60px; display: inline-block;"></label>
-                            <label>Review window (min) <input type="text" id="wifiReviewMin" class="cr-input" style="width: 60px; display: inline-block;"></label>
-                            <button class="cr-btn-pill cr-btn-cancel" id="btnSaveWifi" style="font-size: 12px;">Save</button>
-                        </div>
-                    </div>
-
                     <div style="padding-top: 14px; border-top: 1px solid var(--border);">
                         <label style="font-size: 11px; color: var(--text-secondary); text-transform: uppercase; font-weight: 600; display: block; margin-bottom: 8px;">Hardware Power & Spool Actions</label>
                         <div style="display: flex; flex-wrap: wrap; gap: 8px;">
@@ -3338,7 +3295,6 @@ INDEX_HTML = """<!DOCTYPE html>
                 document.getElementById('adminUnlockedState').style.display = 'block';
                 document.getElementById('btnAdminLock').innerHTML = '<svg class="icon" viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 9.9-1"></path></svg> <span>Admin</span>';
                 showToast('Administrator privileges unlocked', 'success');
-                startWifiPolling();
             } else {
                 showToast(data.error || 'Invalid password', 'error');
             }
@@ -3379,121 +3335,12 @@ INDEX_HTML = """<!DOCTYPE html>
         if (confirm('Shut down print server appliance now?')) executeAdminAction('shutdown');
     });
 
-    // ==========================================
-    // WI-FI QUICK PRINT QUEUE (admin review)
-    // ==========================================
-    let wifiPollTimer = null;
-    let wifiKnownJobs = new Set();
-    let wifiFirstLoad = true;
-
-    async function wifiAdminFetch(url, opts={}) {
-        opts.headers = Object.assign({ 'X-Admin-Token': currentAdminToken }, opts.headers || {});
-        return fetch(url, opts);
-    }
-
-    function renderWifiQueue(data) {
-        const list = document.getElementById('wifiQueueList');
-        list.textContent = '';
-        document.getElementById('wifiQueueCount').textContent = data.jobs.length ? '(' + data.jobs.length + ' waiting)' : '';
-        if (!data.jobs.length) {
-            const empty = document.createElement('div');
-            empty.style.cssText = 'font-size:12px;color:var(--text-secondary);';
-            empty.textContent = 'No paid jobs waiting.' + (data.unpaid_uploads ? ' ' + data.unpaid_uploads + ' upload(s) waiting for coins.' : '');
-            list.appendChild(empty);
-        }
-        data.jobs.forEach(j => {
-            const row = document.createElement('div');
-            row.style.cssText = 'display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:8px;border:1px solid var(--border);border-radius:8px;';
-            const info = document.createElement('div');
-            info.style.cssText = 'flex:1;min-width:160px;font-size:12px;';
-            const name = document.createElement('div');
-            name.style.fontWeight = '600';
-            name.textContent = j.filename;
-            const meta = document.createElement('div');
-            meta.style.color = 'var(--text-secondary)';
-            meta.textContent = j.pages + ' page(s) x ' + j.copies + ' - ' + (j.color ? 'Color' : 'B&W') + ' - ₱' + j.price.toFixed(2) + ' paid at ' + j.paid_at + ' - ' + Math.ceil(j.expires_in / 60) + ' min left';
-            info.appendChild(name); info.appendChild(meta);
-            const bPrev = document.createElement('button'); bPrev.className = 'cr-btn-pill cr-btn-cancel'; bPrev.textContent = 'Preview';
-            const bOk = document.createElement('button'); bOk.className = 'cr-btn-pill cr-btn-print'; bOk.textContent = 'Print';
-            const bNo = document.createElement('button'); bNo.className = 'cr-btn-pill cr-btn-cancel'; bNo.style.color = 'var(--danger)'; bNo.textContent = 'Reject';
-            bPrev.addEventListener('click', async () => {
-                const w = window.open('', '_blank');
-                try {
-                    const res = await wifiAdminFetch('/api/admin/wifi/preview?job_id=' + encodeURIComponent(j.job_id));
-                    if (!res.ok) { if (w) w.close(); showToast('Preview not available', 'error'); return; }
-                    const blob = await res.blob();
-                    if (w) w.location = URL.createObjectURL(blob);
-                } catch (e) { if (w) w.close(); showToast('Preview failed', 'error'); }
-            });
-            bOk.addEventListener('click', async () => {
-                bOk.disabled = true;
-                const fd = new FormData(); fd.append('job_id', j.job_id);
-                const res = await wifiAdminFetch('/api/admin/wifi/approve', { method: 'POST', body: fd });
-                const d = await res.json();
-                showToast(d.success ? d.message : ('Error: ' + d.error), d.success ? 'success' : 'error');
-                loadWifiQueue();
-            });
-            bNo.addEventListener('click', async () => {
-                const reason = prompt('Reason for rejecting (shown to the customer, optional):', '');
-                if (reason === null) return;
-                const fd = new FormData(); fd.append('job_id', j.job_id); fd.append('reason', reason);
-                const res = await wifiAdminFetch('/api/admin/wifi/reject', { method: 'POST', body: fd });
-                const d = await res.json();
-                showToast(d.success ? d.message : ('Error: ' + d.error), d.success ? 'success' : 'error');
-                loadWifiQueue();
-            });
-            row.appendChild(info); row.appendChild(bPrev); row.appendChild(bOk); row.appendChild(bNo);
-            list.appendChild(row);
-        });
-    }
-
-    async function loadWifiQueue() {
-        if (!currentAdminToken) return;
-        try {
-            const res = await wifiAdminFetch('/api/admin/wifi/queue');
-            if (res.status === 401) { stopWifiPolling(); return; }
-            const data = await res.json();
-            if (!data.success) return;
-            const fresh = data.jobs.filter(j => !wifiKnownJobs.has(j.job_id));
-            data.jobs.forEach(j => wifiKnownJobs.add(j.job_id));
-            if (fresh.length && !wifiFirstLoad) showToast('New paid Wi-Fi print job: ' + fresh[0].filename, 'success');
-            wifiFirstLoad = false;
-            renderWifiQueue(data);
-            const active = document.activeElement;
-            if (!active || !['wifiMaxPages', 'wifiReviewMin', 'wifiReviewOn'].includes(active.id)) {
-                document.getElementById('wifiReviewOn').checked = data.review;
-                document.getElementById('wifiMaxPages').value = data.max_pages;
-                document.getElementById('wifiReviewMin').value = data.review_minutes;
-            }
-        } catch (e) {}
-    }
-
-    function startWifiPolling() {
-        if (wifiPollTimer) return;
-        loadWifiQueue();
-        wifiPollTimer = setInterval(loadWifiQueue, 8000);
-    }
-    function stopWifiPolling() {
-        if (wifiPollTimer) clearInterval(wifiPollTimer);
-        wifiPollTimer = null;
-    }
-
-    document.getElementById('btnSaveWifi').addEventListener('click', async () => {
-        await executeAdminAction('update_wifi_settings', {
-            wifi_review: document.getElementById('wifiReviewOn').checked ? 'on' : 'off',
-            wifi_max_pages: document.getElementById('wifiMaxPages').value,
-            wifi_review_minutes: document.getElementById('wifiReviewMin').value
-        });
-        loadWifiQueue();
-    });
-
     // Initial boot
     if (currentAdminToken) {
         document.getElementById('adminLockedState').style.display = 'none';
         document.getElementById('adminUnlockedState').style.display = 'block';
         document.getElementById('btnAdminLock').innerHTML = '<svg class="icon" viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 9.9-1"></path></svg> <span>Admin</span>';
     }
-    if (currentAdminToken) startWifiPolling();
     loadPrinters();
     updatePreviewLayout();
 </script>
@@ -3513,46 +3360,9 @@ def cleanup_expired_jobs():
             except Exception:
                 pass
         cur.execute("DELETE FROM pinned_jobs WHERE expires_at < ?", (now,))
-
-        cur.execute("SELECT job_id, file_path FROM router_jobs WHERE status = 'HELD' AND expires_at < ?", (now,))
-        for r in cur.fetchall():
-            try:
-                if os.path.exists(r['file_path']):
-                    os.remove(r['file_path'])
-            except Exception:
-                pass
-        cur.execute("UPDATE router_jobs SET status = 'EXPIRED' WHERE status = 'HELD' AND expires_at < ?", (now,))
-
-        # Paid jobs the admin never reviewed in time: remove the file; the router sees 'failed/expired' and credits the customer
-        cur.execute("SELECT job_id, file_path FROM router_jobs WHERE status = 'PAID' AND review_expires_at < ?", (now,))
-        for r in cur.fetchall():
-            try:
-                if os.path.exists(r['file_path']):
-                    os.remove(r['file_path'])
-            except Exception:
-                pass
-        cur.execute("UPDATE router_jobs SET status = 'EXPIRED' WHERE status = 'PAID' AND review_expires_at < ?", (now,))
         conn.commit()
     except Exception:
         pass
-
-def verify_router_request():
-    client_ip = request.remote_addr or ''
-    if client_ip.startswith('::ffff:'):
-        client_ip = client_ip[7:]
-    allowed_ips = {'10.0.0.1', '127.0.0.1', '::1'}
-    if client_ip not in allowed_ips:
-        return False, jsonify({'success': False, 'error': 'Forbidden: source IP not authorized'}), 403
-
-    provided_key = request.headers.get('X-Router-Key', '')
-    if not provided_key:
-        return False, jsonify({'success': False, 'error': 'Unauthorized: missing X-Router-Key header'}), 401
-
-    expected_key = get_router_key()
-    if not expected_key or not hmac.compare_digest(provided_key.strip(), expected_key.strip()):
-        return False, jsonify({'success': False, 'error': 'Unauthorized: invalid router key'}), 401
-
-    return True, None, 200
 
 @app.route('/')
 def index():
@@ -4184,19 +3994,6 @@ def api_admin_action():
         with conn:
             conn.execute("UPDATE settings SET value = ? WHERE key = 'admin_hash'", (new_hash,))
         return jsonify({'success': True, 'message': 'Admin password changed.'})
-    elif action == 'update_wifi_settings':
-        review = 'off' if request.form.get('wifi_review') == 'off' else 'on'
-        try:
-            max_pages = max(1, min(50, int(request.form.get('wifi_max_pages', '10'))))
-            minutes = max(5, min(240, int(request.form.get('wifi_review_minutes', '30'))))
-        except ValueError:
-            return jsonify({'success': False, 'error': 'Page limit and review time must be numbers'}), 400
-        conn = get_db()
-        with conn:
-            conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('wifi_review', ?)", (review,))
-            conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('wifi_max_pages', ?)", (str(max_pages),))
-            conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('wifi_review_minutes', ?)", (str(minutes),))
-        return jsonify({'success': True, 'message': 'Wi-Fi print settings saved.'})
     elif action == 'toggle_public_print':
         current = is_public_print_enabled()
         new_val = 'off' if current else 'on'
@@ -4205,404 +4002,6 @@ def api_admin_action():
             conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('public_print', ?)", (new_val,))
         return jsonify({'success': True, 'public_print': (new_val == 'on'), 'message': f'Public printing turned {new_val}.'})
     return jsonify({'success': False, 'error': 'Unknown action'}), 400
-
-# ============================================================
-# ROUTER INTEGRATION API (SECTION C - SOURCE: 10.0.0.1 ONLY)
-# ============================================================
-@app.route('/api/router/job', methods=['POST'])
-def api_router_job():
-    auth_ok, resp, status_code = verify_router_request()
-    if not auth_ok:
-        return resp, status_code
-
-    if 'file' not in request.files:
-        return jsonify({'success': False, 'error': 'No file uploaded'}), 400
-    file = request.files['file']
-    if not file.filename:
-        return jsonify({'success': False, 'error': 'Empty filename'}), 400
-
-    try:
-        ext = validate_extension(file.filename)
-        copies = validate_copies(request.form.get('copies', '1'))
-    except ValueError as e:
-        return jsonify({'success': False, 'error': str(e)}), 400
-
-    printers_list, def_p = get_printers()
-    valid_names = [p['name'] for p in printers_list]
-    printer = request.form.get('printer', '').strip()
-    if not printer:
-        printer = def_p or (valid_names[0] if valid_names else 'HP_Smart_Tank_520')
-    elif valid_names and printer not in valid_names:
-        return jsonify({'success': False, 'error': 'Printer not found'}), 400
-
-    colormodel = request.form.get('colormodel', 'RGB')
-    if colormodel not in ALLOWED_COLORMODELS:
-        colormodel = 'RGB'
-
-    pagesize = request.form.get('pagesize', 'A4')
-    if pagesize not in ALLOWED_PAGESIZES: pagesize = 'A4'
-    duplex = request.form.get('duplex', 'None')
-    if duplex not in ALLOWED_DUPLEX: duplex = 'None'
-    mediatype = request.form.get('mediatype', 'Plain')
-    if mediatype not in ALLOWED_MEDIATYPES: mediatype = 'Plain'
-    quality = request.form.get('quality', 'Normal')
-    if quality not in ALLOWED_QUALITIES: quality = 'Normal'
-    resolution = request.form.get('resolution', '300')
-    if resolution not in ALLOWED_RESOLUTIONS: resolution = '300'
-    fitpage = (request.form.get('fitpage', 'true').lower() == 'true')
-
-    with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp:
-        file.save(tmp.name)
-        raw_path = tmp.name
-
-    temp_dir = None
-    try:
-        conv_pdf, temp_dir = convert_to_pdf(raw_path, file.filename)
-        pages = get_pdf_page_count(conv_pdf)
-        wifi_cap = min(wifi_max_pages(), MAX_PAGES_PER_JOB)
-        if pages > wifi_cap:
-            return jsonify({'success': False, 'error': f'Quick-print limit is {wifi_cap} pages per job', 'max_pages': wifi_cap}), 400
-
-        job_id = f"wifi_{int(time.time())}_{secrets.token_hex(4)}"
-        held_dest = os.path.join(SPOOL_HELD_DIR, f"{job_id}.pdf")
-        shutil.copy2(conv_pdf, held_dest)
-        try: os.chmod(held_dest, 0o600)
-        except Exception: pass
-
-        options = {
-            'printer': printer,
-            'copies': copies,
-            'pagesize': pagesize,
-            'colormodel': colormodel,
-            'duplex': duplex,
-            'mediatype': mediatype,
-            'quality': quality,
-            'resolution': resolution,
-            'fitpage': fitpage
-        }
-
-        expires_at = int(time.time()) + 900  # 15 minutes hold
-        conn = get_db()
-        with conn:
-            conn.execute("""
-                INSERT INTO router_jobs
-                (job_id, file_path, pages, copies, colormodel, printer, options_json, status, cups_job_id, created_at, expires_at, filename)
-                VALUES (?, ?, ?, ?, ?, ?, ?, 'HELD', NULL, ?, ?, ?)
-            """, (job_id, held_dest, pages, copies, colormodel, printer, json.dumps(options), int(time.time()), expires_at,
-                  clean_filename(file.filename)))
-
-        is_color = (colormodel in ['RGB', 'CMYK', 'Color'])
-        return jsonify({
-            'success': True,
-            'job_id': job_id,
-            'pages': pages,
-            'color': is_color,
-            'expires_at': expires_at
-        })
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
-    finally:
-        if temp_dir and os.path.exists(temp_dir):
-            shutil.rmtree(temp_dir, ignore_errors=True)
-        if os.path.exists(raw_path):
-            try: os.remove(raw_path)
-            except Exception: pass
-
-def _drop_file(path):
-    try:
-        if path and os.path.exists(path):
-            os.remove(path)
-    except Exception:
-        pass
-
-def _lp_command_for_router_job(row, options):
-    printer = options.get('printer') or 'HP_Smart_Tank_520'
-    copies = options.get('copies', 1)
-    cmd = ['lp', '-d', printer, '-n', str(copies)]
-    if options.get('pagesize'): cmd.extend(['-o', f"PageSize={options['pagesize']}"])
-    if options.get('mediatype'): cmd.extend(['-o', f"MediaType={options['mediatype']}"])
-    if options.get('quality'): cmd.extend(['-o', f"OutputMode={options['quality']}"])
-    if options.get('colormodel'): cmd.extend(['-o', f"ColorModel={options['colormodel']}"])
-    if options.get('duplex') and options['duplex'] != 'None': cmd.extend(['-o', f"Duplex={options['duplex']}"])
-    if options.get('fitpage') is True or options.get('fitpage') == 'true': cmd.extend(['-o', 'fit-to-page'])
-    if options.get('resolution'): cmd.extend(['-o', f"resolution={options['resolution']}dpi"])
-    cmd.append(row['file_path'])
-    return printer, cmd
-
-def _print_router_job(conn, row):
-    """Send a held Wi-Fi job to CUPS, delete the spool file and write the ledger row. Raises on failure."""
-    options = json.loads(row['options_json'])
-    if not os.path.exists(row['file_path']):
-        raise RuntimeError('Spool file missing')
-    printer, cmd = _lp_command_for_router_job(row, options)
-    res = subprocess.run(cmd, capture_output=True, text=True, check=True, timeout=30)
-    cups_job = res.stdout.strip()
-    _drop_file(row['file_path'])
-    with conn:
-        conn.execute("UPDATE router_jobs SET status = 'PRINTED', cups_job_id = ? WHERE job_id = ?", (cups_job, row['job_id']))
-    rate = get_rate(row['colormodel'] in ['RGB', 'CMYK', 'Color'])
-    cost = rate * row['pages'] * row['copies']
-    record_ledger(row['filename'] or "WiFi Guest Job", printer, row['pages'], row['copies'],
-                  row['pages'] * row['copies'], row['colormodel'], cost,
-                  "10.0.0.1", "COMPLETED", source="wifi")
-    return cups_job
-
-@app.route('/api/router/release', methods=['POST'])
-def api_router_release():
-    """The router says the customer has paid. With review on (default) the job waits for the admin; otherwise it prints now."""
-    auth_ok, resp, status_code = verify_router_request()
-    if not auth_ok:
-        return resp, status_code
-
-    req_data = request.get_json(silent=True) or request.form
-    job_id = (req_data.get('job_id') or '').strip()
-    if not job_id:
-        return jsonify({'success': False, 'error': 'Missing job_id'}), 400
-
-    cleanup_expired_jobs()
-    conn = get_db()
-    cur = conn.cursor()
-    cur.execute("SELECT * FROM router_jobs WHERE job_id = ?", (job_id,))
-    row = cur.fetchone()
-    if not row:
-        return jsonify({'success': False, 'error': 'Job not found'}), 404
-
-    # Idempotent: repeated calls return where the job already is
-    if row['status'] in ['PRINTED', 'DONE']:
-        return jsonify({'success': True, 'job_id': job_id, 'status': 'printing',
-                        'cups_job': row['cups_job_id'] or '', 'message': 'Job already released'})
-    if row['status'] == 'PAID':
-        return jsonify({'success': True, 'job_id': job_id, 'status': 'awaiting_admin',
-                        'review_expires_at': row['review_expires_at']})
-    if row['status'] == 'EXPIRED':
-        return jsonify({'success': False, 'error': 'Job expired'}), 410
-    if row['status'] != 'HELD':
-        return jsonify({'success': False, 'error': f"Job cannot be released in status '{row['status']}'"}), 400
-
-    now = int(time.time())
-    if row['expires_at'] < now:
-        _drop_file(row['file_path'])
-        with conn:
-            conn.execute("UPDATE router_jobs SET status = 'EXPIRED' WHERE job_id = ?", (job_id,))
-        return jsonify({'success': False, 'error': 'Job expired'}), 410
-    if not os.path.exists(row['file_path']):
-        return jsonify({'success': False, 'error': 'Spool file missing'}), 500
-
-    if wifi_review_enabled():
-        review_until = now + wifi_review_minutes() * 60
-        with conn:
-            conn.execute("UPDATE router_jobs SET status = 'PAID', paid_at = ?, review_expires_at = ? WHERE job_id = ?",
-                         (now, review_until, job_id))
-        return jsonify({'success': True, 'job_id': job_id, 'status': 'awaiting_admin', 'review_expires_at': review_until})
-
-    try:
-        cups_job = _print_router_job(conn, row)
-        return jsonify({'success': True, 'job_id': job_id, 'status': 'printing', 'cups_job': cups_job})
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-@app.route('/api/router/cancel', methods=['POST'])
-def api_router_cancel():
-    auth_ok, resp, status_code = verify_router_request()
-    if not auth_ok:
-        return resp, status_code
-
-    req_data = request.get_json(silent=True) or request.form
-    job_id = (req_data.get('job_id') or '').strip()
-    if not job_id:
-        return jsonify({'success': False, 'error': 'Missing job_id'}), 400
-
-    conn = get_db()
-    cur = conn.cursor()
-    cur.execute("SELECT * FROM router_jobs WHERE job_id = ?", (job_id,))
-    row = cur.fetchone()
-    if not row:
-        return jsonify({'success': False, 'error': 'Job not found'}), 404
-    if row['status'] not in ('HELD', 'PAID'):
-        return jsonify({'success': False, 'error': f"Job is already {row['status'].lower()}", 'status': row['status'].lower()}), 409
-
-    _drop_file(row['file_path'])
-    with conn:
-        conn.execute("UPDATE router_jobs SET status = 'CANCELLED' WHERE job_id = ?", (job_id,))
-    return jsonify({'success': True, 'job_id': job_id, 'message': 'Job cancelled and purged'})
-
-@app.route('/api/router/status', methods=['GET'])
-def api_router_status():
-    """queued (not paid yet) | awaiting_admin | printing | done | rejected | failed"""
-    auth_ok, resp, status_code = verify_router_request()
-    if not auth_ok:
-        return resp, status_code
-
-    job_id = request.args.get('job_id', '').strip()
-    if not job_id:
-        return jsonify({'success': False, 'error': 'Missing job_id'}), 400
-
-    cleanup_expired_jobs()
-    conn = get_db()
-    cur = conn.cursor()
-    cur.execute("SELECT * FROM router_jobs WHERE job_id = ?", (job_id,))
-    row = cur.fetchone()
-    if not row:
-        return jsonify({'success': False, 'error': 'Job not found'}), 404
-
-    status = row['status']
-    if status == 'HELD':
-        return jsonify({'success': True, 'job_id': job_id, 'status': 'queued'})
-    if status == 'PAID':
-        return jsonify({'success': True, 'job_id': job_id, 'status': 'awaiting_admin',
-                        'review_expires_at': row['review_expires_at']})
-    if status == 'REJECTED':
-        return jsonify({'success': True, 'job_id': job_id, 'status': 'rejected', 'detail': row['reject_reason'] or ''})
-    if status == 'CANCELLED':
-        return jsonify({'success': True, 'job_id': job_id, 'status': 'failed', 'detail': 'cancelled'})
-    if status == 'EXPIRED':
-        return jsonify({'success': True, 'job_id': job_id, 'status': 'failed', 'detail': 'expired'})
-
-    if status in ['PRINTED', 'DONE']:
-        cups_job = row['cups_job_id'] or ''
-        cups_status = 'done'
-        if cups_job:
-            try:
-                stat_res = subprocess.run(['lpstat', '-o'], capture_output=True, text=True, timeout=5)
-                if cups_job in stat_res.stdout:
-                    cups_status = 'printing'
-            except Exception:
-                pass
-        return jsonify({'success': True, 'job_id': job_id, 'status': cups_status})
-
-    return jsonify({'success': True, 'job_id': job_id, 'status': status.lower()})
-
-# ============================================================
-# ADMIN PRINT CONSOLE: REVIEW QUEUE FOR PAID WI-FI JOBS
-# ============================================================
-def _admin_ok():
-    return verify_admin_token(request.headers.get('X-Admin-Token'))
-
-@app.route('/api/admin/wifi/queue', methods=['GET'])
-def api_admin_wifi_queue():
-    if not _admin_ok():
-        return jsonify({'success': False, 'error': 'Unauthorized: administrator login required'}), 401
-    cleanup_expired_jobs()
-    conn = get_db()
-    cur = conn.cursor()
-    cur.execute("SELECT * FROM router_jobs WHERE status = 'PAID' ORDER BY paid_at ASC")
-    jobs = []
-    for r in cur.fetchall():
-        is_color = r['colormodel'] in ['RGB', 'CMYK', 'Color']
-        jobs.append({
-            'job_id': r['job_id'],
-            'filename': r['filename'] or 'document',
-            'pages': r['pages'],
-            'copies': r['copies'],
-            'color': is_color,
-            'printer': r['printer'],
-            'price': round(get_rate(is_color) * r['pages'] * r['copies'], 2),
-            'paid_at': datetime.fromtimestamp(r['paid_at'] or r['created_at']).strftime('%H:%M:%S'),
-            'expires_in': max(0, (r['review_expires_at'] or 0) - int(time.time()))
-        })
-    cur.execute("SELECT COUNT(*) AS n FROM router_jobs WHERE status = 'HELD'")
-    held = cur.fetchone()['n']
-    return jsonify({'success': True, 'jobs': jobs, 'unpaid_uploads': held,
-                    'review': wifi_review_enabled(), 'max_pages': wifi_max_pages(),
-                    'review_minutes': wifi_review_minutes()})
-
-@app.route('/api/admin/wifi/preview', methods=['GET'])
-def api_admin_wifi_preview():
-    if not _admin_ok():
-        return jsonify({'success': False, 'error': 'Unauthorized: administrator login required'}), 401
-    job_id = request.args.get('job_id', '').strip()
-    conn = get_db()
-    cur = conn.cursor()
-    cur.execute("SELECT * FROM router_jobs WHERE job_id = ? AND status IN ('PAID', 'HELD')", (job_id,))
-    row = cur.fetchone()
-    if not row or not os.path.exists(row['file_path']):
-        return jsonify({'success': False, 'error': 'Job not found or file already removed'}), 404
-    with open(row['file_path'], 'rb') as f:
-        data = f.read()
-    return Response(data, mimetype='application/pdf', headers={'Content-Disposition': 'inline; filename=preview.pdf',
-                                                               'Cache-Control': 'no-store'})
-
-@app.route('/api/admin/wifi/approve', methods=['POST'])
-def api_admin_wifi_approve():
-    if not _admin_ok():
-        return jsonify({'success': False, 'error': 'Unauthorized: administrator login required'}), 401
-    job_id = (request.form.get('job_id') or '').strip()
-    conn = get_db()
-    cur = conn.cursor()
-    cur.execute("SELECT * FROM router_jobs WHERE job_id = ?", (job_id,))
-    row = cur.fetchone()
-    if not row:
-        return jsonify({'success': False, 'error': 'Job not found'}), 404
-    if row['status'] != 'PAID':
-        return jsonify({'success': False, 'error': f"Job is {row['status'].lower()}, not waiting for review"}), 409
-    try:
-        cups_job = _print_router_job(conn, row)
-    except subprocess.CalledProcessError as e:
-        return jsonify({'success': False, 'error': (e.stderr or str(e)).strip()}), 500
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
-    return jsonify({'success': True, 'message': f'Sent to printer ({cups_job}).', 'cups_job': cups_job})
-
-@app.route('/api/admin/wifi/reject', methods=['POST'])
-def api_admin_wifi_reject():
-    if not _admin_ok():
-        return jsonify({'success': False, 'error': 'Unauthorized: administrator login required'}), 401
-    job_id = (request.form.get('job_id') or '').strip()
-    reason = ''.join(ch for ch in (request.form.get('reason') or '') if ch.isprintable())[:120]
-    conn = get_db()
-    cur = conn.cursor()
-    cur.execute("SELECT * FROM router_jobs WHERE job_id = ?", (job_id,))
-    row = cur.fetchone()
-    if not row:
-        return jsonify({'success': False, 'error': 'Job not found'}), 404
-    if row['status'] != 'PAID':
-        return jsonify({'success': False, 'error': f"Job is {row['status'].lower()}, not waiting for review"}), 409
-    _drop_file(row['file_path'])
-    with conn:
-        conn.execute("UPDATE router_jobs SET status = 'REJECTED', reject_reason = ? WHERE job_id = ?", (reason, job_id))
-    return jsonify({'success': True, 'message': 'Job rejected. The router will credit the customer.'})
-
-@app.route('/api/router/health', methods=['GET'])
-def api_router_health():
-    auth_ok, resp, status_code = verify_router_request()
-    if not auth_ok:
-        return resp, status_code
-
-    printers, def_p = get_printers()
-    overall = "ok"
-    if not printers:
-        overall = "offline"
-    else:
-        stopped_count = sum(1 for p in printers if p['status'] == 'stopped')
-        if stopped_count == len(printers):
-            overall = "offline"
-        elif stopped_count > 0:
-            overall = "degraded"
-
-    warnings = []
-    try:
-        res = subprocess.run(['lpstat', '-p'], capture_output=True, text=True, timeout=5)
-        out_lower = res.stdout.lower()
-        if 'out of paper' in out_lower or 'paper out' in out_lower:
-            warnings.append('paper_out')
-            if overall == "ok":
-                overall = "degraded"
-        if 'low ink' in out_lower or 'ink low' in out_lower:
-            warnings.append('ink_low')
-    except Exception:
-        pass
-
-    return jsonify({
-        'success': True,
-        'overall': overall,
-        'default_printer': def_p,
-        'printers': printers,
-        'warnings': warnings,
-        'wifi_max_pages': wifi_max_pages(),
-        'wifi_review': wifi_review_enabled(),
-        'rate_bw': get_rate(False),
-        'rate_color': get_rate(True)
-    })
 
 init_db()
 

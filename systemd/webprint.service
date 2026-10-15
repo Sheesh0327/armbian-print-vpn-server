@@ -10,6 +10,7 @@ Group=webprint
 SupplementaryGroups=lp
 WorkingDirectory=/opt/webprint
 Environment=PORT=80
+EnvironmentFile=-/etc/webprint/webprint.env
 ExecStart=/usr/bin/gunicorn --bind 0.0.0.0:80 --workers 1 --threads 4 --timeout 120 --access-logfile - --error-logfile - app:app
 # One worker on purpose: admin sessions and rate limits live in memory, so a second worker would log admins out at random.
 Restart=always

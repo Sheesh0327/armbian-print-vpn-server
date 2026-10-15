@@ -9,16 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [2.1.0] - 2026-10-15
 
+### Removed
+- The Wi-Fi quick print / captive portal payment feature is gone again to keep this server simple: no `/api/router/*`, no admin review queue, no router key, no `router_jobs` use. Guests on the PisoWiFi network cannot print.
+
 ### Added
-- **Admin review queue for Wi-Fi quick print**: paid jobs wait in the admin console for Preview / Print / Reject (settings: review on/off, page limit default 10, review window default 30 minutes). Router status now reports `awaiting_admin` and `rejected`.
-- New admin endpoints `/api/admin/wifi/queue`, `preview`, `approve`, `reject`; new tests in `tests/test_review_queue.py`.
+- **Trusted devices only**: every request is checked against `TRUSTED_NETWORKS` (default `10.0.0.0/24,192.168.1.0/24`, plus loopback) and answered with HTTP 403 otherwise. Configured in `/etc/webprint/webprint.env` (created by `setup.sh`, never overwritten). CUPS print queues get matching `Allow from` lines (never `/admin`).
+- Tests for the allow-list (`tests/test_trusted_devices.py`) and a test that the page script parses (`tests/test_page_script.py`, uses Node).
 
 ### Fixed
-- **The whole web page script failed to parse** (an unescaped quote in the "login required" row), so tabs and admin did nothing. Fixed, and CI now syntax-checks the page script with Node.
+- **The whole web page script failed to parse** (an unescaped quote in the "login required" row), so tabs and admin did nothing.
 - Admin login failed at random with two gunicorn workers (tokens and limits live in memory): now one worker with four threads.
-- Printing from the modem network failed once `--remote-any` was removed: setup now allows the upstream subnet (default `192.168.1.0/24`, override with `UPSTREAM_SUBNET`) on the print queues only, never on `/admin`.
+- Printing from the modem network failed once `--remote-any` was removed (CUPS did not treat 192.168.1.x as local): fixed with the allow-list above.
 - `/api/inspect` had no rate limit and ignored `PUBLIC_PRINT=off`.
-- Cancel could mark a printed job as cancelled; the initial admin password no longer appears on a command line; admin tokens are no longer accepted in URLs except for the CSV download; stale Canva text removed from the README; the backup no longer lists a file that is never installed.
+- The initial admin password no longer appears on a command line; admin tokens are no longer accepted in URLs except for the CSV download; stale Canva text removed from the README; the backup no longer lists a file that is never installed.
 
 ## [2.0.0] - 2026-10-15
 

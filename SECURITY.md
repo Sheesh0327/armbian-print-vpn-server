@@ -13,7 +13,7 @@ The appliance is designed for mixed-trust physical and network environments wher
 ```
 +-----------------------------------------------------------------------------+
 | Upstream Modem Network (192.168.1.0/24)                                      |
-| Untrusted / Semi-trusted clients connecting to router WAN IP (192.168.1.13) |
+| Home devices connecting to router WAN IP (192.168.1.13); visitors blocked    |
 +-----------------------------------------------------------------------------+
                                        |
                                        | (Only DNAT TCP 80, 631; Inbound UDP 5353)
@@ -36,10 +36,9 @@ The appliance is designed for mixed-trust physical and network environments wher
 
 | Zone | Subnet / Interface | Threat Profile | Allowed Access on Print Server | Enforcement Mechanism |
 | :--- | :--- | :--- | :--- | :--- |
-| **Upstream Modem Network** | `192.168.1.0/24` | Shared household / office devices; untrusted visitors. | Web Print Portal (`:80`), CUPS IPP (`:631`), mDNS (`:5353`). | OpenWrt DNAT rules; CUPS `cupsd.conf` restricts `/admin` to `10.0.0.0/24`; router management ports blocked. |
-| **PisoWiFi Guest Network** | `10.0.30.0/24` | Paying commercial Wi-Fi customers; zero-trust. | **NONE.** Direct access is blocked. | OpenWrt firewall forward rule blocks all traffic from `guest` to `lan` (`10.0.0.0/24`). |
-| **Downstream Private LAN** | `10.0.0.0/24` | Owner workstations (`10.0.0.112`) and appliances. | Web Print Portal (`:80`), CUPS Admin (`:631`), SSH (`:22`). | Local subnet access permitted with authentication. |
-| **Router-Assisted Guest Print** | `10.0.0.1` | Automated requests initiated by OpenWrt router software. | Router API (`/api/router/*`) only. | Source IP validation (`10.0.0.1`) and shared secret header (`X-Router-Key`). |
+| **Upstream Modem Network** | `192.168.1.0/24` | Trusted home devices; visitors on the same Wi-Fi are not trusted. | Web Print Portal (`:80`), CUPS IPP (`:631`), mDNS (`:5353`) for addresses in `TRUSTED_NETWORKS` only. | App-level allow-list (HTTP 403 for everything else); CUPS `Allow from` lines; OpenWrt DNAT rules should carry `src_ip` of the trusted devices; CUPS `/admin` restricted to `10.0.0.0/24`. |
+| **PisoWiFi Guest Network** | `10.0.30.0/24` | Paying commercial Wi-Fi customers; zero-trust. | **NONE.** There is no guest or paid printing. | OpenWrt firewall blocks `guest` to `lan`; the server independently answers HTTP 403 to any address outside `TRUSTED_NETWORKS`. |
+| **Downstream Private LAN** | `10.0.0.0/24` | Owner workstations (`10.0.0.112`) and appliances. | Web Print Portal (`:80`), CUPS Admin (`:631`), SSH (`:22`). | Listed in `TRUSTED_NETWORKS`; admin actions also need the admin password. |
 | **Tailscale Remote VPN** | `tailnet` | Remote administrative and mobile access. | Port 80 and 631 only. | No exit node; subnet route restricted strictly to `10.0.0.95/32`; tailnet ACLs. |
 
 ---
@@ -84,11 +83,11 @@ The appliance is designed for mixed-trust physical and network environments wher
   - ImageMagick executes with a 30-second timeout under a security policy disabling `MVG`, `MSL`, `URL`, `HTTPS`, `HTTP`, `FTP`, `EPHEMERAL`, `PS`, and `EPS` coders.
   - Temporary files and conversion workspaces are guaranteed to be unlinked in `finally` blocks.
 
-### E. Commercial Wi-Fi Router Integration API
-- **Strict Origin Check**: Calls to `/api/router/*` are rejected with HTTP 403 unless the connecting IP is `10.0.0.1` (or local test loopback).
-- **Cryptographic Header**: Every request must provide the shared secret in `X-Router-Key` matching `/etc/webprint/router.key` (mode 0640).
-- **Two-Stage Execution**: Router jobs are staged as `HELD` and are never printed without an explicit `release` call. Held jobs expire and purge automatically after 15 minutes.
-- **Privacy Preservation**: Guest print jobs are logged with document title `WiFi Guest Job` and `source="wifi"`. Document contents and client filenames are never retained or logged.
+### E. Trusted Devices Only
+- **Allow-list in the application**: a `before_request` check refuses every request (pages, API, admin, static files) whose source address is not in `TRUSTED_NETWORKS` (default `10.0.0.0/24,192.168.1.0/24`, plus loopback). The list lives in `/etc/webprint/webprint.env`. Invalid entries are ignored, never widened. IPv4-mapped IPv6 addresses are checked as IPv4.
+- **Why twice**: the router firewall is the first wall; the app check is the second, so a mistaken firewall rule does not expose the server.
+- **Narrowing**: if visitors can join the modem's Wi-Fi, list single devices instead of `192.168.1.0/24` and give those devices fixed addresses (DHCP reservations) on the modem.
+- **Limits**: addresses can be spoofed on a shared Wi-Fi by a determined person. The allow-list keeps casual and accidental access out; it is not a replacement for the admin password or for separating networks.
 
 ---
 

@@ -6,7 +6,7 @@ Turn low-cost ARM SBCs and TV boxes (such as the ZTE B860H with Amlogic S905X, 1
 
 ## System Architecture and Network Placement
 
-The print server sits on the downstream local network behind a gateway router (OpenWrt) separating upstream modem clients and isolated guest Wi-Fi clients.
+The print server sits on the downstream local network behind a gateway router (OpenWrt) separating upstream modem clients and isolated guest Wi-Fi clients. **Only trusted home devices may use it**: everything else gets HTTP 403.
 
 ```
        [ISP Modem / Upstream Subnet: 192.168.1.0/24]
@@ -20,13 +20,18 @@ The print server sits on the downstream local network behind a gateway router (O
    [Downstream LAN: 10.0.0.0/24]        [Guest Wi-Fi (openNDS): 10.0.30.0/24]
    - Print Server: 10.0.0.95:80          - Strictly isolated via OpenWrt firewall
    - Workstation PC: 10.0.0.112          - Cannot route or connect to 10.0.0.95
-   - CUPS Server: 10.0.0.95:631          - Prints via OpenWrt Router API hook
+   - CUPS Server: 10.0.0.95:631          - No access (blocked by the router and by the server)
 ```
 
 ### Network Access Rules
 1. **Downstream LAN (`10.0.0.0/24`)**: Full access to the Web Print portal (Port 80) and raw IPP printing (Port 631). CUPS web administration (`https://10.0.0.95:631/admin`) is restricted to localhost and `10.0.0.0/24`.
 2. **Upstream Modem Network (`192.168.1.0/24`)**: Accesses Port 80 and Port 631 forwarded via OpenWrt DNAT rules. Avahi reflector on OpenWrt advertises the printer to modem devices. CUPS administrative endpoints reject upstream connections.
-3. **Guest Wi-Fi Network (`10.0.30.0/24`)**: Direct layer-3 access to `10.0.0.95` is blocked by firewall forwarding drop rules. Guest print jobs are handled by the router calling the internal Router API (`/api/router/*`) over the trusted LAN interface.
+3. **Guest Wi-Fi Network (`10.0.30.0/24`)**: No access. The router firewall drops it and the server refuses it with HTTP 403 even if a firewall rule is ever opened by mistake. There is no paid or automated guest printing.
+
+### OpenWrt settings that match this
+- Give each `config redirect` for ports 80 and 631 a `src_ip` (your trusted devices, or `192.168.1.0/24` at most).
+- Limit `Allow-WAN-to-Printer` to `proto tcp`, `dest_port '80 631 9100'`.
+- Keep the guest zone without forwarding to `lan`. Do not put the guest network in `TRUSTED_NETWORKS`.
 
 ---
 
@@ -46,7 +51,8 @@ The print server sits on the downstream local network behind a gateway router (O
   - Mobile image formats (`.heic`, `.heif`, `.avif`, `.webp`, `.png`, `.jpg`).
 - **Vendored PDF Preview Engine**:
   - Mozilla PDF.js v3.11.174 vendored locally (`webprint/static/pdf.min.js` and `webprint/static/pdf.worker.min.js`) for reliable, air-gapped document rendering without external CDN dependencies.
-- **Public Portal Toggle**: Set `PUBLIC_PRINT=off` in the environment to disable general walk-up uploads while preserving the router paid-print pipeline.
+- **Trusted Devices Only**: every request (portal, API, admin, static files) is checked against `TRUSTED_NETWORKS` (default `10.0.0.0/24,192.168.1.0/24`, plus the box itself). Anything else, including the guest Wi-Fi, gets HTTP 403. Edit `/etc/webprint/webprint.env` and run `systemctl restart webprint`; list single devices (`192.168.1.20,192.168.1.21`) if the modem's Wi-Fi is shared with visitors. CUPS is limited to the same list by `setup.sh`.
+- **Public Portal Toggle**: set `PUBLIC_PRINT=off` to disable uploads from the portal while keeping the admin console.
 
 ### 2. ID Photo Maker
 - Browser-side tool that lays out 1x1, 2x2 and passport photos on a sheet and sends it to the printer (no server load).
@@ -60,7 +66,7 @@ The print server sits on the downstream local network behind a gateway router (O
   - Unclaimed jobs automatically purge after 24 hours.
 
 ### 4. Accounting and Audit Ledger
-- **Transaction Logging**: Records timestamp, job name, printer, page count, copies, color mode, billing amount, client IP, and source (`direct` vs `wifi`).
+- **Transaction Logging**: Records timestamp, job name, printer, page count, copies, color mode, billing amount, client IP, and source.
 - **Protected Administration**:
   - Ledger view (`/api/reports/ledger`), CSV export (`/api/reports/export.csv`), and PIN queue management (`/api/pin/list`) require an active admin session.
   - Hardware controls (reboot, shutdown, CUPS restart, spool purge) require admin credentials.
@@ -78,23 +84,7 @@ The print server sits on the downstream local network behind a gateway router (O
 - **Execution Timeouts**: ImageMagick limited to 30 seconds; LibreOffice limited to 45 seconds. Per-job temporary files are strictly cleaned up inside `finally` blocks.
 - **Safe Directory Purges**: Python `shutil` and `os` primitives used for spool cleanup instead of shell invocations.
 
-### 7. Wi-Fi Quick Print (OpenWrt PisoWiFi) and the Admin Review Queue
-This is **not** a replacement for the main print service. It is a small, autonomous quick-print for short documents (about 5 to 10 pages): a guest on the Wi-Fi uploads a file at the PisoWiFi portal, inserts coins, and the job is printed after the administrator checks it.
-
-Flow: upload (held, unpaid) -> coins counted by the router -> `release` -> job waits in the **Wi-Fi Quick Print Queue** in the admin console -> admin previews, then **Print** or **Reject** -> printer. Guests never reach `10.0.0.95`; the router relays everything.
-
-- **Source Verification**: Requests are accepted only from router IP `10.0.0.1` (or localhost).
-- **Shared Secret**: `X-Router-Key` header matching `/etc/webprint/router.key`. **Copy this key to the router** (for example `/etc/coinslot.d/print.key`, mode 600) once after installing; `setup.sh` generates it but cannot reach the router.
-- **Endpoints**:
-  - `POST /api/router/job`: upload, convert, count pages, stage as `HELD` (15 minutes). Refuses files over the quick-print page limit (default 10). Returns `{job_id, pages, color, expires_at}`.
-  - `POST /api/router/release`: payment confirmed. With review on (default) the job becomes `awaiting_admin`; with review off it prints at once. Idempotent.
-  - `POST /api/router/cancel`: deletes an unprinted job (409 if already printed).
-  - `GET /api/router/status?job_id=...`: `queued` (not paid), `awaiting_admin`, `printing`, `done`, `rejected` (with reason), `failed` (expired/cancelled).
-  - `GET /api/router/health`: printer state, warnings (`paper_out`, `ink_low`), current page limit, review setting and rates.
-- **Admin console** (Settings tab, after unlocking): lists paid jobs with file name, pages, colour, price and minutes left; **Preview** opens the PDF in a new tab, **Print** sends it to CUPS, **Reject** removes it and the router credits the customer. A toast appears when a new paid job arrives. Settings there: review on/off, page limit, review window (default 30 minutes). A paid job nobody reviews in time expires and the router refunds it.
-- **Audit Logging**: printed router jobs are recorded in the ledger with `source="wifi"`, using the original file name.
-
-### 8. Automated Daily Backups
+### 7. Automated Daily Backups
 - **Service and Timer**: Handled via `backup-webprint.service` and `backup-webprint.timer`.
 - **Schedule**: Triggers daily at 03:00.
 - **Data Protection**: Archives the SQLite database (`/var/lib/webprint/webprint.db`), encryption keys (`/etc/webprint`), and CUPS configuration into `/var/backups/webprint/` with file mode `0600`.
@@ -117,7 +107,7 @@ sudo ./setup.sh
 During installation:
 - System packages (`cups`, `gunicorn`, `poppler-utils`, `libreoffice-writer-nogui`, `imagemagick`, `python3-cryptography`) are installed.
 - Unprivileged user `webprint` is created and added to group `lp`.
-- Cryptographic keys (`secret.key` and `router.key`) are generated with mode `0600`.
+- Cryptographic keys (`secret.key`) are generated with mode `0600`.
 - A random admin password is generated and displayed once on the console. Save this password securely.
 - The Gunicorn systemd service and daily backup timer are enabled and started.
 
@@ -142,7 +132,6 @@ sudo systemctl status backup-webprint.timer
 | **Web Print Portal** | `http://printserver.local` (Port 80) | Unprivileged Gunicorn, rate-limited, input-validated |
 | **CUPS Printing (IPP)** | `http://printserver.local:631/printers/...` | Shared queues accessible by LAN and upstream modem |
 | **CUPS Admin** | `https://printserver.local:631/admin` | Restricted to localhost and LAN `10.0.0.0/24` |
-| **Router API** | `http://10.0.0.95:80/api/router/*` | Restricted to IP `10.0.0.1` + `X-Router-Key` header |
 | **Daily Backups** | `/var/backups/webprint/` | Mode `0600`, root/webprint private directory |
 
 ---
@@ -185,7 +174,7 @@ To securely access the print appliance over the internet:
 
 ## Verification and Testing
 
-Execute the test suite to verify validators, rate limiting, authentication, and the router API:
+Execute the test suite to verify validators, rate limiting, authentication:
 
 ```bash
 # Run automated tests

@@ -11,9 +11,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 test_dir = tempfile.mkdtemp(prefix="test_webprint_js_")
 os.environ['WEBPRINT_DB'] = os.path.join(test_dir, 'test.db')
 os.environ['WEBPRINT_SECRET_KEY'] = os.path.join(test_dir, 'secret.key')
-os.environ['WEBPRINT_ROUTER_KEY'] = os.path.join(test_dir, 'router.key')
 os.environ['WEBPRINT_SPOOL_PINNED'] = os.path.join(test_dir, 'pinned')
-os.environ['WEBPRINT_SPOOL_HELD'] = os.path.join(test_dir, 'held')
 
 from webprint.app import INDEX_HTML  # noqa: E402
 

@@ -57,7 +57,6 @@ fi
 
 mkdir -p /var/lib/webprint
 mkdir -p /var/spool/webprint/pinned
-mkdir -p /var/spool/webprint/held
 mkdir -p /var/backups/webprint
 mkdir -p /etc/webprint
 mkdir -p /opt/webprint/scripts
@@ -65,7 +64,7 @@ mkdir -p /opt/webprint/static
 
 chown -R webprint:lp /var/lib/webprint /var/spool/webprint
 chmod 750 /var/lib/webprint /var/spool/webprint
-chmod 700 /var/spool/webprint/pinned /var/spool/webprint/held
+chmod 700 /var/spool/webprint/pinned
 chmod 700 /var/backups/webprint
 chown root:webprint /etc/webprint
 chmod 750 /etc/webprint
@@ -78,15 +77,19 @@ if [[ ! -f /var/lib/webprint/secret.key ]]; then
     chmod 600 /var/lib/webprint/secret.key
 fi
 
-# Router API key
-if [[ ! -f /etc/webprint/router.key ]]; then
-    openssl rand -hex 32 > /etc/webprint/router.key
-    chown root:webprint /etc/webprint/router.key
-    chmod 640 /etc/webprint/router.key
+# Trusted home devices (the only addresses allowed to use the server). Never overwritten on re-runs.
+if [[ ! -f /etc/webprint/webprint.env ]]; then
+    cat > /etc/webprint/webprint.env <<'ENVEOF'
+# Comma separated networks or single addresses allowed to reach the print portal and CUPS.
+# Narrow it to your own devices if the modem's Wi-Fi is shared, e.g. 10.0.0.0/24,192.168.1.20,192.168.1.21
+TRUSTED_NETWORKS=10.0.0.0/24,192.168.1.0/24
+ENVEOF
+    chown root:webprint /etc/webprint/webprint.env
+    chmod 640 /etc/webprint/webprint.env
 fi
-cp /etc/webprint/router.key /var/lib/webprint/router.key
-chown webprint:lp /var/lib/webprint/router.key
-chmod 600 /var/lib/webprint/router.key
+# shellcheck disable=SC1091
+TRUSTED_NETWORKS="$(sed -n 's/^TRUSTED_NETWORKS=//p' /etc/webprint/webprint.env | head -n1)"
+TRUSTED_NETWORKS="${TRUSTED_NETWORKS:-10.0.0.0/24,192.168.1.0/24}"
 
 # Admin password initialization (random, no default)
 ADMIN_PASSWORD=""
@@ -123,13 +126,17 @@ if grep -q "<Location /admin/log>" /etc/cups/cupsd.conf; then
     sed -i '/<Location \/admin\/log>/,/<\/Location>/c\<Location /admin/log>\n  AuthType Default\n  Require user @SYSTEM\n  Order allow,deny\n  Allow from 127.0.0.1\n  Allow from ::1\n  Allow from 10.0.0.0/24\n</Location>' /etc/cups/cupsd.conf
 fi
 
-# Printing (not admin) from the modem's network: the OpenWrt router forwards ports 80/631 and those clients arrive as
-# 192.168.1.x, which CUPS does not treat as local. Allow that subnet on the print queues only, never on /admin.
-UPSTREAM_SUBNET="${UPSTREAM_SUBNET:-192.168.1.0/24}"
+# Printing (never /admin) is allowed only from the trusted home devices. The OpenWrt router forwards ports 80/631 from the
+# modem's network and those clients arrive as 192.168.1.x, which CUPS does not treat as local, so list them explicitly.
+IFS=',' read -r -a TRUSTED_LIST <<< "${TRUSTED_NETWORKS}"
 for loc in '/' '/printers'; do
-    if grep -q "<Location ${loc}>" /etc/cups/cupsd.conf && ! sed -n "/<Location ${loc//\//\\/}>/,/<\/Location>/p" /etc/cups/cupsd.conf | grep -q "${UPSTREAM_SUBNET}"; then
-        sed -i "/<Location ${loc//\//\\/}>/,/<\/Location>/ s|^\( *\)Order allow,deny|&\n\1Allow from ${UPSTREAM_SUBNET}|" /etc/cups/cupsd.conf
-    fi
+    for net in "${TRUSTED_LIST[@]}"; do
+        net="${net// /}"
+        [[ -z "${net}" ]] && continue
+        if grep -q "<Location ${loc}>" /etc/cups/cupsd.conf && ! sed -n "/<Location ${loc//\//\\/}>/,/<\/Location>/p" /etc/cups/cupsd.conf | grep -qF "Allow from ${net}"; then
+            sed -i "/<Location ${loc//\//\\/}>/,/<\/Location>/ s|^\( *\)Order allow,deny|&\n\1Allow from ${net}|" /etc/cups/cupsd.conf
+        fi
+    done
 done
 
 systemctl restart cups
@@ -182,7 +189,7 @@ echo -e "${CLR_GRN}=====================================================${CLR_RS
 echo -e "Web Print Portal:    http://${PRIMARY_IP}:80"
 echo -e "CUPS IPP Printing:   http://${PRIMARY_IP}:631/printers/<printer_name>"
 echo -e "CUPS Admin Panel:    https://${PRIMARY_IP}:631 (Local 10.0.0.0/24 subnet only)"
-echo -e "Router Secret Key:   /etc/webprint/router.key"
+echo -e "Trusted devices:     ${TRUSTED_NETWORKS}  (edit /etc/webprint/webprint.env, then: systemctl restart webprint)"
 
 if [[ -n "${ADMIN_PASSWORD}" ]]; then
     echo -e "\n${CLR_YLW}-----------------------------------------------------${CLR_RST}"
