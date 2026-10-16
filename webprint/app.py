@@ -12,6 +12,7 @@ import shutil
 import glob
 import ipaddress
 import threading
+import mimetypes
 from urllib.parse import quote, unquote
 from datetime import datetime
 from flask import Flask, render_template_string, request, jsonify, Response, send_file, g, has_app_context
@@ -25,7 +26,7 @@ except ImportError:
 
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'static')
 app = Flask(__name__, static_folder=STATIC_DIR, static_url_path='/static')
-app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50MB file size limit
+app.config['MAX_CONTENT_LENGTH'] = 2 * 1024 * 1024 * 1024  # 2GB cloud storage limit
 
 if os.name == 'nt' and 'WEBPRINT_DB' not in os.environ:
     base_dir = os.path.join(tempfile.gettempdir(), 'webprint_dev')
@@ -35,6 +36,8 @@ if os.name == 'nt' and 'WEBPRINT_DB' not in os.environ:
     SPOOL_INBOX_DIR = os.path.join(base_dir, 'inbox')
     SPOOL_PREVIEWS_DIR = os.path.join(base_dir, 'previews')
     SEND_KEY_PATH = os.path.join(base_dir, 'send.key')
+    STORAGE_PUBLIC_DIR = os.path.join(base_dir, 'shares', 'public')
+    STORAGE_USERS_DIR = os.path.join(base_dir, 'shares', 'users')
 else:
     DB_PATH = os.environ.get('WEBPRINT_DB', '/var/lib/webprint/webprint.db')
     SECRET_KEY_PATH = os.environ.get('WEBPRINT_SECRET_KEY', '/var/lib/webprint/secret.key')
@@ -42,6 +45,8 @@ else:
     SPOOL_INBOX_DIR = os.environ.get('WEBPRINT_SPOOL_INBOX', '/var/spool/webprint/inbox')
     SPOOL_PREVIEWS_DIR = os.environ.get('WEBPRINT_SPOOL_PREVIEWS', '/var/spool/webprint/previews')
     SEND_KEY_PATH = os.environ.get('WEBPRINT_SEND_KEY', '/etc/webprint/send.key')
+    STORAGE_PUBLIC_DIR = os.environ.get('WEBPRINT_STORAGE_PUBLIC', '/srv/shares/public')
+    STORAGE_USERS_DIR = os.environ.get('WEBPRINT_STORAGE_USERS', '/srv/shares/users')
 
 CONVERSION_SEMAPHORE = threading.Semaphore(1)
 MAX_PAGES_PER_JOB = int(os.environ.get('MAX_PAGES_PER_JOB', 50))
@@ -266,6 +271,9 @@ def init_db():
         os.makedirs(SPOOL_PINNED_DIR, exist_ok=True)
         os.makedirs(SPOOL_INBOX_DIR, exist_ok=True)
         os.makedirs(SPOOL_PREVIEWS_DIR, exist_ok=True)
+        os.makedirs(STORAGE_PUBLIC_DIR, exist_ok=True)
+        os.makedirs(STORAGE_USERS_DIR, exist_ok=True)
+        os.makedirs(os.path.join(STORAGE_USERS_DIR, 'mil'), exist_ok=True)
     except Exception:
         pass
     get_or_create_secret_key()
@@ -329,6 +337,15 @@ def init_db():
                     cups_job_id INTEGER
                 )
             """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS cloud_users (
+                    username TEXT PRIMARY KEY,
+                    password_hash TEXT NOT NULL,
+                    display_name TEXT,
+                    is_admin INTEGER DEFAULT 0,
+                    created_at INTEGER
+                )
+            """)
 
             try:
                 conn.execute("ALTER TABLE pinned_jobs ADD COLUMN failed_attempts INTEGER DEFAULT 0")
@@ -348,6 +365,7 @@ def init_db():
             conn.execute("CREATE INDEX IF NOT EXISTS idx_ledger_timestamp ON print_ledger(timestamp DESC)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_pinned_expires ON pinned_jobs(expires_at)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_inbox_received ON inbox(received_at)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_cloud_users_username ON cloud_users(username)")
 
             defaults = {
                 'currency_symbol': '₱',
@@ -363,6 +381,13 @@ def init_db():
                 conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", (k, v))
 
             cur = conn.cursor()
+            cur.execute("SELECT username FROM cloud_users WHERE username = 'mil'")
+            if not cur.fetchone():
+                conn.execute(
+                    "INSERT INTO cloud_users (username, password_hash, display_name, is_admin, created_at) VALUES (?, ?, ?, ?, ?)",
+                    ('mil', generate_password_hash('Mil@Armbian143', method='scrypt'), 'Mil Angelou', 1, int(time.time()))
+                )
+
             cur.execute("SELECT value FROM settings WHERE key = 'admin_hash'")
             row = cur.fetchone()
             if not row:
@@ -720,6 +745,8 @@ INDEX_HTML = """<!DOCTYPE html>
                     if (typeof loadPinList === 'function') loadPinList();
                 } else if (tabName === 'history') {
                     if (typeof loadHistory === 'function') loadHistory();
+                } else if (tabName === 'storage') {
+                    if (typeof loadCloudStorage === 'function') loadCloudStorage();
                 } else if (tabName === 'settings') {
                     if (typeof loadTelemetry === 'function') loadTelemetry();
                 }
@@ -1796,6 +1823,246 @@ INDEX_HTML = """<!DOCTYPE html>
             width: 90%;
             box-shadow: 0 20px 40px rgba(0,0,0,0.5);
         }
+
+        /* Cloud Storage Component Styles */
+        .storage-container {
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+            max-width: 1240px;
+            margin: 0 auto;
+            padding: 8px 0 32px;
+        }
+        .storage-top-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-lg);
+            padding: 12px 18px;
+            gap: 16px;
+            flex-wrap: wrap;
+        }
+        .storage-scope-pills {
+            display: flex;
+            gap: 6px;
+            background: var(--bg);
+            padding: 4px;
+            border-radius: var(--radius-md);
+            border: 1px solid var(--border);
+        }
+        .storage-scope-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 7px 16px;
+            font-size: 13px;
+            font-weight: 500;
+            color: var(--text-secondary);
+            background: transparent;
+            border: none;
+            border-radius: var(--radius-sm);
+            cursor: pointer;
+            transition: all 0.15s ease;
+        }
+        .storage-scope-btn:hover { color: var(--text-primary); }
+        .storage-scope-btn.active {
+            background: var(--surface-elevated);
+            color: var(--accent);
+            box-shadow: 0 1px 3px rgba(0,0,0,0.25);
+        }
+        .storage-user-bar {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            flex-wrap: wrap;
+        }
+        .storage-disk-info {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+        .storage-disk-bar {
+            width: 90px;
+            height: 6px;
+            background: var(--bg);
+            border-radius: 3px;
+            overflow: hidden;
+            display: inline-block;
+            border: 1px solid var(--border);
+        }
+        .storage-disk-bar-fill {
+            height: 100%;
+            background: var(--accent);
+            border-radius: 3px;
+            transition: width 0.3s ease;
+        }
+        .storage-action-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+        .storage-breadcrumbs {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 13px;
+            color: var(--text-secondary);
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-md);
+            padding: 8px 14px;
+            flex: 1;
+            min-width: 200px;
+            overflow-x: auto;
+        }
+        .storage-crumb-link {
+            color: var(--accent);
+            text-decoration: none;
+            cursor: pointer;
+            white-space: nowrap;
+            font-weight: 500;
+        }
+        .storage-crumb-link:hover { text-decoration: underline; }
+        .storage-crumb-sep { color: var(--text-tertiary); }
+        .storage-btn-group {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        .storage-search-input {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            color: var(--text-primary);
+            padding: 6px 12px;
+            font-size: 13px;
+            border-radius: var(--radius-md);
+            outline: none;
+            width: 170px;
+            transition: border-color 0.15s ease;
+        }
+        .storage-search-input:focus { border-color: var(--accent); }
+        .storage-dropzone {
+            border: 1px solid var(--border);
+            border-radius: var(--radius-lg);
+            background: var(--surface);
+            min-height: 420px;
+            position: relative;
+            transition: all 0.2s ease;
+            overflow: hidden;
+        }
+        .storage-dropzone.dragover {
+            border-color: var(--accent);
+            background: var(--surface-hover);
+        }
+        .storage-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+        }
+        .storage-table th {
+            text-align: left;
+            padding: 10px 16px;
+            color: var(--text-secondary);
+            font-weight: 500;
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            border-bottom: 1px solid var(--border);
+            background: var(--surface);
+        }
+        .storage-table td {
+            padding: 10px 16px;
+            border-bottom: 1px solid var(--border-subtle);
+            color: var(--text-primary);
+            vertical-align: middle;
+        }
+        .storage-row:hover td { background: var(--row-hover); }
+        .storage-item-name {
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            cursor: pointer;
+            font-weight: 500;
+            color: var(--text-primary);
+        }
+        .storage-item-name:hover { color: var(--accent); }
+        .storage-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+            gap: 12px;
+            padding: 16px;
+        }
+        .storage-card {
+            background: var(--surface-elevated);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-md);
+            padding: 14px 10px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            text-align: center;
+            gap: 8px;
+            cursor: pointer;
+            position: relative;
+            transition: transform 0.15s ease, border-color 0.15s ease;
+        }
+        .storage-card:hover {
+            transform: translateY(-2px);
+            border-color: var(--border-hover);
+            background: var(--surface-hover);
+        }
+        .storage-card-icon {
+            width: 44px;
+            height: 44px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .storage-card-title {
+            font-size: 12px;
+            font-weight: 500;
+            max-width: 100%;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            color: var(--text-primary);
+        }
+        .storage-card-meta {
+            font-size: 11px;
+            color: var(--text-secondary);
+        }
+        .storage-item-actions {
+            display: flex;
+            gap: 4px;
+            align-items: center;
+            justify-content: flex-end;
+        }
+        .storage-action-icon-btn {
+            background: transparent;
+            border: none;
+            color: var(--text-secondary);
+            padding: 5px;
+            border-radius: 4px;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.15s ease;
+        }
+        .storage-action-icon-btn:hover {
+            color: var(--text-primary);
+            background: var(--surface-elevated);
+        }
+        .storage-action-icon-btn.danger:hover {
+            color: var(--danger);
+        }
     </style>
 </head>
 <body>
@@ -1816,6 +2083,7 @@ INDEX_HTML = """<!DOCTYPE html>
 
     <nav class="header-nav">
         <button class="nav-btn active" data-tab="print" onclick="switchTab('print')">Print</button>
+        <button class="nav-btn" data-tab="storage" onclick="switchTab('storage')">Cloud Storage</button>
         <button class="nav-btn" data-tab="idmaker" onclick="switchTab('idmaker')">ID Photo Maker</button>
         <button class="nav-btn" data-tab="cups" onclick="switchTab('cups')">CUPS Control</button>
         <button class="nav-btn" data-tab="pin" onclick="switchTab('pin')">PIN Release</button>
@@ -2905,6 +3173,107 @@ INDEX_HTML = """<!DOCTYPE html>
             </div>
         </div>
     </div>
+
+    <!-- TAB: CLOUD STORAGE -->
+    <div class="tab-content" id="tab-storage">
+        <div class="storage-container">
+            <!-- Top Bar: Scope Selector, User Status, Disk Stats -->
+            <div class="storage-top-bar">
+                <div class="storage-scope-pills">
+                    <button class="storage-scope-btn active" id="btnScopePublic" onclick="setStorageScope('public')">
+                        <svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>
+                        <span>Public Files</span>
+                    </button>
+                    <button class="storage-scope-btn" id="btnScopePrivate" onclick="setStorageScope('private')">
+                        <svg class="icon" viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+                        <span id="privateScopeLabel">Private Vault</span>
+                    </button>
+                </div>
+
+                <div class="storage-user-bar">
+                    <div class="storage-disk-info" id="storageDiskInfo">
+                        <span id="storageDiskText">Storage</span>
+                        <div class="storage-disk-bar"><div class="storage-disk-bar-fill" id="storageDiskBarFill" style="width: 0%;"></div></div>
+                    </div>
+                    <div id="storageUserSection"></div>
+                </div>
+            </div>
+
+            <!-- Action Bar: Breadcrumbs, Search, Actions, View Toggle -->
+            <div class="storage-action-bar">
+                <div class="storage-breadcrumbs" id="storageBreadcrumbs">
+                    <span class="storage-crumb-link" onclick="navigateStoragePath('')">Home</span>
+                </div>
+
+                <div class="storage-btn-group">
+                    <input type="text" class="storage-search-input" id="storageSearchInput" placeholder="Filter files..." oninput="filterStorageView()">
+                    <button class="cr-btn-pill cr-btn-print" id="btnStorageUpload" onclick="triggerStorageUpload()">
+                        <svg class="icon" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+                        <span>Upload</span>
+                    </button>
+                    <input type="file" id="storageFileInput" multiple style="display: none;" onchange="handleStorageFilesSelected(event)">
+                    <button class="cr-btn-pill cr-btn-cancel" onclick="openNewFolderModal()">
+                        <svg class="icon" viewBox="0 0 24 24"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path><line x1="12" y1="11" x2="12" y2="17"></line><line x1="9" y1="14" x2="15" y2="14"></line></svg>
+                        <span>New Folder</span>
+                    </button>
+                    <button class="cr-btn-pill cr-btn-cancel" onclick="loadCloudStorage(true)" title="Refresh">
+                        <svg class="icon" viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
+                    </button>
+                    <div style="display: flex; border: 1px solid var(--border); border-radius: var(--radius-sm); overflow: hidden;">
+                        <button class="storage-action-icon-btn active" id="btnStorageViewList" onclick="setStorageViewMode('list')" title="List View" style="padding: 6px 8px;">
+                            <svg class="icon" viewBox="0 0 24 24"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg>
+                        </button>
+                        <button class="storage-action-icon-btn" id="btnStorageViewGrid" onclick="setStorageViewMode('grid')" title="Grid View" style="padding: 6px 8px;">
+                            <svg class="icon" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Upload progress bar -->
+            <div id="storageUploadProgressContainer" style="display: none; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 10px 14px;">
+                <div style="display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 6px;">
+                    <span id="storageUploadStatusText">Uploading files...</span>
+                    <span id="storageUploadPercentText">0%</span>
+                </div>
+                <div style="background: var(--bg); height: 6px; border-radius: 3px; overflow: hidden; border: 1px solid var(--border);">
+                    <div id="storageUploadProgressBar" style="width: 0%; height: 100%; background: var(--accent); transition: width 0.1s ease;"></div>
+                </div>
+            </div>
+
+            <!-- Drag & Drop Explorer Area -->
+            <div class="storage-dropzone" id="storageDropzone">
+                <div id="storageExplorerContent"></div>
+                <div id="storageEmptyState" style="display: none; text-align: center; padding: 60px 20px; color: var(--text-secondary);">
+                    <svg class="icon" viewBox="0 0 24 24" style="width: 48px; height: 48px; stroke: var(--border-hover); margin-bottom: 12px;"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
+                    <div style="font-size: 15px; font-weight: 500; color: var(--text-primary); margin-bottom: 4px;">This folder is empty</div>
+                    <div style="font-size: 12px;">Drag and drop files here, or click "Upload" above.</div>
+                </div>
+                <div id="storageDragOverlay" style="display: none; position: absolute; inset: 0; background: rgba(32,33,36,0.92); border: 2px dashed var(--accent); border-radius: var(--radius-lg); align-items: center; justify-content: center; z-index: 10;">
+                    <div style="text-align: center; color: var(--accent);">
+                        <svg class="icon" viewBox="0 0 24 24" style="width: 48px; height: 48px; stroke: var(--accent); margin-bottom: 8px;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+                        <div style="font-size: 16px; font-weight: 600;">Drop files here to upload</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Samba Access Guide Card -->
+            <div style="background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 14px 18px; font-size: 12px; color: var(--text-secondary); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+                <div>
+                    <strong style="color: var(--text-primary);">Samba Network Share:</strong>
+                    <span>Connect directly from Windows File Explorer at </span>
+                    <code style="background: var(--surface-elevated); padding: 2px 6px; border-radius: 4px; font-family: var(--font-mono); color: var(--accent);">\\\\10.0.0.95\\Public</code>
+                    <span> or </span>
+                    <code style="background: var(--surface-elevated); padding: 2px 6px; border-radius: 4px; font-family: var(--font-mono); color: var(--accent);">\\\\10.0.0.95\\Private</code>
+                    <span> (User: <strong style="color: var(--text-primary);">mil</strong>)</span>
+                </div>
+                <div>
+                    <span>Browser Quick Link: </span>
+                    <a href="/Public" style="color: var(--accent); text-decoration: none;">http://10.0.0.95/Public</a>
+                </div>
+            </div>
+        </div>
+    </div>
 </main>
 
 <!-- PIN UNLOCK MODAL -->
@@ -2919,6 +3288,104 @@ INDEX_HTML = """<!DOCTYPE html>
         <div style="display: flex; gap: 10px; justify-content: flex-end;">
             <button class="cr-btn-pill cr-btn-cancel" id="btnCancelPinModal">Cancel</button>
             <button class="cr-btn-pill cr-btn-print" id="btnConfirmReleasePin">Release Print</button>
+        </div>
+    </div>
+</div>
+
+<!-- STORAGE LOGIN MODAL -->
+<div class="modal-overlay" id="storageLoginModal">
+    <div class="modal-card">
+        <h3 style="font-size: 16px; font-weight: 600; margin-bottom: 8px;">Private Vault Sign In</h3>
+        <p style="font-size: 12px; color: var(--text-secondary); margin-bottom: 16px;">Enter your credentials to access your private encrypted storage folder.</p>
+        <div style="margin-bottom: 12px;">
+            <label style="font-size: 11px; color: var(--text-secondary); text-transform: uppercase; display: block; margin-bottom: 4px;">Username</label>
+            <input type="text" id="storageLoginUser" class="cr-input" placeholder="e.g. mil" autocomplete="username">
+        </div>
+        <div style="margin-bottom: 16px;">
+            <label style="font-size: 11px; color: var(--text-secondary); text-transform: uppercase; display: block; margin-bottom: 4px;">Password</label>
+            <input type="password" id="storageLoginPass" class="cr-input" placeholder="••••••••" autocomplete="current-password" onkeydown="if(event.key==='Enter') executeStorageLogin()">
+        </div>
+        <div style="display: flex; gap: 10px; justify-content: flex-end;">
+            <button class="cr-btn-pill cr-btn-cancel" onclick="closeStorageModal('storageLoginModal')">Cancel</button>
+            <button class="cr-btn-pill cr-btn-print" onclick="executeStorageLogin()">Unlock Vault</button>
+        </div>
+    </div>
+</div>
+
+<!-- STORAGE NEW FOLDER MODAL -->
+<div class="modal-overlay" id="storageNewFolderModal">
+    <div class="modal-card">
+        <h3 style="font-size: 16px; font-weight: 600; margin-bottom: 8px;">Create New Folder</h3>
+        <div style="margin-bottom: 16px;">
+            <input type="text" id="storageNewFolderName" class="cr-input" placeholder="Folder name" onkeydown="if(event.key==='Enter') executeStorageMkdir()">
+        </div>
+        <div style="display: flex; gap: 10px; justify-content: flex-end;">
+            <button class="cr-btn-pill cr-btn-cancel" onclick="closeStorageModal('storageNewFolderModal')">Cancel</button>
+            <button class="cr-btn-pill cr-btn-print" onclick="executeStorageMkdir()">Create</button>
+        </div>
+    </div>
+</div>
+
+<!-- STORAGE RENAME MODAL -->
+<div class="modal-overlay" id="storageRenameModal">
+    <div class="modal-card">
+        <h3 style="font-size: 16px; font-weight: 600; margin-bottom: 8px;">Rename Item</h3>
+        <div style="margin-bottom: 16px;">
+            <input type="text" id="storageRenameInput" class="cr-input" placeholder="New name" onkeydown="if(event.key==='Enter') executeStorageRename()">
+        </div>
+        <div style="display: flex; gap: 10px; justify-content: flex-end;">
+            <button class="cr-btn-pill cr-btn-cancel" onclick="closeStorageModal('storageRenameModal')">Cancel</button>
+            <button class="cr-btn-pill cr-btn-print" onclick="executeStorageRename()">Rename</button>
+        </div>
+    </div>
+</div>
+
+<!-- STORAGE PREVIEW MODAL -->
+<div class="modal-overlay" id="storagePreviewModal">
+    <div class="modal-card" style="max-width: 820px; width: 92%; max-height: 86vh; display: flex; flex-direction: column;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid var(--border);">
+            <h3 style="font-size: 15px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 480px;" id="storagePreviewTitle">Preview</h3>
+            <div style="display: flex; gap: 8px; align-items: center;">
+                <button class="cr-btn-pill cr-btn-cancel" id="btnPreviewPrint" style="font-size: 11px; padding: 4px 10px;">
+                    <svg class="icon" viewBox="0 0 24 24"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>
+                    Print
+                </button>
+                <a class="cr-btn-pill cr-btn-cancel" id="btnPreviewDownload" style="font-size: 11px; padding: 4px 10px; text-decoration: none;" download>Download</a>
+                <button class="storage-action-icon-btn" onclick="closeStorageModal('storagePreviewModal')">
+                    <svg class="icon" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                </button>
+            </div>
+        </div>
+        <div id="storagePreviewBody" style="flex: 1; overflow: auto; text-align: center; min-height: 280px; background: var(--bg); border-radius: var(--radius-sm); padding: 12px; display: flex; align-items: center; justify-content: center;">
+        </div>
+    </div>
+</div>
+
+<!-- STORAGE DIRECT PRINT MODAL -->
+<div class="modal-overlay" id="storagePrintModal">
+    <div class="modal-card">
+        <h3 style="font-size: 16px; font-weight: 600; margin-bottom: 8px;">Print from Cloud Storage</h3>
+        <p style="font-size: 12px; color: var(--text-secondary); margin-bottom: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" id="storagePrintFileLabel">File</p>
+        <div style="margin-bottom: 12px;">
+            <label style="font-size: 11px; color: var(--text-secondary); text-transform: uppercase; display: block; margin-bottom: 4px;">Destination Printer</label>
+            <select id="storagePrintPrinter" class="cr-select" style="width: 100%;"></select>
+        </div>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 16px;">
+            <div>
+                <label style="font-size: 11px; color: var(--text-secondary); text-transform: uppercase; display: block; margin-bottom: 4px;">Copies</label>
+                <input type="number" id="storagePrintCopies" class="cr-input" min="1" max="99" value="1">
+            </div>
+            <div>
+                <label style="font-size: 11px; color: var(--text-secondary); text-transform: uppercase; display: block; margin-bottom: 4px;">Color Mode</label>
+                <select id="storagePrintColor" class="cr-select" style="width: 100%;">
+                    <option value="KGray">B&amp;W (Mono)</option>
+                    <option value="RGB" selected>Color</option>
+                </select>
+            </div>
+        </div>
+        <div style="display: flex; gap: 10px; justify-content: flex-end;">
+            <button class="cr-btn-pill cr-btn-cancel" onclick="closeStorageModal('storagePrintModal')">Cancel</button>
+            <button class="cr-btn-pill cr-btn-print" id="btnConfirmStoragePrint" onclick="executeStoragePrint()">Send to Printer</button>
         </div>
     </div>
 </div>
@@ -3012,6 +3479,7 @@ INDEX_HTML = """<!DOCTYPE html>
         try {
             const res = await fetch('/api/printers');
             const data = await res.json();
+            window.availablePrintersList = data.printers || [];
             const selects = [document.getElementById('headerPrinterSelect'), document.getElementById('printDestination')];
             
             selects.forEach(select => {
@@ -4935,6 +5403,682 @@ INDEX_HTML = """<!DOCTYPE html>
         }
     }, 5000);
 
+    // --- CLOUD STORAGE CLIENT LOGIC ---
+    let storageCurrentScope = 'public';
+    let storageCurrentPath = '';
+    let storageViewMode = localStorage.getItem('storage_view_mode') || 'list';
+    let storageToken = localStorage.getItem('storage_token') || '';
+    let storageUser = null;
+    let storageData = { folders: [], files: [], breadcrumbs: [] };
+    let storageActiveItem = null;
+
+    function escapeHtml(str) {
+        if (!str) return '';
+        return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
+    }
+
+    function getStorageHeaders() {
+        const h = {};
+        if (storageToken) h['X-Storage-Token'] = storageToken;
+        if (currentAdminToken) h['X-Admin-Token'] = currentAdminToken;
+        return h;
+    }
+
+    function setStorageScope(scope) {
+        if (scope === 'private' && !storageUser) {
+            openStorageLoginModal();
+            return;
+        }
+        storageCurrentScope = scope;
+        storageCurrentPath = '';
+        document.getElementById('btnScopePublic').classList.toggle('active', scope === 'public');
+        document.getElementById('btnScopePrivate').classList.toggle('active', scope === 'private');
+        loadCloudStorage();
+    }
+
+    function setStorageViewMode(mode) {
+        storageViewMode = mode;
+        localStorage.setItem('storage_view_mode', mode);
+        document.getElementById('btnStorageViewList').classList.toggle('active', mode === 'list');
+        document.getElementById('btnStorageViewGrid').classList.toggle('active', mode === 'grid');
+        renderStorageExplorer();
+    }
+
+    async function loadCloudStorage(force = false) {
+        try {
+            await updateStorageAuthStatus();
+            const url = `/api/storage/list?scope=${encodeURIComponent(storageCurrentScope)}&path=${encodeURIComponent(storageCurrentPath)}`;
+            const res = await fetch(url, { headers: getStorageHeaders() });
+            const data = await res.json();
+            if (!data.success) {
+                if (res.status === 401 && storageCurrentScope === 'private') {
+                    openStorageLoginModal();
+                    return;
+                }
+                showToast(data.error || 'Failed to load storage items', 'error');
+                return;
+            }
+            storageData = data;
+            renderStorageBreadcrumbs();
+            renderStorageExplorer();
+            if (data.disk) {
+                renderStorageDisk(data.disk);
+            }
+        } catch (e) {
+            console.error(e);
+            showToast('Network error loading cloud storage', 'error');
+        }
+    }
+
+    async function updateStorageAuthStatus() {
+        try {
+            const res = await fetch('/api/storage/status', { headers: getStorageHeaders() });
+            const data = await res.json();
+            if (data.success && data.authenticated && data.user) {
+                storageUser = data.user;
+                document.getElementById('privateScopeLabel').textContent = 'Vault (' + data.user.username + ')';
+                document.getElementById('storageUserSection').innerHTML = `
+                    <div style="display: flex; align-items: center; gap: 8px; font-size: 12px;">
+                        <span style="color: var(--success); font-weight: 600;">● ${escapeHtml(data.user.display_name || data.user.username)}</span>
+                        <button class="cr-btn-pill cr-btn-cancel" onclick="executeStorageLogout()" style="padding: 2px 8px; font-size: 11px;">Sign Out</button>
+                    </div>
+                `;
+            } else {
+                storageUser = null;
+                document.getElementById('privateScopeLabel').textContent = 'Private Vault';
+                document.getElementById('storageUserSection').innerHTML = `
+                    <button class="cr-btn-pill cr-btn-cancel" onclick="openStorageLoginModal()" style="padding: 3px 10px; font-size: 11px;">
+                        <svg class="icon" viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+                        Sign In
+                    </button>
+                `;
+            }
+            if (data.disk) {
+                renderStorageDisk(data.disk);
+            }
+        } catch (e) {}
+    }
+
+    function renderStorageDisk(disk) {
+        document.getElementById('storageDiskText').textContent = `${disk.free_formatted} free of ${disk.total_formatted}`;
+        document.getElementById('storageDiskBarFill').style.width = `${disk.percent_used}%`;
+        if (disk.percent_used > 90) {
+            document.getElementById('storageDiskBarFill').style.background = 'var(--danger)';
+        } else if (disk.percent_used > 75) {
+            document.getElementById('storageDiskBarFill').style.background = 'var(--warning)';
+        } else {
+            document.getElementById('storageDiskBarFill').style.background = 'var(--accent)';
+        }
+    }
+
+    function renderStorageBreadcrumbs() {
+        const bc = document.getElementById('storageBreadcrumbs');
+        const rootLabel = storageCurrentScope === 'public' ? 'Public' : (storageUser ? `${storageUser.username}'s Vault` : 'Vault');
+        let html = `<span class="storage-crumb-link" onclick="navigateStoragePath('')">${escapeHtml(rootLabel)}</span>`;
+        if (storageData.breadcrumbs && storageData.breadcrumbs.length > 0) {
+            storageData.breadcrumbs.forEach(b => {
+                html += ` <span class="storage-crumb-sep">/</span> <span class="storage-crumb-link" onclick="navigateStoragePath('${escapeHtml(b.path)}')">${escapeHtml(b.name)}</span>`;
+            });
+        }
+        bc.innerHTML = html;
+    }
+
+    function navigateStoragePath(path) {
+        storageCurrentPath = path;
+        loadCloudStorage();
+    }
+
+    function filterStorageView() {
+        const q = (document.getElementById('storageSearchInput').value || '').toLowerCase().trim();
+        renderStorageExplorer(q);
+    }
+
+    function renderStorageExplorer(filterText = '') {
+        const container = document.getElementById('storageExplorerContent');
+        const emptyState = document.getElementById('storageEmptyState');
+        let folders = storageData.folders || [];
+        let files = storageData.files || [];
+
+        if (filterText) {
+            folders = folders.filter(f => f.name.toLowerCase().includes(filterText));
+            files = files.filter(f => f.name.toLowerCase().includes(filterText));
+        }
+
+        if (folders.length === 0 && files.length === 0) {
+            container.innerHTML = '';
+            emptyState.style.display = 'block';
+            return;
+        }
+        emptyState.style.display = 'none';
+
+        if (storageViewMode === 'grid') {
+            let html = '<div class="storage-grid">';
+            folders.forEach(f => {
+                html += `
+                    <div class="storage-card" onclick="navigateStoragePath('${escapeHtml(f.path)}')">
+                        <div class="storage-card-icon" style="color: var(--accent);">
+                            <svg class="icon" viewBox="0 0 24 24" style="width: 38px; height: 38px;"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" fill="currentColor" fill-opacity="0.15" stroke="currentColor"></path></svg>
+                        </div>
+                        <div class="storage-card-title" title="${escapeHtml(f.name)}">${escapeHtml(f.name)}</div>
+                        <div class="storage-card-meta">${f.items_count} items</div>
+                        <div class="storage-item-actions" onclick="event.stopPropagation();" style="margin-top: 4px;">
+                            <button class="storage-action-icon-btn" onclick="openRenameModal('${escapeHtml(f.path)}', '${escapeHtml(f.name)}', true)" title="Rename">
+                                <svg class="icon" viewBox="0 0 24 24"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>
+                            </button>
+                            <button class="storage-action-icon-btn danger" onclick="deleteStorageItem('${escapeHtml(f.path)}', true)" title="Delete">
+                                <svg class="icon" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+                            </button>
+                        </div>
+                    </div>
+                `;
+            });
+
+            files.forEach(f => {
+                const iconSvg = getFileIconSvg(f.category);
+                html += `
+                    <div class="storage-card" onclick="previewStorageItem('${escapeHtml(f.path)}', '${escapeHtml(f.name)}', '${f.category}')">
+                        <div class="storage-card-icon">
+                            ${iconSvg}
+                        </div>
+                        <div class="storage-card-title" title="${escapeHtml(f.name)}">${escapeHtml(f.name)}</div>
+                        <div class="storage-card-meta">${f.size_formatted}</div>
+                        <div class="storage-item-actions" onclick="event.stopPropagation();" style="margin-top: 4px;">
+                            <button class="storage-action-icon-btn" onclick="downloadStorageItem('${escapeHtml(f.path)}')" title="Download">
+                                <svg class="icon" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                            </button>
+                            ${(f.category === 'pdf' || f.category === 'image') ? `
+                            <button class="storage-action-icon-btn" onclick="openStoragePrintModal('${escapeHtml(f.path)}', '${escapeHtml(f.name)}')" title="Print">
+                                <svg class="icon" viewBox="0 0 24 24"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>
+                            </button>` : ''}
+                            <button class="storage-action-icon-btn" onclick="openRenameModal('${escapeHtml(f.path)}', '${escapeHtml(f.name)}', false)" title="Rename">
+                                <svg class="icon" viewBox="0 0 24 24"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>
+                            </button>
+                            <button class="storage-action-icon-btn danger" onclick="deleteStorageItem('${escapeHtml(f.path)}', false)" title="Delete">
+                                <svg class="icon" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+                            </button>
+                        </div>
+                    </div>
+                `;
+            });
+            html += '</div>';
+            container.innerHTML = html;
+        } else {
+            // Table view
+            let html = `
+                <table class="storage-table">
+                    <thead>
+                        <tr>
+                            <th style="width: 50%;">Name</th>
+                            <th style="width: 15%;">Size</th>
+                            <th style="width: 20%;">Modified</th>
+                            <th style="width: 15%; text-align: right;">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+            `;
+            folders.forEach(f => {
+                html += `
+                    <tr class="storage-row">
+                        <td>
+                            <div class="storage-item-name" onclick="navigateStoragePath('${escapeHtml(f.path)}')">
+                                <svg class="icon" viewBox="0 0 24 24" style="color: var(--accent); stroke: var(--accent);"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
+                                <span>${escapeHtml(f.name)}</span>
+                            </div>
+                        </td>
+                        <td style="color: var(--text-secondary);">${f.items_count} items</td>
+                        <td style="color: var(--text-secondary);">${f.mtime_formatted || '-'}</td>
+                        <td>
+                            <div class="storage-item-actions">
+                                <button class="storage-action-icon-btn" onclick="openRenameModal('${escapeHtml(f.path)}', '${escapeHtml(f.name)}', true)" title="Rename">
+                                    <svg class="icon" viewBox="0 0 24 24"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>
+                                </button>
+                                <button class="storage-action-icon-btn danger" onclick="deleteStorageItem('${escapeHtml(f.path)}', true)" title="Delete">
+                                    <svg class="icon" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+                                </button>
+                            </div>
+                        </td>
+                    </tr>
+                `;
+            });
+
+            files.forEach(f => {
+                const iconSvg = getFileIconSvg(f.category);
+                html += `
+                    <tr class="storage-row">
+                        <td>
+                            <div class="storage-item-name" onclick="previewStorageItem('${escapeHtml(f.path)}', '${escapeHtml(f.name)}', '${f.category}')">
+                                ${iconSvg}
+                                <span>${escapeHtml(f.name)}</span>
+                            </div>
+                        </td>
+                        <td style="color: var(--text-secondary);">${f.size_formatted}</td>
+                        <td style="color: var(--text-secondary);">${f.mtime_formatted || '-'}</td>
+                        <td>
+                            <div class="storage-item-actions">
+                                <button class="storage-action-icon-btn" onclick="downloadStorageItem('${escapeHtml(f.path)}')" title="Download">
+                                    <svg class="icon" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                                </button>
+                                ${(f.category === 'pdf' || f.category === 'image') ? `
+                                <button class="storage-action-icon-btn" onclick="openStoragePrintModal('${escapeHtml(f.path)}', '${escapeHtml(f.name)}')" title="Print">
+                                    <svg class="icon" viewBox="0 0 24 24"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>
+                                </button>` : ''}
+                                <button class="storage-action-icon-btn" onclick="openRenameModal('${escapeHtml(f.path)}', '${escapeHtml(f.name)}', false)" title="Rename">
+                                    <svg class="icon" viewBox="0 0 24 24"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>
+                                </button>
+                                <button class="storage-action-icon-btn danger" onclick="deleteStorageItem('${escapeHtml(f.path)}', false)" title="Delete">
+                                    <svg class="icon" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+                                </button>
+                            </div>
+                        </td>
+                    </tr>
+                `;
+            });
+            html += '</tbody></table>';
+            container.innerHTML = html;
+        }
+    }
+
+    function getFileIconSvg(cat) {
+        if (cat === 'pdf') {
+            return `<svg class="icon" viewBox="0 0 24 24" style="color: #ea4335; stroke: #ea4335;"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>`;
+        } else if (cat === 'image') {
+            return `<svg class="icon" viewBox="0 0 24 24" style="color: #4285f4; stroke: #4285f4;"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>`;
+        } else if (cat === 'text') {
+            return `<svg class="icon" viewBox="0 0 24 24" style="color: #34a853; stroke: #34a853;"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>`;
+        } else if (cat === 'archive') {
+            return `<svg class="icon" viewBox="0 0 24 24" style="color: #fbbc04; stroke: #fbbc04;"><polyline points="21 8 21 21 3 21 3 8"></polyline><rect x="1" y="3" width="22" height="5"></rect><line x1="10" y1="12" x2="14" y2="12"></line></svg>`;
+        } else if (cat === 'audio') {
+            return `<svg class="icon" viewBox="0 0 24 24" style="color: #a142f4; stroke: #a142f4;"><path d="M9 18V5l12-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="16" r="3"></circle></svg>`;
+        } else if (cat === 'video') {
+            return `<svg class="icon" viewBox="0 0 24 24" style="color: #ff6d01; stroke: #ff6d01;"><polygon points="23 7 16 12 23 17 23 7"></polygon><rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect></svg>`;
+        }
+        return `<svg class="icon" viewBox="0 0 24 24" style="color: var(--text-secondary); stroke: var(--text-secondary);"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path><polyline points="13 2 13 9 20 9"></polyline></svg>`;
+    }
+
+    function triggerStorageUpload() {
+        document.getElementById('storageFileInput').click();
+    }
+
+    function handleStorageFilesSelected(e) {
+        const files = e.target.files;
+        if (!files || files.length === 0) return;
+        uploadStorageFiles(files);
+        e.target.value = '';
+    }
+
+    function uploadStorageFiles(fileList) {
+        const fd = new FormData();
+        fd.append('scope', storageCurrentScope);
+        fd.append('path', storageCurrentPath);
+        for (let i = 0; i < fileList.length; i++) {
+            fd.append('files', fileList[i]);
+        }
+
+        const prog = document.getElementById('storageUploadProgressContainer');
+        const pBar = document.getElementById('storageUploadProgressBar');
+        const pText = document.getElementById('storageUploadPercentText');
+        const sText = document.getElementById('storageUploadStatusText');
+
+        prog.style.display = 'block';
+        pBar.style.width = '0%';
+        pText.textContent = '0%';
+        sText.textContent = `Uploading ${fileList.length} file(s)...`;
+
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', '/api/storage/upload', true);
+        if (storageToken) xhr.setRequestHeader('X-Storage-Token', storageToken);
+        if (currentAdminToken) xhr.setRequestHeader('X-Admin-Token', currentAdminToken);
+
+        xhr.upload.onprogress = (evt) => {
+            if (evt.lengthComputable) {
+                const percent = Math.round((evt.loaded / evt.total) * 100);
+                pBar.style.width = percent + '%';
+                pText.textContent = percent + '%';
+            }
+        };
+
+        xhr.onload = () => {
+            prog.style.display = 'none';
+            if (xhr.status === 200) {
+                try {
+                    const res = JSON.parse(xhr.responseText);
+                    if (res.success) {
+                        showToast(`Uploaded successfully`, 'success');
+                        loadCloudStorage();
+                    } else {
+                        showToast(res.error || 'Upload failed', 'error');
+                    }
+                } catch (e) {
+                    showToast('Upload finished with unexpected response', 'warning');
+                    loadCloudStorage();
+                }
+            } else {
+                showToast(`Upload failed (Status ${xhr.status})`, 'error');
+            }
+        };
+
+        xhr.onerror = () => {
+            prog.style.display = 'none';
+            showToast('Network error during upload', 'error');
+        };
+
+        xhr.send(fd);
+    }
+
+    // Drag and drop setup on dropzone
+    (function setupStorageDragAndDrop() {
+        window.addEventListener('DOMContentLoaded', () => {
+            const dz = document.getElementById('storageDropzone');
+            const overlay = document.getElementById('storageDragOverlay');
+            if (!dz) return;
+
+            let dragCounter = 0;
+            dz.addEventListener('dragenter', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                dragCounter++;
+                overlay.style.display = 'flex';
+            });
+
+            dz.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+            });
+
+            dz.addEventListener('dragleave', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                dragCounter--;
+                if (dragCounter <= 0) {
+                    overlay.style.display = 'none';
+                    dragCounter = 0;
+                }
+            });
+
+            dz.addEventListener('drop', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                overlay.style.display = 'none';
+                dragCounter = 0;
+                if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                    uploadStorageFiles(e.dataTransfer.files);
+                }
+            });
+        });
+    })();
+
+    function openNewFolderModal() {
+        document.getElementById('storageNewFolderName').value = '';
+        openStorageModal('storageNewFolderModal');
+        setTimeout(() => document.getElementById('storageNewFolderName').focus(), 100);
+    }
+
+    async function executeStorageMkdir() {
+        const name = (document.getElementById('storageNewFolderName').value || '').trim();
+        if (!name) return;
+        closeStorageModal('storageNewFolderModal');
+
+        const fd = new FormData();
+        fd.append('scope', storageCurrentScope);
+        fd.append('path', storageCurrentPath);
+        fd.append('folder_name', name);
+
+        try {
+            const res = await fetch('/api/storage/mkdir', {
+                method: 'POST',
+                headers: getStorageHeaders(),
+                body: fd
+            });
+            const data = await res.json();
+            if (data.success) {
+                showToast(`Folder "${name}" created`, 'success');
+                loadCloudStorage();
+            } else {
+                showToast(data.error || 'Failed to create folder', 'error');
+            }
+        } catch (e) {
+            showToast('Network error creating folder', 'error');
+        }
+    }
+
+    function openRenameModal(path, currentName, isDir) {
+        storageActiveItem = { path, currentName, isDir };
+        document.getElementById('storageRenameInput').value = currentName;
+        openStorageModal('storageRenameModal');
+        setTimeout(() => document.getElementById('storageRenameInput').focus(), 100);
+    }
+
+    async function executeStorageRename() {
+        if (!storageActiveItem) return;
+        const newName = (document.getElementById('storageRenameInput').value || '').trim();
+        if (!newName || newName === storageActiveItem.currentName) {
+            closeStorageModal('storageRenameModal');
+            return;
+        }
+        closeStorageModal('storageRenameModal');
+
+        const fd = new FormData();
+        fd.append('scope', storageCurrentScope);
+        fd.append('path', storageActiveItem.path);
+        fd.append('new_name', newName);
+
+        try {
+            const res = await fetch('/api/storage/rename', {
+                method: 'POST',
+                headers: getStorageHeaders(),
+                body: fd
+            });
+            const data = await res.json();
+            if (data.success) {
+                showToast('Renamed successfully', 'success');
+                loadCloudStorage();
+            } else {
+                showToast(data.error || 'Rename failed', 'error');
+            }
+        } catch (e) {
+            showToast('Network error renaming item', 'error');
+        }
+    }
+
+    async function deleteStorageItem(path, isDir) {
+        const itemType = isDir ? 'folder and its contents' : 'file';
+        if (!confirm(`Are you sure you want to permanently delete this ${itemType}?`)) return;
+
+        const fd = new FormData();
+        fd.append('scope', storageCurrentScope);
+        fd.append('path', path);
+
+        try {
+            const res = await fetch('/api/storage/delete', {
+                method: 'POST',
+                headers: getStorageHeaders(),
+                body: fd
+            });
+            const data = await res.json();
+            if (data.success) {
+                showToast('Item deleted', 'success');
+                loadCloudStorage();
+            } else {
+                showToast(data.error || 'Delete failed', 'error');
+            }
+        } catch (e) {
+            showToast('Network error deleting item', 'error');
+        }
+    }
+
+    function downloadStorageItem(path) {
+        const url = `/api/storage/download?scope=${encodeURIComponent(storageCurrentScope)}&path=${encodeURIComponent(path)}${storageToken ? '&token=' + encodeURIComponent(storageToken) : ''}`;
+        window.location.href = url;
+    }
+
+    async function previewStorageItem(path, name, category) {
+        document.getElementById('storagePreviewTitle').textContent = name;
+        const body = document.getElementById('storagePreviewBody');
+        body.innerHTML = '<div style="color: var(--text-secondary); padding: 40px;">Loading preview...</div>';
+
+        const printBtn = document.getElementById('btnPreviewPrint');
+        if (category === 'pdf' || category === 'image') {
+            printBtn.style.display = 'inline-flex';
+            printBtn.onclick = () => openStoragePrintModal(path, name);
+        } else {
+            printBtn.style.display = 'none';
+        }
+
+        const dlBtn = document.getElementById('btnPreviewDownload');
+        dlBtn.href = `/api/storage/download?scope=${encodeURIComponent(storageCurrentScope)}&path=${encodeURIComponent(path)}${storageToken ? '&token=' + encodeURIComponent(storageToken) : ''}`;
+
+        openStorageModal('storagePreviewModal');
+
+        const previewUrl = `/api/storage/preview?scope=${encodeURIComponent(storageCurrentScope)}&path=${encodeURIComponent(path)}${storageToken ? '&token=' + encodeURIComponent(storageToken) : ''}`;
+
+        if (category === 'image') {
+            body.innerHTML = `<img src="${previewUrl}" style="max-width: 100%; max-height: 70vh; object-fit: contain; border-radius: 4px; box-shadow: 0 4px 12px rgba(0,0,0,0.3);">`;
+        } else if (category === 'pdf') {
+            body.innerHTML = `<iframe src="${previewUrl}" style="width: 100%; height: 70vh; border: none; border-radius: 4px; background: #fff;"></iframe>`;
+        } else if (category === 'audio') {
+            body.innerHTML = `<audio controls src="${previewUrl}" style="width: 80%; margin: 40px auto;"></audio>`;
+        } else if (category === 'video') {
+            body.innerHTML = `<video controls src="${previewUrl}" style="max-width: 100%; max-height: 70vh; border-radius: 4px;"></video>`;
+        } else if (category === 'text') {
+            try {
+                const res = await fetch(previewUrl, { headers: getStorageHeaders() });
+                const text = await res.text();
+                body.innerHTML = `<pre style="text-align: left; font-family: var(--font-mono); font-size: 12px; line-height: 1.5; color: var(--text-primary); background: var(--bg); padding: 14px; border-radius: 4px; overflow: auto; max-height: 70vh; width: 100%; white-space: pre-wrap; word-break: break-all;">${escapeHtml(text)}</pre>`;
+            } catch (e) {
+                body.innerHTML = '<div style="color: var(--danger); padding: 40px;">Unable to load text preview</div>';
+            }
+        } else {
+            body.innerHTML = `
+                <div style="padding: 40px; color: var(--text-secondary);">
+                    <div style="font-size: 14px; margin-bottom: 8px;">No inline preview available for this file type.</div>
+                    <button class="cr-btn-pill cr-btn-print" onclick="downloadStorageItem('${escapeHtml(path)}')">Download File</button>
+                </div>
+            `;
+        }
+    }
+
+    function openStoragePrintModal(path, name) {
+        document.getElementById('storagePrintFileLabel').textContent = name;
+        storageActiveItem = { path, name };
+
+        // Populate printers
+        const sel = document.getElementById('storagePrintPrinter');
+        sel.innerHTML = '';
+        if (window.availablePrintersList && window.availablePrintersList.length > 0) {
+            window.availablePrintersList.forEach(p => {
+                const opt = document.createElement('option');
+                opt.value = p.name;
+                opt.textContent = p.name + (p.is_default ? ' (Default)' : '');
+                if (p.is_default) opt.selected = true;
+                sel.appendChild(opt);
+            });
+        } else {
+            const opt = document.createElement('option');
+            opt.value = 'HP_Smart_Tank_520';
+            opt.textContent = 'HP Smart Tank 520';
+            sel.appendChild(opt);
+        }
+
+        openStorageModal('storagePrintModal');
+    }
+
+    async function executeStoragePrint() {
+        if (!storageActiveItem) return;
+        const printer = document.getElementById('storagePrintPrinter').value;
+        const copies = document.getElementById('storagePrintCopies').value || 1;
+        const color = document.getElementById('storagePrintColor').value || 'RGB';
+
+        closeStorageModal('storagePrintModal');
+        showToast('Sending document to printer spooler...', 'info');
+
+        const fd = new FormData();
+        fd.append('scope', storageCurrentScope);
+        fd.append('path', storageActiveItem.path);
+        fd.append('printer', printer);
+        fd.append('copies', copies);
+        fd.append('colormodel', color);
+
+        try {
+            const res = await fetch('/api/storage/print', {
+                method: 'POST',
+                headers: getStorageHeaders(),
+                body: fd
+            });
+            const data = await res.json();
+            if (data.success) {
+                showToast(data.message || 'Job sent to printer successfully!', 'success');
+            } else {
+                showToast(data.error || 'Print failed', 'error');
+            }
+        } catch (e) {
+            showToast('Network error while requesting print', 'error');
+        }
+    }
+
+    function openStorageLoginModal() {
+        document.getElementById('storageLoginUser').value = 'mil';
+        document.getElementById('storageLoginPass').value = '';
+        openStorageModal('storageLoginModal');
+        setTimeout(() => document.getElementById('storageLoginPass').focus(), 100);
+    }
+
+    async function executeStorageLogin() {
+        const u = (document.getElementById('storageLoginUser').value || '').trim();
+        const p = document.getElementById('storageLoginPass').value;
+        if (!u || !p) {
+            showToast('Please enter both username and password', 'error');
+            return;
+        }
+
+        try {
+            const fd = new FormData();
+            fd.append('username', u);
+            fd.append('password', p);
+            const res = await fetch('/api/storage/login', {
+                method: 'POST',
+                body: fd
+            });
+            const data = await res.json();
+            if (data.success && data.token) {
+                storageToken = data.token;
+                localStorage.setItem('storage_token', data.token);
+                storageUser = data.user;
+                closeStorageModal('storageLoginModal');
+                showToast(`Welcome back, ${data.user.display_name || data.user.username}!`, 'success');
+                setStorageScope('private');
+            } else {
+                showToast(data.error || 'Invalid username or password', 'error');
+            }
+        } catch (e) {
+            showToast('Authentication network error', 'error');
+        }
+    }
+
+    async function executeStorageLogout() {
+        try {
+            if (storageToken) {
+                const fd = new FormData();
+                fd.append('token', storageToken);
+                await fetch('/api/storage/logout', { method: 'POST', body: fd });
+            }
+        } catch (e) {}
+        storageToken = '';
+        storageUser = null;
+        localStorage.removeItem('storage_token');
+        showToast('Signed out of Private Vault', 'info');
+        setStorageScope('public');
+    }
+
+    function openStorageModal(id) {
+        const m = document.getElementById(id);
+        if (m) m.classList.add('show');
+    }
+
+    function closeStorageModal(id) {
+        const m = document.getElementById(id);
+        if (m) m.classList.remove('show');
+    }
+
     // Initial boot
     if (currentAdminToken) {
         document.getElementById('adminLockedState').style.display = 'none';
@@ -4946,6 +6090,9 @@ INDEX_HTML = """<!DOCTYPE html>
     }
     loadPrinters();
     updatePreviewLayout();
+    if (window.location.pathname.toLowerCase().includes('/public') || window.location.pathname.toLowerCase().includes('/storage') || new URLSearchParams(window.location.search).get('tab') === 'storage') {
+        window.switchTab('storage');
+    }
 </script>
 </body>
 </html>"""
@@ -5032,9 +6179,32 @@ def handle_server_error(e):
         return jsonify({'success': False, 'error': 'Internal server error'}), 500
     return "Internal Server Error", 500
 
+def render_portal_with_tab(active_tab='print'):
+    html = INDEX_HTML
+    if active_tab != 'print':
+        html = re.sub(r'class="nav-btn active" data-tab="print"', 'class="nav-btn" data-tab="print"', html)
+        html = re.sub(r'id="tab-print" class="tab-content active"', 'id="tab-print" class="tab-content"', html)
+        html = re.sub(rf'class="nav-btn" data-tab="{active_tab}"', f'class="nav-btn active" data-tab="{active_tab}"', html)
+        html = re.sub(rf'id="tab-{active_tab}" class="tab-content"', f'id="tab-{active_tab}" class="tab-content active"', html)
+    return render_template_string(html)
+
 @app.route('/')
 def index():
-    return render_template_string(INDEX_HTML)
+    cleanup_expired_jobs()
+    tab = request.args.get('tab', 'print')
+    if tab not in ['print', 'storage', 'idmaker', 'cups', 'pin', 'history', 'settings']:
+        tab = 'print'
+    return render_portal_with_tab(tab)
+
+@app.route('/storage')
+@app.route('/cloud')
+@app.route('/Public')
+@app.route('/Public/')
+@app.route('/public')
+@app.route('/public/')
+def route_cloud_storage_direct():
+    cleanup_expired_jobs()
+    return render_portal_with_tab('storage')
 
 @app.route('/api/status')
 def api_status():
@@ -6908,6 +8078,496 @@ def api_inbox_delete():
     with conn:
         conn.execute("DELETE FROM inbox WHERE id = ?", (file_id,))
     return jsonify({'success': True})
+
+# ==========================================
+# CLOUD STORAGE BACKEND MODULE
+# ==========================================
+
+STORAGE_SESSIONS = {}  # token -> {'username': username, 'display_name': display_name, 'is_admin': is_admin, 'expires_at': ts}
+
+def get_current_cloud_user():
+    token = request.headers.get('X-Storage-Token') or request.args.get('token') or request.cookies.get('storage_token')
+    if token and token in STORAGE_SESSIONS:
+        s = STORAGE_SESSIONS[token]
+        if time.time() < s['expires_at']:
+            return s
+        STORAGE_SESSIONS.pop(token, None)
+
+    # Check if admin token is present and valid
+    admin_token = request.headers.get('X-Admin-Token')
+    if admin_token and verify_admin_token(admin_token):
+        return {'username': 'admin', 'display_name': 'Administrator', 'is_admin': 1}
+    return None
+
+def resolve_storage_path(scope: str, subpath: str, user=None) -> tuple:
+    scope = (scope or 'public').strip().lower()
+    subpath = (subpath or '').strip().replace('\\', '/').lstrip('/')
+
+    parts = [p for p in subpath.split('/') if p and p != '.']
+    if any(p == '..' for p in parts):
+        raise PermissionError("Directory traversal is strictly forbidden")
+
+    clean_subpath = '/'.join(parts)
+
+    if scope == 'public':
+        base_dir = os.path.realpath(STORAGE_PUBLIC_DIR)
+        os.makedirs(base_dir, exist_ok=True)
+    elif scope == 'private':
+        if not user or not user.get('username'):
+            raise PermissionError("Login required to access private storage")
+        username = re.sub(r'[^a-zA-Z0-9_\-\.]', '', user['username'])
+        if not username:
+            raise PermissionError("Invalid user identity")
+        base_dir = os.path.realpath(os.path.join(STORAGE_USERS_DIR, username))
+        os.makedirs(base_dir, exist_ok=True)
+    else:
+        raise ValueError("Unknown storage scope")
+
+    target_path = os.path.realpath(os.path.join(base_dir, clean_subpath))
+    if target_path != base_dir and not target_path.startswith(base_dir + os.sep):
+        raise PermissionError("Access outside storage boundary is prohibited")
+
+    return target_path, clean_subpath
+
+def format_storage_bytes(num_bytes: int) -> str:
+    for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
+        if abs(num_bytes) < 1024.0:
+            return f"{num_bytes:.1f} {unit}" if unit != 'B' else f"{int(num_bytes)} B"
+        num_bytes /= 1024.0
+    return f"{num_bytes:.1f} PB"
+
+def get_storage_disk_info() -> dict:
+    try:
+        check_path = STORAGE_PUBLIC_DIR if os.path.exists(STORAGE_PUBLIC_DIR) else '/'
+        total, used, free = shutil.disk_usage(check_path)
+        percent = round((used / total) * 100, 1) if total > 0 else 0
+        return {
+            'total_bytes': total,
+            'used_bytes': used,
+            'free_bytes': free,
+            'total_formatted': format_storage_bytes(total),
+            'used_formatted': format_storage_bytes(used),
+            'free_formatted': format_storage_bytes(free),
+            'percent_used': percent
+        }
+    except Exception:
+        return {
+            'total_bytes': 0, 'used_bytes': 0, 'free_bytes': 0,
+            'total_formatted': '0 B', 'used_formatted': '0 B', 'free_formatted': '0 B',
+            'percent_used': 0
+        }
+
+def get_file_type_meta(filename: str) -> dict:
+    ext = os.path.splitext(filename)[1].lower()
+    mime, _ = mimetypes.guess_type(filename)
+    mime = mime or 'application/octet-stream'
+
+    category = 'file'
+    if ext in ['.png', '.jpg', '.jpeg', '.webp', '.gif', '.svg', '.bmp', '.tiff', '.ico', '.avif']:
+        category = 'image'
+    elif ext == '.pdf':
+        category = 'pdf'
+    elif ext in ['.txt', '.md', '.log', '.csv', '.json', '.xml', '.yaml', '.yml', '.py', '.sh', '.js', '.html', '.css', '.c', '.cpp', '.h', '.java', '.sql', '.conf', '.ini']:
+        category = 'text'
+    elif ext in ['.zip', '.tar', '.gz', '.bz2', '.xz', '.7z', '.rar']:
+        category = 'archive'
+    elif ext in ['.mp3', '.wav', '.ogg', '.flac', '.m4a', '.aac']:
+        category = 'audio'
+    elif ext in ['.mp4', '.mkv', '.webm', '.avi', '.mov', '.wmv']:
+        category = 'video'
+    elif ext in ['.doc', '.docx', '.odt', '.rtf']:
+        category = 'doc'
+    elif ext in ['.xls', '.xlsx', '.ods']:
+        category = 'sheet'
+    elif ext in ['.ppt', '.pptx', '.odp']:
+        category = 'slide'
+
+    return {
+        'ext': ext,
+        'mime': mime,
+        'category': category
+    }
+
+@app.route('/api/storage/status', methods=['GET'])
+def api_storage_status():
+    user = get_current_cloud_user()
+    return jsonify({
+        'success': True,
+        'authenticated': bool(user),
+        'user': {
+            'username': user['username'],
+            'display_name': user.get('display_name', user['username']),
+            'is_admin': bool(user.get('is_admin', 0))
+        } if user else None,
+        'disk': get_storage_disk_info(),
+        'scopes': ['public', 'private']
+    })
+
+@app.route('/api/storage/login', methods=['POST'])
+def api_storage_login():
+    username = (request.form.get('username') or '').strip().lower()
+    password = request.form.get('password') or ''
+    if not username or not password:
+        return jsonify({'success': False, 'error': 'Username and password required'}), 400
+
+    authenticated = False
+    display_name = username
+    is_admin = 0
+
+    if username == 'admin':
+        admin_hash = get_setting('admin_hash')
+        if admin_hash and check_password_hash(admin_hash, password):
+            authenticated = True
+            display_name = 'Administrator'
+            is_admin = 1
+
+    if not authenticated:
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM cloud_users WHERE username = ?", (username,))
+        row = cur.fetchone()
+        if row and check_password_hash(row['password_hash'], password):
+            authenticated = True
+            display_name = row['display_name'] or username
+            is_admin = row['is_admin']
+
+    if not authenticated:
+        return jsonify({'success': False, 'error': 'Invalid username or password'}), 401
+
+    token = secrets.token_hex(24)
+    STORAGE_SESSIONS[token] = {
+        'username': username,
+        'display_name': display_name,
+        'is_admin': is_admin,
+        'expires_at': int(time.time()) + 86400 * 7
+    }
+    return jsonify({
+        'success': True,
+        'token': token,
+        'user': {
+            'username': username,
+            'display_name': display_name,
+            'is_admin': bool(is_admin)
+        }
+    })
+
+@app.route('/api/storage/logout', methods=['POST'])
+def api_storage_logout():
+    token = request.headers.get('X-Storage-Token') or request.form.get('token')
+    if token:
+        STORAGE_SESSIONS.pop(token, None)
+    return jsonify({'success': True})
+
+@app.route('/api/storage/list', methods=['GET'])
+def api_storage_list():
+    scope = request.args.get('scope', 'public')
+    subpath = request.args.get('path', '')
+    user = get_current_cloud_user()
+
+    try:
+        target_path, clean_subpath = resolve_storage_path(scope, subpath, user)
+    except PermissionError as pe:
+        return jsonify({'success': False, 'error': str(pe)}), 401
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+
+    if not os.path.exists(target_path):
+        return jsonify({'success': False, 'error': 'Folder not found'}), 404
+    if not os.path.isdir(target_path):
+        return jsonify({'success': False, 'error': 'Target is not a directory'}), 400
+
+    folders = []
+    files = []
+
+    try:
+        entries = sorted(os.listdir(target_path), key=lambda s: s.lower())
+    except Exception as e:
+        return jsonify({'success': False, 'error': f'Cannot read directory: {e}'}), 500
+
+    for name in entries:
+        if name.startswith('.'):
+            continue
+        entry_abs = os.path.join(target_path, name)
+        rel_item_path = f"{clean_subpath}/{name}".strip('/') if clean_subpath else name
+        try:
+            st = os.stat(entry_abs)
+            mtime = int(st.st_mtime)
+            mtime_fmt = datetime.fromtimestamp(mtime).strftime('%Y-%m-%d %H:%M')
+
+            if os.path.isdir(entry_abs):
+                try:
+                    count = len([x for x in os.listdir(entry_abs) if not x.startswith('.')])
+                except Exception:
+                    count = 0
+                folders.append({
+                    'name': name,
+                    'path': rel_item_path,
+                    'is_dir': True,
+                    'items_count': count,
+                    'mtime': mtime,
+                    'mtime_formatted': mtime_fmt
+                })
+            else:
+                size = st.st_size
+                meta = get_file_type_meta(name)
+                files.append({
+                    'name': name,
+                    'path': rel_item_path,
+                    'is_dir': False,
+                    'size': size,
+                    'size_formatted': format_storage_bytes(size),
+                    'mtime': mtime,
+                    'mtime_formatted': mtime_fmt,
+                    'ext': meta['ext'],
+                    'mime': meta['mime'],
+                    'category': meta['category']
+                })
+        except Exception:
+            pass
+
+    breadcrumbs = []
+    if clean_subpath:
+        parts = clean_subpath.split('/')
+        accum = []
+        for p in parts:
+            accum.append(p)
+            breadcrumbs.append({'name': p, 'path': '/'.join(accum)})
+
+    return jsonify({
+        'success': True,
+        'scope': scope,
+        'current_path': clean_subpath,
+        'breadcrumbs': breadcrumbs,
+        'folders': folders,
+        'files': files,
+        'disk': get_storage_disk_info(),
+        'user': {
+            'username': user['username'],
+            'display_name': user.get('display_name', user['username']),
+            'is_admin': bool(user.get('is_admin', 0))
+        } if user else None
+    })
+
+@app.route('/api/storage/upload', methods=['POST'])
+def api_storage_upload():
+    scope = request.form.get('scope', 'public')
+    subpath = request.form.get('path', '')
+    user = get_current_cloud_user()
+
+    try:
+        target_dir, _ = resolve_storage_path(scope, subpath, user)
+    except PermissionError as pe:
+        return jsonify({'success': False, 'error': str(pe)}), 401
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+
+    uploaded_files = request.files.getlist('files') or request.files.getlist('files[]')
+    if not uploaded_files:
+        return jsonify({'success': False, 'error': 'No files provided for upload'}), 400
+
+    uploaded_names = []
+    for file in uploaded_files:
+        if not file or not file.filename:
+            continue
+        clean_name = os.path.basename(file.filename.replace('\\', '/'))
+        clean_name = re.sub(r'[/\\:\0]', '_', clean_name).strip()
+        if not clean_name:
+            continue
+        dest_path = os.path.join(target_dir, clean_name)
+        try:
+            file.save(dest_path)
+            uploaded_names.append(clean_name)
+        except Exception as e:
+            return jsonify({'success': False, 'error': f'Failed saving {clean_name}: {e}'}), 500
+
+    return jsonify({'success': True, 'uploaded': uploaded_names})
+
+@app.route('/api/storage/mkdir', methods=['POST'])
+def api_storage_mkdir():
+    scope = request.form.get('scope', 'public')
+    subpath = request.form.get('path', '')
+    folder_name = (request.form.get('folder_name') or '').strip()
+    user = get_current_cloud_user()
+
+    if not folder_name or re.search(r'[\\/\0]', folder_name) or folder_name in ['.', '..']:
+        return jsonify({'success': False, 'error': 'Invalid folder name'}), 400
+
+    try:
+        target_dir, _ = resolve_storage_path(scope, subpath, user)
+        new_folder_path = os.path.join(target_dir, folder_name)
+        if os.path.exists(new_folder_path):
+            return jsonify({'success': False, 'error': 'Folder already exists'}), 400
+        os.makedirs(new_folder_path, exist_ok=True)
+        return jsonify({'success': True, 'folder': folder_name})
+    except PermissionError as pe:
+        return jsonify({'success': False, 'error': str(pe)}), 401
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/storage/download', methods=['GET'])
+def api_storage_download():
+    scope = request.args.get('scope', 'public')
+    subpath = request.args.get('path', '')
+    user = get_current_cloud_user()
+
+    try:
+        file_path, _ = resolve_storage_path(scope, subpath, user)
+    except PermissionError as pe:
+        return jsonify({'success': False, 'error': str(pe)}), 401
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+
+    if not os.path.exists(file_path) or not os.path.isfile(file_path):
+        return jsonify({'success': False, 'error': 'File not found'}), 404
+
+    filename = os.path.basename(file_path)
+    return send_file(file_path, as_attachment=True, download_name=filename)
+
+@app.route('/api/storage/preview', methods=['GET'])
+def api_storage_preview():
+    scope = request.args.get('scope', 'public')
+    subpath = request.args.get('path', '')
+    user = get_current_cloud_user()
+
+    try:
+        file_path, _ = resolve_storage_path(scope, subpath, user)
+    except PermissionError as pe:
+        return jsonify({'success': False, 'error': str(pe)}), 401
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+
+    if not os.path.exists(file_path) or not os.path.isfile(file_path):
+        return jsonify({'success': False, 'error': 'File not found'}), 404
+
+    meta = get_file_type_meta(os.path.basename(file_path))
+    if meta['category'] == 'text':
+        try:
+            with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
+                content = f.read(2 * 1024 * 1024)
+            return Response(content, mimetype='text/plain; charset=utf-8')
+        except Exception as e:
+            return jsonify({'success': False, 'error': str(e)}), 500
+
+    return send_file(file_path, mimetype=meta['mime'])
+
+@app.route('/api/storage/rename', methods=['POST'])
+def api_storage_rename():
+    scope = request.form.get('scope', 'public')
+    subpath = request.form.get('path', '')
+    new_name = (request.form.get('new_name') or '').strip()
+    user = get_current_cloud_user()
+
+    if not new_name or re.search(r'[\\/\0]', new_name) or new_name in ['.', '..']:
+        return jsonify({'success': False, 'error': 'Invalid new name'}), 400
+
+    try:
+        old_path, _ = resolve_storage_path(scope, subpath, user)
+        if not os.path.exists(old_path):
+            return jsonify({'success': False, 'error': 'Target item not found'}), 404
+
+        parent_dir = os.path.dirname(old_path)
+        new_path = os.path.join(parent_dir, new_name)
+        if os.path.exists(new_path):
+            return jsonify({'success': False, 'error': 'An item with that name already exists'}), 400
+
+        os.rename(old_path, new_path)
+        return jsonify({'success': True})
+    except PermissionError as pe:
+        return jsonify({'success': False, 'error': str(pe)}), 401
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/storage/delete', methods=['POST'])
+def api_storage_delete():
+    scope = request.form.get('scope', 'public')
+    subpath = (request.form.get('path') or '').strip()
+    user = get_current_cloud_user()
+
+    if not subpath:
+        return jsonify({'success': False, 'error': 'Cannot delete root directory'}), 400
+
+    try:
+        target_path, _ = resolve_storage_path(scope, subpath, user)
+        if not os.path.exists(target_path):
+            return jsonify({'success': False, 'error': 'Item not found'}), 404
+
+        if os.path.isdir(target_path):
+            shutil.rmtree(target_path)
+        else:
+            os.remove(target_path)
+        return jsonify({'success': True})
+    except PermissionError as pe:
+        return jsonify({'success': False, 'error': str(pe)}), 401
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/storage/print', methods=['POST'])
+def api_storage_print():
+    scope = request.form.get('scope', 'public')
+    subpath = request.form.get('path', '')
+    printer = request.form.get('printer') or 'HP_Smart_Tank_520'
+    try:
+        copies = int(request.form.get('copies') or 1)
+    except Exception:
+        copies = 1
+    colormodel = request.form.get('colormodel') or 'RGB'
+    user = get_current_cloud_user()
+    client_ip = request.remote_addr or '127.0.0.1'
+
+    try:
+        file_path, _ = resolve_storage_path(scope, subpath, user)
+        if not os.path.exists(file_path) or not os.path.isfile(file_path):
+            return jsonify({'success': False, 'error': 'File not found'}), 404
+
+        filename = os.path.basename(file_path)
+        ext = os.path.splitext(filename)[1].lower()
+
+        temp_dir = None
+        conv_pdf = None
+        try:
+            if ext == '.pdf':
+                conv_pdf = file_path
+            else:
+                conv_pdf, temp_dir = convert_to_pdf(file_path, filename)
+
+            total_pages = get_pdf_page_count(conv_pdf)
+            rate = get_rate(colormodel not in ('KGray', 'Gray', 'K'))
+            cost = rate * total_pages * copies
+
+            options = {
+                'copies': copies,
+                'pagesize': 'A4',
+                'mediatype': 'Plain',
+                'quality': 'Normal',
+                'colormodel': colormodel,
+                'duplex': 'None',
+                'orientation': 'auto',
+                'fitpage': 'fit-to-page',
+                'pagerange': '',
+                'resolution': '600',
+                'margin_mode': 'normal'
+            }
+
+            cmd = build_lp_command(printer, conv_pdf, options)
+            res = subprocess.run(cmd, capture_output=True, text=True, check=True, timeout=30)
+            m = re.search(r'([A-Za-z0-9_-]+-\d+)', res.stdout)
+            job_id = m.group(1) if m else res.stdout.strip()
+            cups_jid = None
+            if job_id and '-' in job_id:
+                try:
+                    cups_jid = int(job_id.split('-')[-1])
+                except Exception:
+                    pass
+
+            record_ledger(filename, printer, total_pages, copies, total_pages * copies, colormodel, cost, client_ip, "COMPLETED", source="cloud_storage", cups_job_id=cups_jid)
+            return jsonify({'success': True, 'message': f'Document sent to {printer}', 'job_id': job_id})
+        finally:
+            if temp_dir and os.path.exists(temp_dir):
+                shutil.rmtree(temp_dir, ignore_errors=True)
+    except PermissionError as pe:
+        return jsonify({'success': False, 'error': str(pe)}), 401
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 init_db()
 
