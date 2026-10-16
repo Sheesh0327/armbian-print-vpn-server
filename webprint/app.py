@@ -1783,7 +1783,7 @@ INDEX_HTML = """<!DOCTYPE html>
 
     <nav class="header-nav">
         <button class="nav-btn active" data-tab="print" onclick="switchTab('print')">Print</button>
-        <button class="nav-btn" data-tab="scan" onclick="switchTab('scan')">Scan &amp; Copy</button>
+        <button class="nav-btn" data-tab="scan" onclick="switchTab('scan')">Scanner</button>
         <button class="nav-btn" data-tab="idmaker" onclick="switchTab('idmaker')">ID Photo Maker</button>
         <button class="nav-btn" data-tab="cups" onclick="switchTab('cups')">CUPS Control</button>
         <button class="nav-btn" data-tab="pin" onclick="switchTab('pin')">PIN Release</button>
@@ -2110,168 +2110,28 @@ INDEX_HTML = """<!DOCTYPE html>
         </div>
     </div>
 
-    <!-- TAB: WALK-UP SCANNER & PHOTOCOPIER -->
+    <!-- TAB: DOCUMENT SCANNER -->
     <div class="tab-content" id="tab-scan">
         <div class="cr-page-container">
-            <!-- Scanner Hardware Status Banner -->
-            <div class="cr-card" style="margin-bottom: 16px;">
-                <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
-                    <div style="display: flex; align-items: center; gap: 10px;">
-                        <svg class="icon" viewBox="0 0 24 24" style="stroke: var(--accent); width: 22px; height: 22px;"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
-                        <div>
-                            <div style="display: flex; align-items: center; gap: 8px;">
-                                <h2 style="font-size: 17px; font-weight: 600; color: var(--text-primary); margin: 0;">Walk-Up Scanner & Photocopier</h2>
-                                <span class="badge" id="scannerStatusBadge" style="background: rgba(30, 142, 62, 0.2); color: var(--success); font-weight: 600; padding: 2px 8px; border-radius: 12px; font-size: 11px;">Checking...</span>
-                            </div>
-                            <p style="font-size: 12px; color: var(--text-secondary); margin: 3px 0 0 0;" id="scannerDeviceName">
-                                HP Smart Tank 520 Flatbed Scanner (eSCL Direct Driverless Scanning)
-                            </p>
-                        </div>
-                    </div>
-                    <button type="button" class="cr-btn-pill cr-btn-cancel" onclick="loadScannerTab()" style="padding: 4px 10px; font-size: 12px;">
-                        <svg class="icon" viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg> Refresh Scanner
-                    </button>
-                </div>
-            </div>
-
-            <!-- Card 1: 1-Click Walk-Up Photocopier -->
-            <div class="cr-card" style="margin-bottom: 16px;">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; flex-wrap: wrap; gap: 10px;">
-                    <div>
-                        <h3 style="font-size: 15px; font-weight: 600; color: var(--text-primary); margin: 0;">1-Click Walk-Up Photocopier</h3>
-                        <p style="font-size: 12px; color: var(--text-secondary); margin: 3px 0 0 0;">
-                            Place document face-down on flatbed glass, select color mode, and hit Copy.
-                        </p>
-                    </div>
-                </div>
-
-                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; margin-bottom: 16px;">
-                    <!-- Copy Mode Selector -->
-                    <div>
-                        <label style="font-size: 11px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; display: block; margin-bottom: 6px;">Color Mode</label>
-                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
-                            <button type="button" class="cr-btn-pill cr-btn-print active" id="btnCopyModeBw" onclick="setCopyMode('bw')" style="justify-content: center; padding: 10px 8px;">
-                                <strong>B&W Copy</strong>&nbsp;(₱2.00)
-                            </button>
-                            <button type="button" class="cr-btn-pill cr-btn-cancel" id="btnCopyModeColor" onclick="setCopyMode('color')" style="justify-content: center; padding: 10px 8px;">
-                                <strong>Color Copy</strong>&nbsp;(₱5.00)
-                            </button>
-                        </div>
-                    </div>
-
-                    <!-- Number of Copies -->
-                    <div>
-                        <label style="font-size: 11px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; display: block; margin-bottom: 6px;">Number of Copies</label>
-                        <div style="display: flex; align-items: center; gap: 8px;">
-                            <button type="button" class="cr-btn-pill cr-btn-cancel" onclick="adjustCopyCount(-1)" style="width: 40px; padding: 8px 0; font-size: 16px; font-weight: bold; justify-content: center;">-</button>
-                            <input type="number" id="copyCountInput" class="cr-input" value="1" min="1" max="99" style="text-align: center; width: 70px; font-weight: bold; font-size: 15px;" onchange="sanitizeCopyCount()">
-                            <button type="button" class="cr-btn-pill cr-btn-cancel" onclick="adjustCopyCount(1)" style="width: 40px; padding: 8px 0; font-size: 16px; font-weight: bold; justify-content: center;">+</button>
-                            <span style="font-size: 12px; color: var(--text-secondary); margin-left: 6px;">sheet(s)</span>
-                        </div>
-                    </div>
-
-                    <!-- Scaling / Layout -->
-                    <div>
-                        <label style="font-size: 11px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; display: block; margin-bottom: 6px;">Page Scaling / Layout</label>
-                        <select id="copyScalingSelect" class="cr-select" style="width: 100%;">
-                            <option value="fit">100% Fit Printable Area (Standard)</option>
-                            <option value="2up">2-Up Handout (2 Pages per Sheet)</option>
-                        </select>
-                    </div>
-                </div>
-
-                <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; padding-top: 14px; border-top: 1px solid var(--border);">
-                    <div id="copyStatusText" style="font-size: 12px; color: var(--text-secondary);">
-                        Ready to scan flatbed platen.
-                    </div>
-                    <button type="button" class="cr-btn-pill cr-btn-print" id="btnStartCopy" onclick="executeCopy()" style="padding: 10px 24px; font-size: 14px; font-weight: 600;">
-                        <svg class="icon" viewBox="0 0 24 24"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg> START PHOTOCOPY
-                    </button>
-                </div>
-            </div>
-
-            <!-- Card 2: 2-Sided ID Card Copier -->
-            <div class="cr-card" style="margin-bottom: 16px;">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 10px;">
-                    <div>
-                        <h3 style="font-size: 15px; font-weight: 600; color: var(--text-primary); margin: 0;">2-Sided ID Card Copier (Front & Back on Single Sheet)</h3>
-                        <p style="font-size: 12px; color: var(--text-secondary); margin: 3px 0 0 0;">
-                            Copies both sides of a Government/School ID card neatly centered onto 1 sheet of paper without flipping paper.
-                        </p>
-                    </div>
-                    <button type="button" class="cr-btn-pill cr-btn-cancel" onclick="resetIdCardWizard()" style="padding: 4px 10px; font-size: 11px;">
-                        <svg class="icon" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path><polyline points="3 3 3 8 8 8"></polyline></svg> Reset ID Wizard
-                    </button>
-                </div>
-
-                <!-- Wizard Steps -->
-                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-bottom: 16px;">
-                    <!-- Step 1 Card -->
-                    <div id="idStep1Box" style="background: var(--surface-elevated); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 12px;">
-                        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 6px;">
-                            <span class="badge" id="idStep1Badge" style="background: var(--accent); color: #fff; font-weight: bold; width: 20px; height: 20px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 11px;">1</span>
-                            <strong style="font-size: 13px; color: var(--text-primary);">Front Side</strong>
-                        </div>
-                        <p style="font-size: 11px; color: var(--text-secondary); margin: 0 0 10px 0;">Place ID face-down on upper-left corner of scanner glass.</p>
-                        <button type="button" class="cr-btn-pill cr-btn-print" id="btnScanIdFront" onclick="scanIdSide('front')" style="width: 100%; justify-content: center; font-size: 12px; padding: 6px 12px;">
-                            <svg class="icon" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect></svg> Scan Front Side
-                        </button>
-                    </div>
-
-                    <!-- Step 2 Card -->
-                    <div id="idStep2Box" style="background: var(--surface-elevated); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 12px; opacity: 0.6;">
-                        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 6px;">
-                            <span class="badge" id="idStep2Badge" style="background: var(--surface); color: var(--text-secondary); font-weight: bold; width: 20px; height: 20px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 11px;">2</span>
-                            <strong style="font-size: 13px; color: var(--text-primary);">Back Side</strong>
-                        </div>
-                        <p style="font-size: 11px; color: var(--text-secondary); margin: 0 0 10px 0;">Flip ID over in same spot on scanner glass.</p>
-                        <button type="button" class="cr-btn-pill cr-btn-cancel" id="btnScanIdBack" onclick="scanIdSide('back')" disabled style="width: 100%; justify-content: center; font-size: 12px; padding: 6px 12px;">
-                            <svg class="icon" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect></svg> Scan Back Side
-                        </button>
-                    </div>
-
-                    <!-- Step 3 Card -->
-                    <div id="idStep3Box" style="background: var(--surface-elevated); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 12px; opacity: 0.6;">
-                        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 6px;">
-                            <span class="badge" id="idStep3Badge" style="background: var(--surface); color: var(--text-secondary); font-weight: bold; width: 20px; height: 20px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 11px;">3</span>
-                            <strong style="font-size: 13px; color: var(--text-primary);">Print Composite</strong>
-                        </div>
-                        <p style="font-size: 11px; color: var(--text-secondary); margin: 0 0 10px 0;">Both sides aligned vertically on 1 sheet.</p>
-                        <button type="button" class="cr-btn-pill cr-btn-print" id="btnPrintIdComposite" onclick="printIdCardComposite()" disabled style="width: 100%; justify-content: center; font-size: 12px; padding: 6px 12px;">
-                            <svg class="icon" viewBox="0 0 24 24"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg> Print ID Copy
-                        </button>
-                    </div>
-                </div>
-
-                <!-- Live Side Preview Grid -->
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px; background: var(--bg); border: 1px dashed var(--border); border-radius: var(--radius-sm); padding: 14px; text-align: center;">
-                    <div>
-                        <div style="font-size: 11px; font-weight: 600; color: var(--text-secondary); margin-bottom: 6px; text-transform: uppercase;">Front Preview</div>
-                        <div id="idPreviewFrontContainer" style="height: 120px; display: flex; align-items: center; justify-content: center; background: var(--surface); border-radius: var(--radius-sm); overflow: hidden;">
-                            <span style="font-size: 11px; color: var(--text-secondary);">Awaiting front scan...</span>
-                        </div>
-                    </div>
-                    <div>
-                        <div style="font-size: 11px; font-weight: 600; color: var(--text-secondary); margin-bottom: 6px; text-transform: uppercase;">Back Preview</div>
-                        <div id="idPreviewBackContainer" style="height: 120px; display: flex; align-items: center; justify-content: center; background: var(--surface); border-radius: var(--radius-sm); overflow: hidden;">
-                            <span style="font-size: 11px; color: var(--text-secondary);">Awaiting back scan...</span>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Card 3: Web Document Scanner & Archiver -->
             <div class="cr-card">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; flex-wrap: wrap; gap: 10px;">
+                <!-- Header with Status -->
+                <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px; padding-bottom: 16px; border-bottom: 1px solid var(--border); flex-wrap: wrap; gap: 12px;">
                     <div>
-                        <h3 style="font-size: 15px; font-weight: 600; color: var(--text-primary); margin: 0;">Web Document Scanner & Archiver</h3>
-                        <p style="font-size: 12px; color: var(--text-secondary); margin: 3px 0 0 0;">
-                            Scan full-size documents, contracts, and receipts into PDF or high-res JPEG for download or printing.
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <h2 style="font-size: 16px; font-weight: 600; color: var(--text-primary); margin: 0;">Flatbed Document Scanner</h2>
+                            <span class="badge" id="scannerStatusBadge" style="background: rgba(30, 142, 62, 0.2); color: var(--success); font-weight: 600; padding: 2px 8px; border-radius: 12px; font-size: 11px;">Checking...</span>
+                        </div>
+                        <p style="font-size: 12px; color: var(--text-secondary); margin: 4px 0 0 0;" id="scannerDeviceName">
+                            HP Smart Tank 520 Flatbed Scanner (eSCL)
                         </p>
                     </div>
+                    <button type="button" class="cr-btn-pill cr-btn-cancel" onclick="loadScannerTab()" style="padding: 4px 12px; font-size: 12px;">
+                        <svg class="icon" viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg> Refresh
+                    </button>
                 </div>
 
-                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; margin-bottom: 14px;">
+                <!-- Scan Parameters -->
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 20px;">
                     <div>
                         <label style="font-size: 11px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; display: block; margin-bottom: 6px;">Output Format</label>
                         <select id="docScanFormat" class="cr-select" style="width: 100%;">
@@ -2280,42 +2140,41 @@ INDEX_HTML = """<!DOCTYPE html>
                         </select>
                     </div>
                     <div>
-                        <label style="font-size: 11px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; display: block; margin-bottom: 6px;">Scan Resolution</label>
+                        <label style="font-size: 11px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; display: block; margin-bottom: 6px;">Resolution</label>
                         <select id="docScanResolution" class="cr-select" style="width: 100%;">
-                            <option value="300">300 DPI (Standard Crisp Document)</option>
-                            <option value="150">150 DPI (Fast / Draft Scan)</option>
-                            <option value="600">600 DPI (High Precision Photo)</option>
+                            <option value="300">300 DPI (Standard)</option>
+                            <option value="150">150 DPI (Fast)</option>
+                            <option value="600">600 DPI (High Detail)</option>
                         </select>
                     </div>
                     <div>
                         <label style="font-size: 11px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; display: block; margin-bottom: 6px;">Color Mode</label>
                         <select id="docScanMode" class="cr-select" style="width: 100%;">
-                            <option value="color">Full Color (RGB)</option>
-                            <option value="gray">Grayscale (B&W Documents)</option>
+                            <option value="color">Full Color</option>
+                            <option value="gray">Grayscale</option>
                         </select>
                     </div>
                 </div>
 
-                <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 14px;">
+                <!-- Action Bar -->
+                <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 20px; padding: 12px 16px; background: var(--surface-elevated); border-radius: var(--radius-sm); border: 1px solid var(--border);">
                     <div id="docScanStatusText" style="font-size: 12px; color: var(--text-secondary);">
-                        Ready. Place document on scanner glass.
+                        Place document on scanner glass and click Scan.
                     </div>
                     <div style="display: flex; gap: 8px;">
-                        <button type="button" class="cr-btn-pill cr-btn-print" id="btnRunDocScan" onclick="executeDocScan()" style="padding: 6px 16px;">
-                            <svg class="icon" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg> Scan Document
+                        <button type="button" class="cr-btn-pill cr-btn-print" id="btnRunDocScan" onclick="executeDocScan()" style="padding: 6px 18px; font-size: 12px; font-weight: 600;">
+                            <svg class="icon" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg> Scan Document
                         </button>
-                        <a id="btnDocScanDownload" href="#" download class="cr-btn-pill cr-btn-cancel" style="display: none; padding: 6px 14px; text-decoration: none;">
-                            <svg class="icon" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg> Download File
+                        <a id="btnDocScanDownload" href="#" download class="cr-btn-pill cr-btn-print" style="display: none; padding: 6px 18px; font-size: 12px; font-weight: 600; text-decoration: none;">
+                            <svg class="icon" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg> Download
                         </a>
-                        <button type="button" class="cr-btn-pill cr-btn-cancel" id="btnDocScanPrint" onclick="printScannedDoc()" style="display: none; padding: 6px 14px;">
-                            <svg class="icon" viewBox="0 0 24 24"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg> Print Scanned Doc
-                        </button>
                     </div>
                 </div>
 
-                <!-- Scanned Document Preview Container -->
-                <div id="docScanPreviewWrapper" style="display: none; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 12px; text-align: center;">
-                    <img id="docScanPreviewImg" src="" alt="Scanned Document Preview" style="max-height: 380px; max-width: 100%; object-fit: contain; border-radius: 2px; box-shadow: 0 4px 12px rgba(0,0,0,0.3);">
+                <!-- Scanned Document Preview -->
+                <div id="docScanPreviewWrapper" style="display: none; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 16px; text-align: center;">
+                    <div style="font-size: 11px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; margin-bottom: 10px; text-align: left;">Scan Preview</div>
+                    <img id="docScanPreviewImg" src="" alt="Scan Preview" style="max-height: 480px; max-width: 100%; object-fit: contain; border-radius: 2px; box-shadow: 0 4px 16px rgba(0,0,0,0.4); background: #ffffff;">
                 </div>
             </div>
         </div>
@@ -4915,11 +4774,9 @@ INDEX_HTML = """<!DOCTYPE html>
     if (btnAdminHdr) btnAdminHdr.addEventListener('click', () => window.switchTab('settings'));
 
     // ==========================================
-    // MODULE 1: FLATBED SCANNER & WALK-UP PHOTOCOPIER
+    // DOCUMENT SCANNER
     // ==========================================
     let currentScanId = null;
-    let currentIdSession = null;
-    let currentCopyMode = 'bw';
 
     async function loadScannerTab() {
         const badge = document.getElementById('scannerStatusBadge');
@@ -4927,216 +4784,25 @@ INDEX_HTML = """<!DOCTYPE html>
         try {
             const res = await fetch('/api/scan/status');
             const data = await res.json();
-            if (data.success && data.connected) {
+            if (data.success && data.scanner && data.scanner.available) {
                 if (badge) {
-                    badge.textContent = data.status || 'Ready';
+                    badge.textContent = 'Ready';
                     badge.style.background = 'rgba(30, 142, 62, 0.2)';
                     badge.style.color = 'var(--success)';
                 }
-                if (devName && data.scanner) {
-                    devName.textContent = data.scanner + ' (Direct eSCL Ready)';
+                if (devName) {
+                    devName.textContent = (data.scanner.model || 'HP Smart Tank 520 Flatbed Scanner') + ' (eSCL)';
                 }
             } else {
                 if (badge) {
-                    badge.textContent = data.status || 'Disconnected';
+                    badge.textContent = (data.scanner && data.scanner.state) || 'Offline';
                     badge.style.background = 'rgba(217, 48, 37, 0.2)';
                     badge.style.color = 'var(--danger)';
                 }
             }
         } catch (e) {
-            console.error("Scanner status check failed:", e);
+            console.error("Scanner check error:", e);
         }
-    }
-
-    function setCopyMode(mode) {
-        currentCopyMode = mode;
-        const btnBw = document.getElementById('btnCopyModeBw');
-        const btnColor = document.getElementById('btnCopyModeColor');
-        if (btnBw && btnColor) {
-            if (mode === 'bw') {
-                btnBw.className = 'cr-btn-pill cr-btn-print active';
-                btnColor.className = 'cr-btn-pill cr-btn-cancel';
-            } else {
-                btnColor.className = 'cr-btn-pill cr-btn-print active';
-                btnBw.className = 'cr-btn-pill cr-btn-cancel';
-            }
-        }
-    }
-
-    function adjustCopyCount(delta) {
-        const inp = document.getElementById('copyCountInput');
-        if (!inp) return;
-        let v = parseInt(inp.value) || 1;
-        v = Math.max(1, Math.min(99, v + delta));
-        inp.value = v;
-    }
-
-    function sanitizeCopyCount() {
-        const inp = document.getElementById('copyCountInput');
-        if (!inp) return;
-        let v = parseInt(inp.value) || 1;
-        if (v < 1) v = 1;
-        if (v > 99) v = 99;
-        inp.value = v;
-    }
-
-    async function executeCopy() {
-        const btn = document.getElementById('btnStartCopy');
-        const status = document.getElementById('copyStatusText');
-        const copies = parseInt(document.getElementById('copyCountInput').value) || 1;
-        const scaling = document.getElementById('copyScalingSelect').value || 'fit';
-
-        if (btn) {
-            btn.disabled = true;
-            btn.innerHTML = '<span class="spinner" style="display:inline-block; width:12px; height:12px; border:2px solid #fff; border-top-color:transparent; border-radius:50%; animation:spin 0.8s linear infinite; margin-right:6px;"></span> Scanning & Printing...';
-        }
-        if (status) status.innerHTML = '<span style="color:var(--accent);">Scanning flatbed platen...</span>';
-
-        const fd = new FormData();
-        fd.append('copies', copies);
-        fd.append('mode', currentCopyMode);
-        fd.append('scaling', scaling);
-
-        try {
-            const res = await fetch('/api/scan/copy', { method: 'POST', body: fd });
-            const data = await res.json();
-            if (data.success) {
-                showToast(data.message || 'Photocopy completed successfully', 'success');
-                if (status) status.innerHTML = `<span style="color:var(--success);">Done! Job #${data.job_id} dispatched.</span>`;
-            } else {
-                showToast('Photocopy failed: ' + (data.error || 'Unknown error'), 'error');
-                if (status) status.innerHTML = `<span style="color:var(--danger);">Error: ${data.error || 'Failed'}</span>`;
-            }
-        } catch (e) {
-            showToast('Network error during photocopy', 'error');
-            if (status) status.innerHTML = '<span style="color:var(--danger);">Communication error</span>';
-        } finally {
-            if (btn) {
-                btn.disabled = false;
-                btn.innerHTML = '<svg class="icon" viewBox="0 0 24 24"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg> START PHOTOCOPY';
-            }
-        }
-    }
-
-    async function scanIdSide(side) {
-        const btn = side === 'front' ? document.getElementById('btnScanIdFront') : document.getElementById('btnScanIdBack');
-        const prevContainer = side === 'front' ? document.getElementById('idPreviewFrontContainer') : document.getElementById('idPreviewBackContainer');
-
-        if (btn) {
-            btn.disabled = true;
-            btn.innerHTML = '<span class="spinner" style="display:inline-block; width:12px; height:12px; border:2px solid #fff; border-top-color:transparent; border-radius:50%; animation:spin 0.8s linear infinite; margin-right:6px;"></span> Scanning...';
-        }
-
-        const fd = new FormData();
-        fd.append('step', side);
-        if (currentIdSession) fd.append('session_id', currentIdSession);
-
-        try {
-            const res = await fetch('/api/scan/id-card', { method: 'POST', body: fd });
-            const data = await res.json();
-            if (data.success) {
-                currentIdSession = data.session_id;
-                showToast(side === 'front' ? 'Front of ID scanned!' : 'Back of ID scanned!', 'success');
-                if (prevContainer) {
-                    prevContainer.innerHTML = `<img src="${side === 'front' ? data.front_preview : data.back_preview}&t=${Date.now()}" style="max-height:100%; max-width:100%; object-fit:contain; border-radius:4px;">`;
-                }
-
-                if (side === 'front') {
-                    const b2 = document.getElementById('idStep2Box');
-                    const btnB = document.getElementById('btnScanIdBack');
-                    const badge2 = document.getElementById('idStep2Badge');
-                    if (b2) b2.style.opacity = '1';
-                    if (btnB) {
-                        btnB.disabled = false;
-                        btnB.className = 'cr-btn-pill cr-btn-print';
-                    }
-                    if (badge2) {
-                        badge2.style.background = 'var(--accent)';
-                        badge2.style.color = '#fff';
-                    }
-                } else {
-                    const b3 = document.getElementById('idStep3Box');
-                    const btnC = document.getElementById('btnPrintIdComposite');
-                    const badge3 = document.getElementById('idStep3Badge');
-                    if (b3) b3.style.opacity = '1';
-                    if (btnC) btnC.disabled = false;
-                    if (badge3) {
-                        badge3.style.background = 'var(--success)';
-                        badge3.style.color = '#fff';
-                    }
-                }
-            } else {
-                showToast('Scan failed: ' + (data.error || 'Unknown error'), 'error');
-            }
-        } catch (e) {
-            showToast('Network error during scan', 'error');
-        } finally {
-            if (btn) {
-                btn.disabled = false;
-                btn.innerHTML = `<svg class="icon" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect></svg> Scan ${side === 'front' ? 'Front' : 'Back'} Side`;
-            }
-        }
-    }
-
-    async function printIdCardComposite() {
-        const btn = document.getElementById('btnPrintIdComposite');
-        if (btn) {
-            btn.disabled = true;
-            btn.innerHTML = '<span class="spinner" style="display:inline-block; width:12px; height:12px; border:2px solid #fff; border-top-color:transparent; border-radius:50%; animation:spin 0.8s linear infinite; margin-right:6px;"></span> Printing...';
-        }
-
-        const fd = new FormData();
-        fd.append('step', 'print');
-        fd.append('session_id', currentIdSession);
-        fd.append('copies', '1');
-
-        try {
-            const res = await fetch('/api/scan/id-card', { method: 'POST', body: fd });
-            const data = await res.json();
-            if (data.success) {
-                showToast(data.message || 'ID Card copy printed successfully!', 'success');
-            } else {
-                showToast('Print failed: ' + (data.error || 'Unknown error'), 'error');
-            }
-        } catch (e) {
-            showToast('Network error while printing ID copy', 'error');
-        } finally {
-            if (btn) {
-                btn.disabled = false;
-                btn.innerHTML = '<svg class="icon" viewBox="0 0 24 24"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg> Print ID Copy';
-            }
-        }
-    }
-
-    function resetIdCardWizard() {
-        currentIdSession = null;
-        const b2 = document.getElementById('idStep2Box');
-        const b3 = document.getElementById('idStep3Box');
-        const btnB = document.getElementById('btnScanIdBack');
-        const btnC = document.getElementById('btnPrintIdComposite');
-        const badge2 = document.getElementById('idStep2Badge');
-        const badge3 = document.getElementById('idStep3Badge');
-
-        if (b2) b2.style.opacity = '0.6';
-        if (b3) b3.style.opacity = '0.6';
-        if (btnB) {
-            btnB.disabled = true;
-            btnB.className = 'cr-btn-pill cr-btn-cancel';
-        }
-        if (btnC) btnC.disabled = true;
-        if (badge2) {
-            badge2.style.background = 'var(--surface)';
-            badge2.style.color = 'var(--text-secondary)';
-        }
-        if (badge3) {
-            badge3.style.background = 'var(--surface)';
-            badge3.style.color = 'var(--text-secondary)';
-        }
-
-        const pf = document.getElementById('idPreviewFrontContainer');
-        const pb = document.getElementById('idPreviewBackContainer');
-        if (pf) pf.innerHTML = '<span style="font-size: 11px; color: var(--text-secondary);">Awaiting front scan...</span>';
-        if (pb) pb.innerHTML = '<span style="font-size: 11px; color: var(--text-secondary);">Awaiting back scan...</span>';
     }
 
     async function executeDocScan() {
@@ -5148,9 +4814,9 @@ INDEX_HTML = """<!DOCTYPE html>
 
         if (btn) {
             btn.disabled = true;
-            btn.innerHTML = '<span class="spinner" style="display:inline-block; width:12px; height:12px; border:2px solid #fff; border-top-color:transparent; border-radius:50%; animation:spin 0.8s linear infinite; margin-right:6px;"></span> Scanning Document...';
+            btn.textContent = 'Scanning...';
         }
-        if (status) status.innerHTML = '<span style="color:var(--accent);">Scanner motor running...</span>';
+        if (status) status.textContent = 'Scanning platen. Please wait...';
 
         const fd = new FormData();
         fd.append('format', fmt);
@@ -5163,10 +4829,9 @@ INDEX_HTML = """<!DOCTYPE html>
             if (data.success) {
                 currentScanId = data.scan_id;
                 showToast('Document scanned successfully', 'success');
-                if (status) status.innerHTML = '<span style="color:var(--success);">Scan complete! Ready to download or print.</span>';
+                if (status) status.textContent = 'Scan complete. Click Download to save file.';
 
                 const dlBtn = document.getElementById('btnDocScanDownload');
-                const prBtn = document.getElementById('btnDocScanPrint');
                 const previewImg = document.getElementById('docScanPreviewImg');
                 const previewWrap = document.getElementById('docScanPreviewWrapper');
 
@@ -5174,51 +4839,21 @@ INDEX_HTML = """<!DOCTYPE html>
                     dlBtn.style.display = 'inline-flex';
                     dlBtn.href = data.download_url;
                 }
-                if (prBtn) prBtn.style.display = 'inline-flex';
                 if (previewImg && previewWrap) {
                     previewImg.src = data.preview_url + '?t=' + Date.now();
                     previewWrap.style.display = 'block';
                 }
             } else {
                 showToast('Scan failed: ' + (data.error || 'Unknown error'), 'error');
-                if (status) status.innerHTML = `<span style="color:var(--danger);">Error: ${data.error || 'Failed'}</span>`;
+                if (status) status.textContent = 'Error: ' + (data.error || 'Scan failed');
             }
         } catch (e) {
             showToast('Network error during scan', 'error');
-            if (status) status.innerHTML = '<span style="color:var(--danger);">Network error</span>';
+            if (status) status.textContent = 'Network communication error';
         } finally {
             if (btn) {
                 btn.disabled = false;
-                btn.innerHTML = '<svg class="icon" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg> Scan Document';
-            }
-        }
-    }
-
-    async function printScannedDoc() {
-        if (!currentScanId) return;
-        const btn = document.getElementById('btnDocScanPrint');
-        if (btn) {
-            btn.disabled = true;
-            btn.innerHTML = '<span class="spinner" style="display:inline-block; width:12px; height:12px; border:2px solid #fff; border-top-color:transparent; border-radius:50%; animation:spin 0.8s linear infinite; margin-right:6px;"></span> Printing...';
-        }
-        try {
-            const fd = new FormData();
-            fd.append('copies', '1');
-            fd.append('mode', document.getElementById('docScanMode').value === 'gray' ? 'bw' : 'color');
-            fd.append('scaling', 'fit');
-            const res = await fetch('/api/scan/copy', { method: 'POST', body: fd });
-            const data = await res.json();
-            if (data.success) {
-                showToast('Scanned document sent to printer!', 'success');
-            } else {
-                showToast('Print failed: ' + (data.error || 'Unknown error'), 'error');
-            }
-        } catch (e) {
-            showToast('Print error', 'error');
-        } finally {
-            if (btn) {
-                btn.disabled = false;
-                btn.innerHTML = '<svg class="icon" viewBox="0 0 24 24"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg> Print Scanned Doc';
+                btn.innerHTML = '<svg class="icon" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg> Scan Document';
             }
         }
     }
@@ -7236,6 +6871,14 @@ def api_scan_document():
                 final_path = raw_img_path
                 fmt = 'jpeg'
 
+        # Auto-save copy to Samba network share if available
+        public_scans = '/srv/shares/public/Scans'
+        if os.path.isdir(public_scans):
+            try:
+                shutil.copy2(final_path, os.path.join(public_scans, f"Scan_{scan_id}.{fmt}"))
+            except Exception:
+                pass
+
         return jsonify({
             'success': True,
             'scan_id': scan_id,
@@ -7269,181 +6912,6 @@ def api_scan_download(scan_id):
     mimetypes_map = {'pdf': 'application/pdf', 'png': 'image/png', 'jpg': 'image/jpeg', 'jpeg': 'image/jpeg'}
     mime = mimetypes_map.get(fmt, 'application/octet-stream')
     return send_file(file_path, mimetype=mime, as_attachment=True, download_name=f"Document_Scan_{scan_id}.{fmt}")
-
-@app.route('/api/scan/copy', methods=['POST'])
-def api_scan_copy():
-    if not is_public_print_enabled():
-        return jsonify({'success': False, 'error': 'Public printing is disabled'}), 403
-
-    try:
-        copies = validate_copies(request.form.get('copies', '1'))
-    except ValueError as e:
-        return jsonify({'success': False, 'error': str(e)}), 400
-
-    colormodel = request.form.get('colormodel', 'KGray')
-    contrast = request.form.get('contrast', 'high')
-    pagesize = request.form.get('pagesize', 'A4')
-    if pagesize not in ALLOWED_PAGESIZES: pagesize = 'A4'
-
-    printers_list, def_p = get_printers()
-    printer = request.form.get('printer', '').strip() or def_p or (printers_list[0]['name'] if printers_list else 'HP_Smart_Tank_520')
-
-    escl_color = 'RGB24' if colormodel not in ('KGray', 'Gray', 'monochrome', 'mono', 'K') else 'Grayscale8'
-    try:
-        img_bytes = acquire_scanner_image(resolution=200, colormodel=escl_color)
-    except Exception as e:
-        return jsonify({'success': False, 'error': f"Scanner acquisition failed: {e}"}), 500
-
-    temp_dir = tempfile.mkdtemp(prefix="copy_")
-    raw_img = os.path.join(temp_dir, "scan.jpg")
-    out_pdf = os.path.join(temp_dir, "copy.pdf")
-    with open(raw_img, 'wb') as f:
-        f.write(img_bytes)
-
-    conv_cmd = ['convert', raw_img]
-    if contrast == 'high':
-        conv_cmd.extend(['-contrast-stretch', '3%x2%', '-level', '5%,92%'])
-    if colormodel in ('KGray', 'Gray', 'monochrome', 'mono', 'K'):
-        conv_cmd.extend(['-colorspace', 'gray'])
-    conv_cmd.append(out_pdf)
-
-    try:
-        subprocess.run(conv_cmd, check=True, timeout=30)
-    except Exception:
-        out_pdf = raw_img
-
-    options = {
-        'copies': copies,
-        'pagesize': pagesize,
-        'colormodel': colormodel,
-        'fitpage': True
-    }
-    cmd = build_lp_command(printer, out_pdf, options)
-    try:
-        res = run_cups_cmd(cmd)
-        if res.returncode != 0:
-            return jsonify({'success': False, 'error': f"CUPS spool error: {res.stderr.strip() or res.stdout.strip()}"}), 500
-        m = re.search(r'([A-Za-z0-9_-]+-\d+)', res.stdout)
-        job_id = m.group(1) if m else (f"{printer}-1" if os.name == 'nt' else res.stdout.strip())
-        cups_jid = int(job_id.split('-')[-1]) if '-' in job_id and job_id.split('-')[-1].isdigit() else 1
-
-        rate = get_rate(colormodel not in ('KGray', 'Gray', 'K'))
-        cost = rate * copies
-        record_ledger(f"Photocopy ({copies}x)", printer, 1, copies, copies, colormodel, cost, request.remote_addr or 'Walk-Up', "COMPLETED", source="photocopy", cups_job_id=cups_jid)
-        return jsonify({'success': True, 'job_id': job_id, 'copies': copies, 'cost': cost, 'message': f"Photocopy job ({copies} copy/copies) dispatched to '{printer}'."})
-    except Exception as e:
-        return jsonify({'success': False, 'error': f"CUPS spool error: {e}"}), 500
-    finally:
-        shutil.rmtree(temp_dir, ignore_errors=True)
-
-@app.route('/api/scan/id-card', methods=['POST'])
-def api_scan_id_card():
-    step = request.form.get('step', '').strip()
-    session_id = request.form.get('session_id', '').strip()
-    if not session_id or not re.match(r'^[a-zA-Z0-9_-]+$', session_id):
-        session_id = secrets.token_hex(8)
-
-    session_dir = os.path.join(tempfile.gettempdir(), f"idcard_{session_id}")
-    os.makedirs(session_dir, exist_ok=True)
-    front_img = os.path.join(session_dir, "front.jpg")
-    back_img = os.path.join(session_dir, "back.jpg")
-
-    colormodel = request.form.get('colormodel', 'RGB')
-
-    if step in ('scan_front', 'front'):
-        try:
-            img_bytes = acquire_scanner_image(resolution=300, colormodel='RGB24')
-            with open(front_img, 'wb') as f:
-                f.write(img_bytes)
-            cropped_front = os.path.join(session_dir, "front_card.jpg")
-            try:
-                subprocess.run(['convert', front_img, '-crop', '1100x750+40+40', '+repage', cropped_front], timeout=15)
-            except Exception:
-                cropped_front = front_img
-            return jsonify({'success': True, 'step': 'front_scanned', 'session_id': session_id, 'preview_url': f'/api/scan/id-preview?session_id={session_id}&side=front'})
-        except Exception as e:
-            return jsonify({'success': False, 'error': f"Scan Front failed: {e}"}), 500
-
-    elif step in ('scan_back', 'back'):
-        try:
-            img_bytes = acquire_scanner_image(resolution=300, colormodel='RGB24')
-            with open(back_img, 'wb') as f:
-                f.write(img_bytes)
-            cropped_back = os.path.join(session_dir, "back_card.jpg")
-            try:
-                subprocess.run(['convert', back_img, '-crop', '1100x750+40+40', '+repage', cropped_back], timeout=15)
-            except Exception:
-                cropped_back = back_img
-            return jsonify({'success': True, 'step': 'back_scanned', 'session_id': session_id, 'preview_url': f'/api/scan/id-preview?session_id={session_id}&side=back'})
-        except Exception as e:
-            return jsonify({'success': False, 'error': f"Scan Back failed: {e}"}), 500
-
-    elif step == 'print':
-        out_pdf = os.path.join(session_dir, "id_copy_composite.pdf")
-        c_front = os.path.join(session_dir, "front_card.jpg") if os.path.exists(os.path.join(session_dir, "front_card.jpg")) else front_img
-        c_back = os.path.join(session_dir, "back_card.jpg") if os.path.exists(os.path.join(session_dir, "back_card.jpg")) else back_img
-        if not os.path.exists(c_front):
-            return jsonify({'success': False, 'error': 'Front side must be scanned first'}), 400
-
-        printers_list, def_p = get_printers()
-        printer = request.form.get('printer', '').strip() or def_p or (printers_list[0]['name'] if printers_list else 'HP_Smart_Tank_520')
-
-        try:
-            if os.path.exists(c_back):
-                comp_cmd = [
-                    'convert', '-size', '2480x3508', 'xc:white',
-                    '(', c_front, '-bordercolor', '#dddddd', '-border', '2', ')', '-geometry', '+690+500', '-composite',
-                    '(', c_back, '-bordercolor', '#dddddd', '-border', '2', ')', '-geometry', '+690+1700', '-composite',
-                    out_pdf
-                ]
-            else:
-                comp_cmd = [
-                    'convert', '-size', '2480x3508', 'xc:white',
-                    '(', c_front, '-bordercolor', '#dddddd', '-border', '2', ')', '-geometry', '+690+1000', '-composite',
-                    out_pdf
-                ]
-            subprocess.run(comp_cmd, check=True, timeout=30)
-        except Exception:
-            out_pdf = c_front
-
-        options = {
-            'copies': 1,
-            'pagesize': 'A4',
-            'colormodel': colormodel,
-            'fitpage': True
-        }
-        cmd = build_lp_command(printer, out_pdf, options)
-        try:
-            res = run_cups_cmd(cmd)
-            if res.returncode != 0:
-                return jsonify({'success': False, 'error': f"Spool error: {res.stderr.strip() or res.stdout.strip()}"}), 500
-            m = re.search(r'([A-Za-z0-9_-]+-\d+)', res.stdout)
-            job_id = m.group(1) if m else (f"{printer}-1" if os.name == 'nt' else res.stdout.strip())
-            cups_jid = int(job_id.split('-')[-1]) if '-' in job_id and job_id.split('-')[-1].isdigit() else 1
-
-            rate = get_rate(colormodel not in ('KGray', 'Gray', 'K'))
-            record_ledger("2-Sided ID Card Copy", printer, 1, 1, 1, colormodel, rate, request.remote_addr or 'Walk-Up', "COMPLETED", source="id_card_copy", cups_job_id=cups_jid)
-            return jsonify({'success': True, 'job_id': job_id, 'cost': rate, 'message': f"ID Card Copy submitted to '{printer}'."})
-        except Exception as e:
-            return jsonify({'success': False, 'error': f"Spool error: {e}"}), 500
-
-    return jsonify({'success': False, 'error': 'Invalid step'}), 400
-
-@app.route('/api/scan/id-preview', methods=['GET'])
-def api_scan_id_preview():
-    session_id = request.args.get('session_id', '').strip()
-    side = request.args.get('side', 'front').strip()
-    if not re.match(r'^[a-zA-Z0-9_-]+$', session_id):
-        return jsonify({'error': 'Invalid session'}), 400
-
-    session_dir = os.path.join(tempfile.gettempdir(), f"idcard_{session_id}")
-    card_path = os.path.join(session_dir, f"{side}_card.jpg")
-    if not os.path.exists(card_path):
-        card_path = os.path.join(session_dir, f"{side}.jpg")
-    if not os.path.exists(card_path):
-        return jsonify({'error': 'Side not scanned'}), 404
-    return send_file(card_path, mimetype='image/jpeg')
-
 @app.route('/api/admin/auth', methods=['POST'])
 def api_admin_auth():
     client_ip = request.remote_addr or ''

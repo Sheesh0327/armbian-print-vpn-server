@@ -76,36 +76,25 @@ class TestAllSixModules(unittest.TestCase):
         self.assertIn('scanner', data)
         self.assertTrue(data['scanner']['available'])
 
-    def test_module1_photocopy_endpoint(self):
-        with patch('webprint.app.acquire_scanner_image') as mock_scan:
-            mock_scan.return_value = b'\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x01\x00`\x00`\x00\x00\xff\xdb\x00C\x00\xff\xc0\x00\x0b\x08\x00\x01\x00\x01\x01\x01\x11\x00\xff\xc4\x00\x1f\x00\x00\x01\x05\x01\x01\x01\x01\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x01\x02\x03\x04\x05\x06\x07\x08\t\n\x0b\xff\xda\x00\x08\x01\x01\x00\x00?\x00\xbf\x00\xff\xd9'
-            res = self.client.post('/api/scan/copy', data={'copies': 1, 'mode': 'bw', 'scaling': 'fit'})
+    def test_module1_document_scan_and_download(self):
+        dummy_jpeg = b'\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x01\x00`\x00`\x00\x00\xff\xdb\x00C\x00\xff\xc0\x00\x0b\x08\x00\x01\x00\x01\x01\x01\x11\x00\xff\xc4\x00\x1f\x00\x00\x01\x05\x01\x01\x01\x01\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x01\x02\x03\x04\x05\x06\x07\x08\t\n\x0b\xff\xda\x00\x08\x01\x01\x00\x00?\x00\xbf\x00\xff\xd9'
+        with patch('webprint.app.acquire_scanner_image', return_value=dummy_jpeg):
+            res = self.client.post('/api/scan/document', data={'format': 'jpeg', 'resolution': '300', 'mode': 'color'})
             self.assertEqual(res.status_code, 200)
             data = res.get_json()
             self.assertTrue(data['success'])
-            self.assertIn('job_id', data)
+            self.assertIn('scan_id', data)
+            scan_id = data['scan_id']
 
-    def test_module1_id_card_workflow(self):
-        dummy_jpeg = b'\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x01\x00`\x00`\x00\x00\xff\xdb\x00C\x00\xff\xc0\x00\x0b\x08\x00\x01\x00\x01\x01\x01\x11\x00\xff\xc4\x00\x1f\x00\x00\x01\x05\x01\x01\x01\x01\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x01\x02\x03\x04\x05\x06\x07\x08\t\n\x0b\xff\xda\x00\x08\x01\x01\x00\x00?\x00\xbf\x00\xff\xd9'
-        with patch('webprint.app.acquire_scanner_image', return_value=dummy_jpeg):
-            # Step 1: Scan Front
-            res1 = self.client.post('/api/scan/id-card', data={'step': 'front'})
-            self.assertEqual(res1.status_code, 200)
-            data1 = res1.get_json()
-            self.assertTrue(data1['success'])
-            session_id = data1['session_id']
+            # Test preview
+            prev_res = self.client.get(f'/api/scan/preview/{scan_id}')
+            self.assertEqual(prev_res.status_code, 200)
+            self.assertEqual(prev_res.mimetype, 'image/jpeg')
 
-            # Step 2: Scan Back
-            res2 = self.client.post('/api/scan/id-card', data={'step': 'back', 'session_id': session_id})
-            self.assertEqual(res2.status_code, 200)
-            data2 = res2.get_json()
-            self.assertTrue(data2['success'])
-
-            # Step 3: Print Composite
-            res3 = self.client.post('/api/scan/id-card', data={'step': 'print', 'session_id': session_id, 'copies': 1})
-            self.assertEqual(res3.status_code, 200)
-            data3 = res3.get_json()
-            self.assertTrue(data3['success'])
+            # Test download
+            dl_res = self.client.get(f'/api/scan/download/{scan_id}?format=jpeg')
+            self.assertEqual(dl_res.status_code, 200)
+            self.assertEqual(dl_res.mimetype, 'image/jpeg')
 
 if __name__ == '__main__':
     unittest.main()
