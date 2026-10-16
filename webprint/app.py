@@ -11,9 +11,10 @@ import secrets
 import shutil
 import glob
 import ipaddress
+import threading
 from urllib.parse import quote, unquote
 from datetime import datetime
-from flask import Flask, render_template_string, request, jsonify, Response
+from flask import Flask, render_template_string, request, jsonify, Response, send_file
 from werkzeug.security import generate_password_hash, check_password_hash
 
 try:
@@ -32,13 +33,17 @@ if os.name == 'nt' and 'WEBPRINT_DB' not in os.environ:
     SECRET_KEY_PATH = os.path.join(base_dir, 'secret.key')
     SPOOL_PINNED_DIR = os.path.join(base_dir, 'pinned')
     SPOOL_INBOX_DIR = os.path.join(base_dir, 'inbox')
+    SPOOL_PREVIEWS_DIR = os.path.join(base_dir, 'previews')
     SEND_KEY_PATH = os.path.join(base_dir, 'send.key')
 else:
     DB_PATH = os.environ.get('WEBPRINT_DB', '/var/lib/webprint/webprint.db')
     SECRET_KEY_PATH = os.environ.get('WEBPRINT_SECRET_KEY', '/var/lib/webprint/secret.key')
     SPOOL_PINNED_DIR = os.environ.get('WEBPRINT_SPOOL_PINNED', '/var/spool/webprint/pinned')
     SPOOL_INBOX_DIR = os.environ.get('WEBPRINT_SPOOL_INBOX', '/var/spool/webprint/inbox')
+    SPOOL_PREVIEWS_DIR = os.environ.get('WEBPRINT_SPOOL_PREVIEWS', '/var/spool/webprint/previews')
     SEND_KEY_PATH = os.environ.get('WEBPRINT_SEND_KEY', '/etc/webprint/send.key')
+
+CONVERSION_SEMAPHORE = threading.Semaphore(1)
 MAX_PAGES_PER_JOB = int(os.environ.get('MAX_PAGES_PER_JOB', 50))
 
 # Inbox: files that Wi-Fi guests send from the captive portal. The router relays them (guests never reach this server);
@@ -100,12 +105,25 @@ ALLOWED_EXTENSIONS = {
 }
 
 ALLOWED_PAGESIZES = {
-    'A4', 'Letter', 'Legal', 'A5', 'A6', 'B5', '4x6', '5x7', '8x10', 'Envelope_DL',
+    'A4', 'Letter', 'Legal', 'A5', 'A6', 'B5', '4x6', '4x6in', '5x7', '5x7in', '8x10', 'Envelope_DL', 'EnvelopeDL',
     'Custom.4x6in', 'EnvDL'
 }
-ALLOWED_MEDIATYPES = {'Plain', 'Glossy', 'Matte', 'Brochure'}
+CANONICAL_PAGESIZES = {
+    '4x6in': '4x6',
+    '5x7in': '5x7',
+    'EnvelopeDL': 'Envelope_DL',
+    'EnvDL': 'Envelope_DL'
+}
+
+ALLOWED_MEDIATYPES = {'Plain', 'Glossy', 'FastGlossy', 'CoatedMatte', 'Matte', 'CoatedBrochure', 'Brochure'}
+CANONICAL_MEDIATYPES = {
+    'FastGlossy': 'Glossy',
+    'CoatedMatte': 'Matte',
+    'CoatedBrochure': 'Brochure'
+}
+
 ALLOWED_QUALITIES = {'Draft', 'Normal', 'Best', 'Photo'}
-ALLOWED_COLORMODELS = {'RGB', 'CMYK', 'K', 'Gray', 'Color'}
+ALLOWED_COLORMODELS = {'RGB', 'CMYK', 'K', 'Gray', 'KGray', 'Color'}
 ALLOWED_DUPLEX = {'None', 'DuplexNoTumble', 'DuplexTumble'}
 ALLOWED_ORIENTATIONS = {'auto', '3', '4', 'portrait', 'landscape'}
 ALLOWED_RESOLUTIONS = {'150', '300', '600', '1200'}
@@ -221,7 +239,7 @@ def decrypt_held_file(enc_path: str, output_path: str):
         pass
 
 def get_db():
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=20.0)
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -230,11 +248,18 @@ def init_db():
         os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
         os.makedirs(SPOOL_PINNED_DIR, exist_ok=True)
         os.makedirs(SPOOL_INBOX_DIR, exist_ok=True)
+        os.makedirs(SPOOL_PREVIEWS_DIR, exist_ok=True)
     except Exception:
         pass
     get_or_create_secret_key()
     conn = get_db()
     with conn:
+        try:
+            conn.execute("PRAGMA journal_mode=WAL;")
+            conn.execute("PRAGMA synchronous=NORMAL;")
+            conn.execute("PRAGMA busy_timeout=20000;")
+        except Exception:
+            pass
         conn.execute("""
             CREATE TABLE IF NOT EXISTS settings (
                 key TEXT PRIMARY KEY,
@@ -453,6 +478,115 @@ def validate_pin(pin_str: str) -> str:
         raise ValueError("PIN must be exactly 6 digits")
     return pin_str
 
+def parse_page_ranges(range_str: str, total_pages: int) -> int:
+    """Calculates the exact count of pages selected by range_str clamped to [1, total_pages]."""
+    if not range_str or not str(range_str).strip():
+        return max(1, total_pages)
+    selected = set()
+    parts = str(range_str).split(',')
+    for part in parts:
+        part = part.strip()
+        if not part:
+            continue
+        if '-' in part:
+            subparts = part.split('-', 1)
+            try:
+                raw_s = int(subparts[0].strip())
+                raw_e = int(subparts[1].strip())
+                if (raw_s > total_pages and raw_e > total_pages) or (raw_s < 1 and raw_e < 1):
+                    continue
+                s = max(1, min(total_pages, raw_s))
+                e = max(1, min(total_pages, raw_e))
+                start = min(s, e)
+                end = max(s, e)
+                selected.update(range(start, end + 1))
+            except ValueError:
+                pass
+        else:
+            try:
+                p = int(part)
+                if 1 <= p <= total_pages:
+                    selected.add(p)
+            except ValueError:
+                pass
+    return len(selected) if selected else max(1, total_pages)
+
+def build_lp_command(printer: str, pdf_path: str, options: dict) -> list:
+    """Builds standard, robust lp command flags mapping UI options to CUPS PPD attributes."""
+    cmd = ['lp', '-d', printer]
+    copies = options.get('copies', 1)
+    try:
+        copies = int(copies)
+        if copies > 1:
+            cmd.extend(['-n', str(copies)])
+    except Exception:
+        pass
+
+    pagesize = options.get('pagesize', 'A4')
+    cups_pagesize = CANONICAL_PAGESIZES.get(pagesize, pagesize)
+    if cups_pagesize:
+        cmd.extend(['-o', f'PageSize={cups_pagesize}'])
+
+    mediatype = options.get('mediatype', 'Plain')
+    cups_mediatype = CANONICAL_MEDIATYPES.get(mediatype, mediatype)
+    if cups_mediatype:
+        cmd.extend(['-o', f'MediaType={cups_mediatype}'])
+
+    quality = options.get('quality', 'Normal')
+    if quality:
+        cmd.extend(['-o', f'OutputMode={quality}'])
+
+    colormodel = options.get('colormodel', 'RGB')
+    if colormodel in ('KGray', 'Gray', 'K'):
+        cmd.extend(['-o', 'ColorModel=KGray', '-o', 'print-color-mode=monochrome'])
+    elif colormodel:
+        cmd.extend(['-o', f'ColorModel={colormodel}', '-o', 'print-color-mode=color'])
+
+    duplex = options.get('duplex', 'None')
+    if duplex and duplex != 'None':
+        cmd.extend(['-o', f'Duplex={duplex}'])
+
+    orientation = str(options.get('orientation', 'auto'))
+    if orientation in ['3', '4']:
+        cmd.extend(['-o', f'orientation-requested={orientation}'])
+
+    fitpage = options.get('fitpage')
+    if fitpage is True or str(fitpage).lower() == 'true':
+        cmd.extend(['-o', 'fit-to-page', '-o', 'print-scaling=fit'])
+    else:
+        cmd.extend(['-o', 'print-scaling=none'])
+
+    pagerange = str(options.get('pagerange', '')).strip()
+    if pagerange:
+        cmd.extend(['-o', f'page-ranges={pagerange}'])
+
+    resolution = options.get('resolution')
+    if resolution:
+        cmd.extend(['-o', f'resolution={resolution}dpi'])
+
+    margin_mode = options.get('margin_mode', 'printable')
+    if margin_mode == 'none':
+        cmd.extend(['-o', 'page-top=0', '-o', 'page-bottom=0', '-o', 'page-left=0', '-o', 'page-right=0'])
+    elif margin_mode == 'normal':
+        cmd.extend(['-o', 'page-top=36', '-o', 'page-bottom=36', '-o', 'page-left=36', '-o', 'page-right=36'])
+    elif margin_mode == 'custom':
+        try:
+            m_top = max(0, min(100, float(options.get('m_top', '10'))))
+            m_bottom = max(0, min(100, float(options.get('m_bottom', '10'))))
+            m_left = max(0, min(100, float(options.get('m_left', '10'))))
+            m_right = max(0, min(100, float(options.get('m_right', '10'))))
+            cmd.extend([
+                '-o', f'page-top={int(m_top * 2.83465)}',
+                '-o', f'page-bottom={int(m_bottom * 2.83465)}',
+                '-o', f'page-left={int(m_left * 2.83465)}',
+                '-o', f'page-right={int(m_right * 2.83465)}'
+            ])
+        except Exception:
+            pass
+
+    cmd.append(pdf_path)
+    return cmd
+
 def convert_to_pdf(input_path, original_filename):
     ext = validate_extension(original_filename)
     temp_dir = tempfile.mkdtemp(prefix="conv_")
@@ -465,28 +599,29 @@ def convert_to_pdf(input_path, original_filename):
             shutil.copy2(input_path, safe_pdf)
             return safe_pdf, temp_dir
 
-        if ext in ['.heic', '.heif', '.avif', '.webp', '.png', '.jpg', '.jpeg', '.bmp', '.tiff', '.tif']:
-            subprocess.run(
-                ['convert', input_path, '-auto-orient', output_pdf],
-                check=True,
-                capture_output=True,
-                timeout=30
-            )
-            return output_pdf, temp_dir
+        with CONVERSION_SEMAPHORE:
+            if ext in ['.heic', '.heif', '.avif', '.webp', '.png', '.jpg', '.jpeg', '.bmp', '.tiff', '.tif']:
+                subprocess.run(
+                    ['convert', input_path, '-auto-orient', '-density', '300', '-units', 'PixelsPerInch', output_pdf],
+                    check=True,
+                    capture_output=True,
+                    timeout=30
+                )
+                return output_pdf, temp_dir
 
-        if ext in ['.docx', '.doc', '.odt', '.rtf', '.txt', '.csv', '.xlsx', '.xls', '.pptx', '.ppt']:
-            subprocess.run([
-                'libreoffice',
-                '--headless',
-                f'-env:UserInstallation=file://{lo_profile}',
-                '--convert-to', 'pdf',
-                input_path,
-                '--outdir', temp_dir
-            ], check=True, capture_output=True, timeout=45)
-            base = os.path.splitext(os.path.basename(input_path))[0]
-            conv_file = os.path.join(temp_dir, f"{base}.pdf")
-            if os.path.exists(conv_file):
-                return conv_file, temp_dir
+            if ext in ['.docx', '.doc', '.odt', '.rtf', '.txt', '.csv', '.xlsx', '.xls', '.pptx', '.ppt']:
+                subprocess.run([
+                    'libreoffice',
+                    '--headless',
+                    f'-env:UserInstallation=file://{lo_profile}',
+                    '--convert-to', 'pdf',
+                    input_path,
+                    '--outdir', temp_dir
+                ], check=True, capture_output=True, timeout=45)
+                base = os.path.splitext(os.path.basename(input_path))[0]
+                conv_file = os.path.join(temp_dir, f"{base}.pdf")
+                if os.path.exists(conv_file):
+                    return conv_file, temp_dir
 
         raise ValueError(f"Conversion unsupported for format '{ext}'")
     except Exception:
@@ -2485,24 +2620,83 @@ INDEX_HTML = """<!DOCTYPE html>
         updateEstimatedCost();
     }
 
+    let currentPreviewId = null;
+
+    function parseClientPageRanges(rangeStr, totalPages) {
+        if (!rangeStr || !String(rangeStr).trim()) return Math.max(1, totalPages || 1);
+        const selected = new Set();
+        const parts = String(rangeStr).split(',');
+        for (let part of parts) {
+            part = part.trim();
+            if (!part) continue;
+            if (part.includes('-')) {
+                const sub = part.split('-');
+                try {
+                    const rawS = parseInt(sub[0]) || 1;
+                    const rawE = parseInt(sub[1]) || totalPages;
+                    if ((rawS > totalPages && rawE > totalPages) || (rawS < 1 && rawE < 1)) continue;
+                    const s = Math.max(1, Math.min(totalPages, rawS));
+                    const e = Math.max(1, Math.min(totalPages, rawE));
+                    const start = Math.min(s, e);
+                    const end = Math.max(s, e);
+                    for (let i = start; i <= end; i++) selected.add(i);
+                } catch (err) {}
+            } else {
+                try {
+                    const p = parseInt(part);
+                    if (!isNaN(p) && p >= 1 && p <= totalPages) selected.add(p);
+                } catch (err) {}
+            }
+        }
+        return selected.size > 0 ? selected.size : Math.max(1, totalPages || 1);
+    }
+
     function updateEstimatedCost() {
         const copies = parseInt(document.getElementById('printCopies').value) || 1;
-        const isColor = document.getElementById('printColorModel').value === 'RGB';
+        const colorModel = document.getElementById('printColorModel').value;
+        const isColor = colorModel === 'RGB' || colorModel === 'Color';
         const rate = isColor ? 5.00 : 2.00;
-        const total = rate * inspectedPageCount * copies;
-        const totalSheets = inspectedPageCount * copies;
+        
+        const totalDocPages = inspectedPageCount || 1;
+        const isCustomPages = document.getElementById('printPagesMode') && document.getElementById('printPagesMode').value === 'custom';
+        const rangeVal = isCustomPages ? document.getElementById('printPageRange').value : '';
+        const activePages = parseClientPageRanges(rangeVal, totalDocPages);
 
-        document.getElementById('costDetails').textContent = `${inspectedPageCount} page(s) × ${copies} copy(ies) @ ₱${rate.toFixed(2)}/pg`;
-        document.getElementById('costTotal').textContent = `₱${total.toFixed(2)}`;
-        document.getElementById('costSheets').textContent = `${totalSheets} sheet${totalSheets !== 1 ? 's' : ''} of paper`;
+        const isDuplex = document.getElementById('chkDuplex') && document.getElementById('chkDuplex').checked;
+        const sheetsPerCopy = isDuplex ? Math.ceil(activePages / 2) : activePages;
+        const totalSheets = sheetsPerCopy * copies;
+        const totalCost = rate * activePages * copies;
+
+        document.getElementById('costDetails').textContent = `${activePages} page(s) × ${copies} copy(ies) @ ₱${rate.toFixed(2)}/pg`;
+        document.getElementById('costTotal').textContent = `₱${totalCost.toFixed(2)}`;
+        document.getElementById('costSheets').textContent = `${totalSheets} sheet${totalSheets !== 1 ? 's' : ''} of paper${isDuplex ? ' (Duplex 2-sided)' : ''}`;
     }
 
     ['printPageSize', 'printOrientation', 'printMarginMode', 'printColorModel', 'printScaling', 'printCopies'].forEach(id => {
-        document.getElementById(id).addEventListener('change', updatePreviewLayout);
+        const el = document.getElementById(id);
+        if (el) el.addEventListener('change', updatePreviewLayout);
     });
     ['mTop', 'mBottom', 'mLeft', 'mRight'].forEach(id => {
-        document.getElementById(id).addEventListener('input', updatePreviewLayout);
+        const el = document.getElementById(id);
+        if (el) el.addEventListener('input', updatePreviewLayout);
     });
+
+    ['printPageRange', 'printCopies', 'printColorModel'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) {
+            el.addEventListener('input', updateEstimatedCost);
+            el.addEventListener('change', updateEstimatedCost);
+        }
+    });
+
+    const chkDup = document.getElementById('chkDuplex');
+    if (chkDup) chkDup.addEventListener('change', updateEstimatedCost);
+
+    const selDup = document.getElementById('printDuplex');
+    if (selDup) selDup.addEventListener('change', updateEstimatedCost);
+
+    const selPagesMode = document.getElementById('printPagesMode');
+    if (selPagesMode) selPagesMode.addEventListener('change', updateEstimatedCost);
 
     document.getElementById('printMarginMode').addEventListener('change', (e) => {
         document.getElementById('customMarginBox').style.display = (e.target.value === 'custom') ? 'flex' : 'none';
@@ -2529,32 +2723,18 @@ INDEX_HTML = """<!DOCTYPE html>
         });
     }
 
-    // File Ingestion & Rendering
+    // File Ingestion & Live Rendering with Preview Caching
     const fileInput = document.getElementById('printFileInput');
     fileInput.addEventListener('change', async () => {
         if (!fileInput.files.length) return;
         const file = fileInput.files[0];
+        currentPreviewId = null;
+
         document.getElementById('printFileName').textContent = file.name;
         document.getElementById('previewDocTitle').textContent = file.name;
         document.getElementById('previewTopToolbar').style.display = 'flex';
         document.getElementById('previewEmptyState').style.display = 'none';
         document.getElementById('previewDimensionsTag').style.display = 'flex';
-
-        const formData = new FormData();
-        formData.append('file', file);
-        formData.append('copies', document.getElementById('printCopies').value);
-        formData.append('colormodel', document.getElementById('printColorModel').value);
-
-        try {
-            const res = await fetch('/api/inspect', { method: 'POST', body: formData });
-            const data = await res.json();
-            if (data.success) {
-                inspectedPageCount = data.pages;
-                updateEstimatedCost();
-            }
-        } catch (e) {
-            console.error(e);
-        }
 
         const ext = file.name.split('.').pop().toLowerCase();
         const pdfCanvas = document.getElementById('pdfCanvas');
@@ -2566,6 +2746,7 @@ INDEX_HTML = """<!DOCTYPE html>
         txtPreview.style.display = 'none';
         document.getElementById('previewPagination').style.display = 'none';
 
+        // Fast client-side render for native web images and local PDF
         if (['jpg', 'jpeg', 'png', 'webp', 'bmp'].includes(ext)) {
             const reader = new FileReader();
             reader.onload = function(e) {
@@ -2585,9 +2766,11 @@ INDEX_HTML = """<!DOCTYPE html>
                 pdfjsLib.getDocument(new Uint8Array(e.target.result)).promise.then(pdf => {
                     currentPdf = pdf;
                     pdfPagesTotal = pdf.numPages;
+                    inspectedPageCount = pdf.numPages;
                     pdfPage = 1;
                     if (pdfPagesTotal > 1) document.getElementById('previewPagination').style.display = 'flex';
                     renderPdfPage(pdfPage);
+                    updateEstimatedCost();
                 }).catch(() => {
                     txtPreview.style.display = 'block';
                     txtPreview.textContent = 'PDF ready to print.';
@@ -2596,9 +2779,52 @@ INDEX_HTML = """<!DOCTYPE html>
             };
             reader.readAsArrayBuffer(file);
         } else {
+            // Office / HEIC / TIFF files
             txtPreview.style.display = 'block';
-            txtPreview.textContent = `Document (${ext.toUpperCase()}) queued and ready to print.`;
+            txtPreview.textContent = `Analyzing & converting ${ext.toUpperCase()} document preview...`;
             updatePreviewLayout();
+        }
+
+        // Call /api/inspect in background to cache converted PDF and obtain accurate page & cost metrics
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('copies', document.getElementById('printCopies').value);
+        formData.append('colormodel', document.getElementById('printColorModel').value);
+        const isDuplex = document.getElementById('chkDuplex') && document.getElementById('chkDuplex').checked;
+        formData.append('duplex', isDuplex ? document.getElementById('printDuplex').value : 'None');
+        formData.append('pagerange', document.getElementById('printPageRange').value);
+
+        try {
+            const res = await fetch('/api/inspect', { method: 'POST', body: formData });
+            const data = await res.json();
+            if (data.success) {
+                inspectedPageCount = data.pages;
+                currentPreviewId = data.preview_id;
+                updateEstimatedCost();
+
+                // If this is an Office document or HEIC, load converted PDF directly into PDF.js!
+                if (!['jpg', 'jpeg', 'png', 'webp', 'bmp', 'pdf'].includes(ext) || ext === 'heic' || ext === 'heif' || ext === 'tiff' || ext === 'tif') {
+                    if (data.preview_id) {
+                        pdfjsLib.getDocument(`/api/preview/${data.preview_id}.pdf`).promise.then(pdf => {
+                            currentPdf = pdf;
+                            pdfPagesTotal = pdf.numPages;
+                            pdfPage = 1;
+                            txtPreview.style.display = 'none';
+                            if (pdfPagesTotal > 1) document.getElementById('previewPagination').style.display = 'flex';
+                            renderPdfPage(pdfPage);
+                        }).catch(err => {
+                            console.error('PDF.js preview error:', err);
+                            txtPreview.style.display = 'block';
+                            txtPreview.textContent = `Document (${ext.toUpperCase()}) converted and ready to print.`;
+                            updatePreviewLayout();
+                        });
+                    }
+                }
+            } else {
+                showToast(data.error || 'Failed to inspect document', 'error');
+            }
+        } catch (e) {
+            console.error(e);
         }
     });
 
@@ -2630,6 +2856,7 @@ INDEX_HTML = """<!DOCTYPE html>
     function clearPreviewState() {
         fileInput.value = '';
         currentPdf = null;
+        currentPreviewId = null;
         inspectedPageCount = 1;
         document.getElementById('printFileName').textContent = 'Choose file...';
         document.getElementById('previewTopToolbar').style.display = 'none';
@@ -2651,6 +2878,37 @@ INDEX_HTML = """<!DOCTYPE html>
         document.getElementById('btnSubmitPrint').textContent = e.target.checked ? 'Hold in PIN' : 'Print';
     });
 
+    async function pollJobStatus(jobId, btn) {
+        let attempts = 0;
+        const maxAttempts = 20; // 30 seconds
+        const interval = setInterval(async () => {
+            attempts++;
+            try {
+                const res = await fetch(`/api/jobs/${encodeURIComponent(jobId)}/status`);
+                const data = await res.json();
+                if (data.success) {
+                    if (data.status === 'printing') {
+                        showToast('Printing on ' + selectedPrinter + '...', 'info');
+                    } else if (data.status === 'completed') {
+                        clearInterval(interval);
+                        showToast('Print completed successfully!', 'success');
+                        btn.disabled = false;
+                        btn.textContent = 'Print';
+                        return;
+                    }
+                }
+            } catch (e) {
+                // ignore transient network errors
+            }
+            if (attempts >= maxAttempts) {
+                clearInterval(interval);
+                showToast('Job submitted to printer queue.', 'success');
+                btn.disabled = false;
+                btn.textContent = 'Print';
+            }
+        }, 1500);
+    }
+
     document.getElementById('btnSubmitPrint').addEventListener('click', async () => {
         if (!fileInput.files.length) {
             showToast('Please select a file to print', 'error');
@@ -2664,8 +2922,18 @@ INDEX_HTML = """<!DOCTYPE html>
             return;
         }
 
+        const btn = document.getElementById('btnSubmitPrint');
+        btn.disabled = true;
+        btn.textContent = isPin ? 'Holding...' : 'Sending...';
+
+        const isDuplex = document.getElementById('chkDuplex') && document.getElementById('chkDuplex').checked;
+        const duplexVal = isDuplex ? document.getElementById('printDuplex').value : 'None';
+
         const formData = new FormData();
         formData.append('file', fileInput.files[0]);
+        if (currentPreviewId) {
+            formData.append('preview_id', currentPreviewId);
+        }
         formData.append('printer', selectedPrinter);
         formData.append('copies', document.getElementById('printCopies').value);
         formData.append('pagesize', document.getElementById('printPageSize').value);
@@ -2679,24 +2947,36 @@ INDEX_HTML = """<!DOCTYPE html>
         formData.append('quality', document.getElementById('printQuality').value);
         formData.append('resolution', document.getElementById('printDpi').value);
         formData.append('colormodel', document.getElementById('printColorModel').value);
-        formData.append('duplex', document.getElementById('printDuplex').value);
+        formData.append('duplex', duplexVal);
         formData.append('fitpage', document.getElementById('printScaling').value);
         formData.append('pagerange', document.getElementById('printPageRange').value);
 
         const endpoint = isPin ? '/api/print/pin-hold' : '/api/print';
         if (isPin) formData.append('pin', pin);
 
-        showToast('Submitting print job...', 'info');
+        showToast(isPin ? 'Encrypting & holding document...' : 'Submitting print job...', 'info');
         try {
             const res = await fetch(endpoint, { method: 'POST', body: formData });
             const data = await res.json();
             if (data.success) {
-                showToast(isPin ? ('Document held! Job ID: ' + (data.job_id || '')) : 'Print job queued successfully!', 'success');
+                if (isPin) {
+                    showToast('Document securely held in PIN queue! Job ID: ' + (data.job_id || ''), 'success');
+                    btn.disabled = false;
+                    btn.textContent = 'Hold in PIN';
+                } else {
+                    const jobId = data.job_id;
+                    showToast('Print job queued (ID: ' + jobId + ')', 'info');
+                    pollJobStatus(jobId, btn);
+                }
             } else {
                 showToast('Error: ' + data.error, 'error');
+                btn.disabled = false;
+                btn.textContent = isPin ? 'Hold in PIN' : 'Print';
             }
         } catch (e) {
             showToast('Failed to reach print server', 'error');
+            btn.disabled = false;
+            btn.textContent = isPin ? 'Hold in PIN' : 'Print';
         }
     });
 
@@ -2883,105 +3163,158 @@ INDEX_HTML = """<!DOCTYPE html>
             }
         }
 
+        // Exact 300 DPI Physical Standard Measurements:
+        // 2x2 in = 600x600 px (50.8 x 50.8 mm)
+        // 1x1 in = 300x300 px (25.4 x 25.4 mm)
+        // Passport (Philippine standard 35x45 mm) = 413x531 px
+        // Wallet size (2.5x3.5 in) = 750x1050 px
+        const s2x2 = 600;
+        const s1x1 = 300;
+        const passW = 413;
+        const passH = 531;
+        const wallW = 750;
+        const wallH = 1050;
+
         if (pkg === 'rush_combo_a') {
-            // Full Sheet Fill: 2 pcs 2x2" + 16 pcs 1x1"
-            const size2x2 = isA4 ? 900 : 520;
-            const startX = isA4 ? 260 : 60;
-            const gap = isA4 ? 80 : 40;
-            const y1 = isA4 ? 120 : 50;
-            drawPhotoItem(startX, y1, size2x2, size2x2);
-            drawPhotoItem(startX + size2x2 + gap, y1, size2x2, size2x2);
-
-            const size1x1 = isA4 ? 430 : 250;
-            const gap1x1 = isA4 ? 40 : 26;
-            const startX1 = isA4 ? 260 : 60;
-            const startY = y1 + size2x2 + (isA4 ? 80 : 40);
-
-            const numRows = isA4 ? 6 : 4;
-            for (let r = 0; r < numRows; r++) {
-                for (let c = 0; c < 4; c++) {
-                    drawPhotoItem(startX1 + c * (size1x1 + gap1x1), startY + r * (size1x1 + gap1x1), size1x1, size1x1);
+            if (isA4) {
+                // A4: 3 pcs 2x2" on top + 20 pcs 1x1" below
+                const startX2 = Math.round((sheetW - (3 * s2x2 + 2 * 60)) / 2);
+                const y1 = 140;
+                for (let i = 0; i < 3; i++) {
+                    drawPhotoItem(startX2 + i * (s2x2 + 60), y1, s2x2, s2x2);
                 }
+
+                const startX1 = Math.round((sheetW - (5 * s1x1 + 4 * 50)) / 2);
+                const y2 = y1 + s2x2 + 90;
+                for (let r = 0; r < 4; r++) {
+                    for (let c = 0; c < 5; c++) {
+                        drawPhotoItem(startX1 + c * (s1x1 + 50), y2 + r * (s1x1 + 50), s1x1, s1x1);
+                    }
+                }
+            } else {
+                // 4x6" Sheet: 2 pcs 2x2" stacked + 7 pcs 1x1" (strictly within 1200x1800)
+                const x2 = 80;
+                drawPhotoItem(x2, 80, s2x2, s2x2);
+                drawPhotoItem(x2, 740, s2x2, s2x2);
+
+                const x1 = 760;
+                drawPhotoItem(x1, 80, s1x1, s1x1);
+                drawPhotoItem(x1, 410, s1x1, s1x1);
+                drawPhotoItem(x1, 740, s1x1, s1x1);
+                drawPhotoItem(x1, 1070, s1x1, s1x1);
+
+                const yBottom = 1400;
+                drawPhotoItem(80, yBottom, s1x1, s1x1);
+                drawPhotoItem(420, yBottom, s1x1, s1x1);
+                drawPhotoItem(760, yBottom, s1x1, s1x1);
             }
         } else if (pkg === 'rush_combo_b') {
-            // Full Sheet Fill: 2 pcs 2x2" + 6 pcs Passport + 4 pcs 1x1"
-            const size2x2 = isA4 ? 900 : 520;
-            const startX = isA4 ? 260 : 60;
-            const gap = isA4 ? 80 : 40;
-            const y1 = isA4 ? 100 : 50;
-            drawPhotoItem(startX, y1, size2x2, size2x2);
-            drawPhotoItem(startX + size2x2 + gap, y1, size2x2, size2x2);
+            if (isA4) {
+                // A4: 3 pcs 2x2" + 6 pcs Passport + 10 pcs 1x1"
+                const startX2 = Math.round((sheetW - (3 * s2x2 + 2 * 60)) / 2);
+                drawPhotoItem(startX2, 120, s2x2, s2x2);
+                drawPhotoItem(startX2 + s2x2 + 60, 120, s2x2, s2x2);
+                drawPhotoItem(startX2 + 2 * (s2x2 + 60), 120, s2x2, s2x2);
 
-            const pw = isA4 ? 430 : 340;
-            const ph = isA4 ? 550 : 430;
-            const pgap = isA4 ? 40 : 30;
-            const y2 = y1 + size2x2 + (isA4 ? 60 : 35);
-            const pStartX = Math.round((sheetW - (3 * pw + 2 * pgap)) / 2);
-            for (let r = 0; r < 2; r++) {
-                for (let c = 0; c < 3; c++) {
-                    drawPhotoItem(pStartX + c * (pw + pgap), y2 + r * (ph + pgap), pw, ph);
+                const pStartX = Math.round((sheetW - (3 * passW + 2 * 60)) / 2);
+                const pY = 120 + s2x2 + 80;
+                for (let r = 0; r < 2; r++) {
+                    for (let c = 0; c < 3; c++) {
+                        drawPhotoItem(pStartX + c * (passW + 60), pY + r * (passH + 60), passW, passH);
+                    }
                 }
-            }
 
-            const size1x1 = isA4 ? 430 : 250;
-            const gap1x1 = isA4 ? 40 : 26;
-            const y3 = y2 + 2 * (ph + pgap) + (isA4 ? 40 : 20);
-            for (let i = 0; i < 4; i++) {
-                drawPhotoItem(startX + i * (size1x1 + gap1x1), y3, size1x1, size1x1);
+                const sStartX1 = Math.round((sheetW - (5 * s1x1 + 4 * 50)) / 2);
+                const sY = pY + 2 * (passH + 60) + 40;
+                for (let r = 0; r < 2; r++) {
+                    for (let c = 0; c < 5; c++) {
+                        drawPhotoItem(sStartX1 + c * (s1x1 + 50), sY + r * (s1x1 + 50), s1x1, s1x1);
+                    }
+                }
+            } else {
+                // 4x6" Sheet: 2 pcs 2x2" + 2 pcs Passport + 3 pcs 1x1"
+                drawPhotoItem(80, 80, s2x2, s2x2);
+                drawPhotoItem(80, 720, s2x2, s2x2);
+
+                drawPhotoItem(720, 80, passW, passH);
+                drawPhotoItem(720, 680, passW, passH);
+
+                const yBottom = 1380;
+                drawPhotoItem(80, yBottom, s1x1, s1x1);
+                drawPhotoItem(420, yBottom, s1x1, s1x1);
+                drawPhotoItem(760, yBottom, s1x1, s1x1);
             }
         } else if (pkg === 'all_2x2') {
-            const size = isA4 ? 540 : 520;
-            const cols = isA4 ? 4 : 2;
-            const rows = isA4 ? 5 : 3;
-            const gap = isA4 ? 40 : 40;
-            const startX = Math.round((sheetW - (cols * size + (cols - 1) * gap)) / 2);
-            const startY = isA4 ? 120 : 60;
-
-            for (let r = 0; r < rows; r++) {
-                for (let c = 0; c < cols; c++) {
-                    drawPhotoItem(startX + c * (size + gap), startY + r * (size + gap), size, size);
+            if (isA4) {
+                // A4: 3 cols x 4 rows = 12 pcs of exact 2x2"
+                const startX = Math.round((sheetW - (3 * s2x2 + 2 * 60)) / 2);
+                const startY = Math.round((sheetH - (4 * s2x2 + 3 * 60)) / 2);
+                for (let r = 0; r < 4; r++) {
+                    for (let c = 0; c < 3; c++) {
+                        drawPhotoItem(startX + c * (s2x2 + 60), startY + r * (s2x2 + 60), s2x2, s2x2);
+                    }
                 }
+            } else {
+                // 4x6": 2 pcs 2x2" centered with ample margin
+                const startX = Math.round((sheetW - s2x2) / 2);
+                drawPhotoItem(startX, 180, s2x2, s2x2);
+                drawPhotoItem(startX, 880, s2x2, s2x2);
             }
         } else if (pkg === 'all_1x1') {
-            const size = isA4 ? 320 : 250;
-            const cols = isA4 ? 6 : 4;
-            const rows = isA4 ? 9 : 6;
-            const gap = isA4 ? 28 : 28;
-            const startX = Math.round((sheetW - (cols * size + (cols - 1) * gap)) / 2);
-            const startY = isA4 ? 100 : 50;
-
-            for (let r = 0; r < rows; r++) {
-                for (let c = 0; c < cols; c++) {
-                    drawPhotoItem(startX + c * (size + gap), startY + r * (size + gap), size, size);
+            if (isA4) {
+                // A4: 6 cols x 8 rows = 48 pcs of exact 1x1"
+                const startX = Math.round((sheetW - (6 * s1x1 + 5 * 40)) / 2);
+                const startY = Math.round((sheetH - (8 * s1x1 + 7 * 40)) / 2);
+                for (let r = 0; r < 8; r++) {
+                    for (let c = 0; c < 6; c++) {
+                        drawPhotoItem(startX + c * (s1x1 + 40), startY + r * (s1x1 + 40), s1x1, s1x1);
+                    }
+                }
+            } else {
+                // 4x6": 3 cols x 4 rows = 12 pcs of exact 1x1"
+                const startX = Math.round((sheetW - (3 * s1x1 + 2 * 50)) / 2);
+                const startY = Math.round((sheetH - (4 * s1x1 + 3 * 50)) / 2);
+                for (let r = 0; r < 4; r++) {
+                    for (let c = 0; c < 3; c++) {
+                        drawPhotoItem(startX + c * (s1x1 + 50), startY + r * (s1x1 + 50), s1x1, s1x1);
+                    }
                 }
             }
         } else if (pkg === 'all_passport') {
-            const pw = isA4 ? 420 : 340;
-            const ph = isA4 ? 540 : 400;
-            const cols = isA4 ? 5 : 3;
-            const rows = isA4 ? 5 : 4;
-            const gap = isA4 ? 30 : 25;
-            const startX = Math.round((sheetW - (cols * pw + (cols - 1) * gap)) / 2);
-            const startY = isA4 ? 100 : 50;
-
-            for (let r = 0; r < rows; r++) {
-                for (let c = 0; c < cols; c++) {
-                    drawPhotoItem(startX + c * (pw + gap), startY + r * (ph + gap), pw, ph);
+            if (isA4) {
+                // A4: 4 cols x 5 rows = 20 pcs of exact Passport
+                const startX = Math.round((sheetW - (4 * passW + 3 * 60)) / 2);
+                const startY = Math.round((sheetH - (5 * passH + 4 * 60)) / 2);
+                for (let r = 0; r < 5; r++) {
+                    for (let c = 0; c < 4; c++) {
+                        drawPhotoItem(startX + c * (passW + 60), startY + r * (passH + 60), passW, passH);
+                    }
+                }
+            } else {
+                // 4x6": 2 cols x 2 rows = 4 pcs of exact Passport
+                const startX = Math.round((sheetW - (2 * passW + 60)) / 2);
+                const startY = Math.round((sheetH - (2 * passH + 80)) / 2);
+                for (let r = 0; r < 2; r++) {
+                    for (let c = 0; c < 2; c++) {
+                        drawPhotoItem(startX + c * (passW + 60), startY + r * (passH + 80), passW, passH);
+                    }
                 }
             }
         } else if (pkg === 'wallet') {
-            const ww = isA4 ? 750 : 520;
-            const wh = isA4 ? 1050 : 780;
-            const cols = 2;
-            const rows = 2;
-            const gap = isA4 ? 100 : 40;
-            const startX = Math.round((sheetW - (cols * ww + (cols - 1) * gap)) / 2);
-            const startY = isA4 ? 150 : 60;
-
-            for (let r = 0; r < rows; r++) {
-                for (let c = 0; c < cols; c++) {
-                    drawPhotoItem(startX + c * (ww + gap), startY + r * (wh + gap), ww, wh);
+            if (isA4) {
+                // A4: 2 cols x 2 rows = 4 pcs of exact Wallet
+                const startX = Math.round((sheetW - (2 * wallW + 120)) / 2);
+                const startY = Math.round((sheetH - (2 * wallH + 120)) / 2);
+                for (let r = 0; r < 2; r++) {
+                    for (let c = 0; c < 2; c++) {
+                        drawPhotoItem(startX + c * (wallW + 120), startY + r * (wallH + 120), wallW, wallH);
+                    }
                 }
+            } else {
+                // 4x6": 1 pc exact Wallet centered
+                const startX = Math.round((sheetW - wallW) / 2);
+                const startY = Math.round((sheetH - wallH) / 2);
+                drawPhotoItem(startX, startY, wallW, wallH);
             }
         }
 
@@ -3015,6 +3348,7 @@ INDEX_HTML = """<!DOCTYPE html>
                 formData.append('orientation', '3');
                 formData.append('copies', copies);
                 formData.append('margin_mode', 'none');
+                formData.append('fitpage', 'false');
 
                 const res = await fetch('/api/print', { method: 'POST', body: formData });
                 const data = await res.json();
@@ -3488,6 +3822,16 @@ def cleanup_expired_jobs():
                 pass
         cur.execute("DELETE FROM inbox WHERE received_at < ?", (now - INBOX_TTL_SECONDS,))
         conn.commit()
+
+        # Clean preview cache files older than 1 hour (3600s)
+        if os.path.exists(SPOOL_PREVIEWS_DIR):
+            for fname in os.listdir(SPOOL_PREVIEWS_DIR):
+                fpath = os.path.join(SPOOL_PREVIEWS_DIR, fname)
+                try:
+                    if os.path.isfile(fpath) and (now - os.path.getmtime(fpath) > 3600):
+                        os.remove(fpath)
+                except Exception:
+                    pass
     except Exception:
         pass
 
@@ -3552,6 +3896,61 @@ def api_printers():
     printers, def_p = get_printers()
     return jsonify({'printers': printers, 'default': def_p})
 
+def get_cups_job_status(job_id: str) -> dict:
+    if not job_id:
+        return {'status': 'unknown', 'message': 'No job ID provided'}
+    
+    # Check if this is a PIN-held job
+    if job_id.startswith('pin_'):
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute("SELECT job_id, failed_attempts FROM pinned_jobs WHERE job_id = ?", (job_id,))
+        row = cur.fetchone()
+        if row:
+            return {'status': 'held', 'message': 'Document held in secure PIN queue awaiting release.'}
+        return {'status': 'not_found', 'message': 'PIN job not found or expired.'}
+
+    # Extract CUPS request id if format is 'request id is printer-123 (...)'
+    m = re.search(r'([A-Za-z0-9_-]+-\d+)', job_id)
+    cups_id = m.group(1) if m else job_id
+
+    # Query CUPS lpstat
+    try:
+        res = subprocess.run(['lpstat', '-l', '-o', cups_id], capture_output=True, text=True, timeout=5)
+        out = (res.stdout or '').lower()
+        if res.returncode == 0 and out.strip():
+            if 'processing' in out or 'printing' in out or 'sending data' in out:
+                return {'status': 'printing', 'message': 'Printing in progress on device...', 'job_id': cups_id}
+            return {'status': 'spooling', 'message': 'Job spooled in queue, awaiting device...', 'job_id': cups_id}
+        
+        # Check completed jobs via lpstat -W completed -o cups_id
+        res_comp = subprocess.run(['lpstat', '-W', 'completed', '-o', cups_id], capture_output=True, text=True, timeout=5)
+        out_comp = (res_comp.stdout or '').lower()
+        if res_comp.returncode == 0 and out_comp.strip():
+            return {'status': 'completed', 'message': 'Print job completed.', 'job_id': cups_id}
+        
+        return {'status': 'completed', 'message': 'Print job dispatched to printer.', 'job_id': cups_id}
+    except Exception:
+        # Fallback for Windows development / environments without CUPS
+        return {'status': 'completed', 'message': 'Job submitted.', 'job_id': cups_id}
+
+@app.route('/api/preview/<preview_id>.pdf', methods=['GET'])
+def api_preview_pdf(preview_id):
+    if not re.match(r'^prev_[0-9]+_[a-f0-9]+$', preview_id):
+        return jsonify({'success': False, 'error': 'Invalid preview token'}), 400
+    pdf_path = os.path.join(SPOOL_PREVIEWS_DIR, f"{preview_id}.pdf")
+    if not os.path.exists(pdf_path):
+        return jsonify({'success': False, 'error': 'Preview not found or expired'}), 404
+    return send_file(pdf_path, mimetype='application/pdf')
+
+@app.route('/api/jobs/<job_id>/status', methods=['GET'])
+def api_job_status(job_id):
+    clean_id = re.sub(r'[^A-Za-z0-9_\-\.]', '', job_id)
+    if not clean_id:
+        return jsonify({'success': False, 'error': 'Invalid Job ID'}), 400
+    st = get_cups_job_status(clean_id)
+    return jsonify({'success': True, 'job_id': clean_id, **st})
+
 @app.route('/api/inspect', methods=['POST'])
 def api_inspect():
     client_ip = request.remote_addr or ''
@@ -3570,12 +3969,17 @@ def api_inspect():
     try:
         validate_extension(file.filename)
         copies = validate_copies(request.form.get('copies', '1'))
+        pagerange = validate_page_range(request.form.get('pagerange', ''))
     except ValueError as e:
         return jsonify({'success': False, 'error': str(e)}), 400
 
     colormodel = request.form.get('colormodel', 'RGB')
     if colormodel not in ALLOWED_COLORMODELS:
         colormodel = 'RGB'
+
+    duplex = request.form.get('duplex', 'None')
+    if duplex not in ALLOWED_DUPLEX:
+        duplex = 'None'
 
     suffix = os.path.splitext(file.filename)[1].lower()
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
@@ -3586,16 +3990,32 @@ def api_inspect():
     try:
         conv_pdf, temp_dir = convert_to_pdf(raw_path, file.filename)
         pages = get_pdf_page_count(conv_pdf)
-        rate = get_rate(colormodel == 'RGB')
-        cost = rate * pages * copies
+        billable_pages = parse_page_ranges(pagerange, pages)
+        is_duplex = duplex in ('DuplexNoTumble', 'DuplexTumble')
+        sheets = (billable_pages + 1) // 2 if is_duplex else billable_pages
+        total_sheets = sheets * copies
+
+        rate = get_rate(colormodel not in ('KGray', 'Gray', 'K'))
+        cost = rate * billable_pages * copies
         symbol = get_setting('currency_symbol', '₱')
+
+        # Cache converted PDF for instant client preview and 0ms print execution
+        preview_id = f"prev_{int(time.time())}_{secrets.token_hex(6)}"
+        cached_pdf_path = os.path.join(SPOOL_PREVIEWS_DIR, f"{preview_id}.pdf")
+        shutil.copy2(conv_pdf, cached_pdf_path)
+
         return jsonify({
             'success': True,
+            'preview_id': preview_id,
             'pages': pages,
+            'billable_pages': billable_pages,
+            'sheets': sheets,
+            'total_sheets': total_sheets,
             'copies': copies,
             'cost': cost,
             'cost_formatted': f"{symbol}{cost:.2f}",
-            'filename': file.filename
+            'filename': file.filename,
+            'is_pdf': (suffix == '.pdf')
         })
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -3620,14 +4040,24 @@ def api_print():
     if not public_print_limiter.is_allowed(client_ip):
         return jsonify({'success': False, 'error': 'Rate limit exceeded: maximum 10 print submissions per minute'}), 429
 
-    if 'file' not in request.files:
-        return jsonify({'success': False, 'error': 'No file uploaded'}), 400
-    file = request.files['file']
-    if not file.filename:
-        return jsonify({'success': False, 'error': 'Empty filename'}), 400
+    preview_id = request.form.get('preview_id', '').strip()
+    cached_pdf = None
+    if preview_id and re.match(r'^prev_[0-9]+_[a-f0-9]+$', preview_id):
+        cand = os.path.join(SPOOL_PREVIEWS_DIR, f"{preview_id}.pdf")
+        if os.path.exists(cand):
+            cached_pdf = cand
+
+    file = request.files.get('file')
+    if not cached_pdf and (not file or not file.filename):
+        return jsonify({'success': False, 'error': 'No file uploaded or preview expired'}), 400
+
+    filename = file.filename if file and file.filename else f"{preview_id}.pdf"
 
     try:
-        ext = validate_extension(file.filename)
+        if file and file.filename:
+            ext = validate_extension(file.filename)
+        else:
+            ext = '.pdf'
         copies = validate_copies(request.form.get('copies', '1'))
         pagerange = validate_page_range(request.form.get('pagerange', ''))
     except ValueError as e:
@@ -3642,90 +4072,68 @@ def api_print():
         return jsonify({'success': False, 'error': 'Selected printer is not available'}), 400
 
     pagesize = request.form.get('pagesize', 'A4')
-    if pagesize not in ALLOWED_PAGESIZES:
-        pagesize = 'A4'
-
+    if pagesize not in ALLOWED_PAGESIZES: pagesize = 'A4'
     orientation = request.form.get('orientation', 'auto')
-    if orientation not in ALLOWED_ORIENTATIONS:
-        orientation = 'auto'
-
+    if orientation not in ALLOWED_ORIENTATIONS: orientation = 'auto'
     margin_mode = request.form.get('margin_mode', 'printable')
-    if margin_mode not in ALLOWED_MARGIN_MODES:
-        margin_mode = 'printable'
-
+    if margin_mode not in ALLOWED_MARGIN_MODES: margin_mode = 'printable'
     mediatype = request.form.get('mediatype', 'Plain')
-    if mediatype not in ALLOWED_MEDIATYPES:
-        mediatype = 'Plain'
-
+    if mediatype not in ALLOWED_MEDIATYPES: mediatype = 'Plain'
     quality = request.form.get('quality', 'Normal')
-    if quality not in ALLOWED_QUALITIES:
-        quality = 'Normal'
-
+    if quality not in ALLOWED_QUALITIES: quality = 'Normal'
     colormodel = request.form.get('colormodel', 'RGB')
-    if colormodel not in ALLOWED_COLORMODELS:
-        colormodel = 'RGB'
-
+    if colormodel not in ALLOWED_COLORMODELS: colormodel = 'RGB'
     duplex = request.form.get('duplex', 'None')
-    if duplex not in ALLOWED_DUPLEX:
-        duplex = 'None'
-
+    if duplex not in ALLOWED_DUPLEX: duplex = 'None'
     resolution = request.form.get('resolution', '300')
-    if resolution not in ALLOWED_RESOLUTIONS:
-        resolution = '300'
-
+    if resolution not in ALLOWED_RESOLUTIONS: resolution = '300'
     fitpage = (request.form.get('fitpage', 'true').lower() == 'true')
 
-    suffix = ext
-    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-        file.save(tmp.name)
-        raw_path = tmp.name
-
+    raw_path = None
     temp_dir = None
     try:
-        conv_pdf, temp_dir = convert_to_pdf(raw_path, file.filename)
-        pages = get_pdf_page_count(conv_pdf)
-        if pages > MAX_PAGES_PER_JOB:
+        if cached_pdf:
+            conv_pdf = cached_pdf
+        else:
+            suffix = ext
+            with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+                file.save(tmp.name)
+                raw_path = tmp.name
+            conv_pdf, temp_dir = convert_to_pdf(raw_path, file.filename)
+
+        total_pages = get_pdf_page_count(conv_pdf)
+        if total_pages > MAX_PAGES_PER_JOB:
             return jsonify({'success': False, 'error': f'Document exceeds maximum allowed pages ({MAX_PAGES_PER_JOB})'}), 400
 
-        rate = get_rate(colormodel == 'RGB')
-        cost = rate * pages * copies
+        billable_pages = parse_page_ranges(pagerange, total_pages)
+        rate = get_rate(colormodel not in ('KGray', 'Gray', 'K'))
+        cost = rate * billable_pages * copies
 
-        cmd = ['lp', '-d', printer, '-n', str(copies)]
-        if pagesize: cmd.extend(['-o', f'PageSize={pagesize}'])
-        if mediatype: cmd.extend(['-o', f'MediaType={mediatype}'])
-        if quality: cmd.extend(['-o', f'OutputMode={quality}'])
-        if colormodel: cmd.extend(['-o', f'ColorModel={colormodel}'])
-        if duplex != 'None': cmd.extend(['-o', f'Duplex={duplex}'])
-        if orientation in ['3', '4']: cmd.extend(['-o', f'orientation-requested={orientation}'])
-        if fitpage: cmd.extend(['-o', 'fit-to-page'])
-        if pagerange: cmd.extend(['-o', f'page-ranges={pagerange}'])
-        if resolution: cmd.extend(['-o', f'resolution={resolution}dpi'])
+        options = {
+            'copies': copies,
+            'pagesize': pagesize,
+            'mediatype': mediatype,
+            'quality': quality,
+            'colormodel': colormodel,
+            'duplex': duplex,
+            'orientation': orientation,
+            'fitpage': fitpage,
+            'pagerange': pagerange,
+            'resolution': resolution,
+            'margin_mode': margin_mode,
+            'm_top': request.form.get('m_top', '10'),
+            'm_bottom': request.form.get('m_bottom', '10'),
+            'm_left': request.form.get('m_left', '10'),
+            'm_right': request.form.get('m_right', '10')
+        }
 
-        if margin_mode == 'none':
-            cmd.extend(['-o', 'page-top=0', '-o', 'page-bottom=0', '-o', 'page-left=0', '-o', 'page-right=0'])
-        elif margin_mode == 'normal':
-            cmd.extend(['-o', 'page-top=36', '-o', 'page-bottom=36', '-o', 'page-left=36', '-o', 'page-right=36'])
-        elif margin_mode == 'custom':
-            try:
-                m_top = max(0, min(100, float(request.form.get('m_top', '10'))))
-                m_bottom = max(0, min(100, float(request.form.get('m_bottom', '10'))))
-                m_left = max(0, min(100, float(request.form.get('m_left', '10'))))
-                m_right = max(0, min(100, float(request.form.get('m_right', '10'))))
-                cmd.extend([
-                    '-o', f'page-top={int(m_top * 2.83465)}',
-                    '-o', f'page-bottom={int(m_bottom * 2.83465)}',
-                    '-o', f'page-left={int(m_left * 2.83465)}',
-                    '-o', f'page-right={int(m_right * 2.83465)}'
-                ])
-            except Exception:
-                pass
-
-        cmd.append(conv_pdf)
+        cmd = build_lp_command(printer, conv_pdf, options)
         res = subprocess.run(cmd, capture_output=True, text=True, check=True, timeout=30)
-        job_id = res.stdout.strip()
+        m = re.search(r'([A-Za-z0-9_-]+-\d+)', res.stdout)
+        job_id = m.group(1) if m else res.stdout.strip()
 
-        record_ledger(file.filename, printer, pages, copies, pages * copies, colormodel, cost, client_ip, "COMPLETED", source="portal")
-        return jsonify({'success': True, 'job_id': job_id, 'pages': pages, 'cost': cost})
+        record_ledger(filename, printer, billable_pages, copies, billable_pages * copies, colormodel, cost, client_ip, "COMPLETED", source="portal")
+        return jsonify({'success': True, 'job_id': job_id, 'pages': billable_pages, 'cost': cost})
     except subprocess.CalledProcessError as e:
         return jsonify({'success': False, 'error': e.stderr.strip() or str(e)}), 500
     except Exception as e:
@@ -3733,7 +4141,7 @@ def api_print():
     finally:
         if temp_dir and os.path.exists(temp_dir):
             shutil.rmtree(temp_dir, ignore_errors=True)
-        if os.path.exists(raw_path):
+        if raw_path and os.path.exists(raw_path):
             try:
                 os.remove(raw_path)
             except Exception:
@@ -3809,8 +4217,9 @@ def api_pin_hold():
         dest_enc_path = os.path.join(SPOOL_PINNED_DIR, f"{job_id}.enc")
         encrypt_held_file(conv_pdf, dest_enc_path)
 
-        rate = get_rate(colormodel == 'RGB')
-        cost = rate * pages * copies
+        billable_pages = parse_page_ranges(pagerange, pages)
+        rate = get_rate(colormodel not in ('KGray', 'Gray', 'K'))
+        cost = rate * billable_pages * copies
 
         options = {
             'printer': printer,
@@ -3939,40 +4348,10 @@ def api_pin_release():
         printer = options.get('printer') or 'HP_Smart_Tank_520'
         copies = options.get('copies', 1)
 
-        cmd = ['lp', '-d', printer, '-n', str(copies)]
-        if options.get('pagesize'): cmd.extend(['-o', f"PageSize={options['pagesize']}"])
-        if options.get('mediatype'): cmd.extend(['-o', f"MediaType={options['mediatype']}"])
-        if options.get('quality'): cmd.extend(['-o', f"OutputMode={options['quality']}"])
-        if options.get('colormodel'): cmd.extend(['-o', f"ColorModel={options['colormodel']}"])
-        if options.get('duplex') and options['duplex'] != 'None': cmd.extend(['-o', f"Duplex={options['duplex']}"])
-        if options.get('orientation') in ['3', '4']: cmd.extend(['-o', f"orientation-requested={options['orientation']}"])
-        if options.get('fitpage') is True or options.get('fitpage') == 'true': cmd.extend(['-o', 'fit-to-page'])
-        if options.get('pagerange'): cmd.extend(['-o', f"page-ranges={options['pagerange']}"])
-        if options.get('resolution'): cmd.extend(['-o', f"resolution={options['resolution']}dpi"])
-
-        m_mode = options.get('margin_mode', 'printable')
-        if m_mode == 'none':
-            cmd.extend(['-o', 'page-top=0', '-o', 'page-bottom=0', '-o', 'page-left=0', '-o', 'page-right=0'])
-        elif m_mode == 'normal':
-            cmd.extend(['-o', 'page-top=36', '-o', 'page-bottom=36', '-o', 'page-left=36', '-o', 'page-right=36'])
-        elif m_mode == 'custom':
-            try:
-                m_top = max(0, min(100, float(options.get('m_top', '10'))))
-                m_bottom = max(0, min(100, float(options.get('m_bottom', '10'))))
-                m_left = max(0, min(100, float(options.get('m_left', '10'))))
-                m_right = max(0, min(100, float(options.get('m_right', '10'))))
-                cmd.extend([
-                    '-o', f'page-top={int(m_top * 2.83465)}',
-                    '-o', f'page-bottom={int(m_bottom * 2.83465)}',
-                    '-o', f'page-left={int(m_left * 2.83465)}',
-                    '-o', f'page-right={int(m_right * 2.83465)}'
-                ])
-            except Exception:
-                pass
-
-        cmd.append(decrypted_pdf)
+        cmd = build_lp_command(printer, decrypted_pdf, options)
         res = subprocess.run(cmd, capture_output=True, text=True, check=True, timeout=30)
-        cups_job = res.stdout.strip()
+        m = re.search(r'([A-Za-z0-9_-]+-\d+)', res.stdout)
+        cups_job = m.group(1) if m else res.stdout.strip()
 
         try:
             os.remove(enc_path)
@@ -4186,12 +4565,6 @@ def api_inbox_upload():
     except ValueError as e:
         return jsonify({'success': False, 'error': str(e)}), 415
 
-    data = request.get_data()
-    if len(data) != length:
-        return jsonify({'success': False, 'error': 'Incomplete upload'}), 400
-    if ext == '.pdf' and not data.startswith(b'%PDF'):
-        return jsonify({'success': False, 'error': 'Not a PDF file'}), 415
-
     cleanup_expired_jobs()
     conn = get_db()
     cur = conn.cursor()
@@ -4203,8 +4576,34 @@ def api_inbox_upload():
     file_id = f"in_{int(time.time())}_{secrets.token_hex(4)}"
     path = os.path.join(SPOOL_INBOX_DIR, file_id + ext)
     fd = os.open(path, os.O_CREAT | os.O_WRONLY | os.O_TRUNC, 0o600)
+    total_written = 0
+    header_bytes = b''
     with open(fd, 'wb') as f:
-        f.write(data)
+        while True:
+            chunk = request.stream.read(65536)
+            if not chunk:
+                break
+            if len(header_bytes) < 4:
+                header_bytes += chunk[:4 - len(header_bytes)]
+            f.write(chunk)
+            total_written += len(chunk)
+            if total_written > INBOX_MAX_BYTES:
+                break
+
+    if total_written > INBOX_MAX_BYTES:
+        try: os.remove(path)
+        except Exception: pass
+        return jsonify({'success': False, 'error': f'File is larger than {INBOX_MAX_BYTES // (1024 * 1024)} MB'}), 413
+
+    if total_written != length:
+        try: os.remove(path)
+        except Exception: pass
+        return jsonify({'success': False, 'error': 'Incomplete upload'}), 400
+
+    if ext == '.pdf' and not header_bytes.startswith(b'%PDF'):
+        try: os.remove(path)
+        except Exception: pass
+        return jsonify({'success': False, 'error': 'Not a PDF file'}), 415
     device = ''.join(ch for ch in request.headers.get('X-Device', '') if ch.isalnum() or ch in ':.-')[:40]
     with conn:
         conn.execute("INSERT INTO inbox (id, file_path, filename, size, device, received_at) VALUES (?, ?, ?, ?, ?, ?)",
