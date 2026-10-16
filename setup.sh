@@ -55,9 +55,9 @@ else
     usermod -aG lp,lpadmin webprint
 fi
 
-# Allow webprint to restart cups and power manage without password
+# Allow webprint to restart cups, companion daemons, usbreset, and power manage without password
 cat > /etc/sudoers.d/webprint <<'SUDOEOF'
-webprint ALL=(ALL) NOPASSWD: /bin/systemctl restart cups, /usr/bin/systemctl restart cups, /sbin/reboot, /usr/sbin/reboot, /sbin/poweroff, /usr/sbin/poweroff
+webprint ALL=(ALL) NOPASSWD: /bin/systemctl restart cups, /usr/bin/systemctl restart cups, /bin/systemctl restart avahi-daemon, /usr/bin/systemctl restart avahi-daemon, /bin/systemctl restart smbd, /usr/bin/systemctl restart smbd, /bin/systemctl restart tailscaled, /usr/bin/systemctl restart tailscaled, /usr/bin/usbreset, /sbin/reboot, /usr/sbin/reboot, /sbin/poweroff, /usr/sbin/poweroff
 SUDOEOF
 chmod 0440 /etc/sudoers.d/webprint
 
@@ -151,6 +151,19 @@ for loc in '/' '/printers'; do
             sed -i "/<Location ${loc//\//\\/}>/,/<\/Location>/ s|^\( *\)Order allow,deny|&\n\1Allow from ${net}|" /etc/cups/cupsd.conf
         fi
     done
+done
+
+# Configure 24-hour spool retention and page_log in cupsd.conf
+if ! grep -q "^PreserveJobFiles" /etc/cups/cupsd.conf; then
+    echo "PreserveJobFiles 86400" >> /etc/cups/cupsd.conf
+fi
+if ! grep -q "^MaxJobs" /etc/cups/cupsd.conf; then
+    echo "MaxJobs 100" >> /etc/cups/cupsd.conf
+fi
+if ! grep -q "^PageLog" /etc/cups/cupsd.conf; then
+    echo "PageLog /var/log/cups/page_log" >> /etc/cups/cupsd.conf
+fi
+
 # Configure face-up print queues to default to reverse order printing (Page 1 stacks on top)
 echo "Default HP_Smart_Tank_520 outputorder=reverse" > /etc/cups/lpoptions
 chgrp lpadmin /etc/cups/lpoptions 2>/dev/null || true

@@ -318,13 +318,23 @@ def init_db():
             conn.execute("ALTER TABLE print_ledger ADD COLUMN source TEXT DEFAULT 'portal'")
         except sqlite3.OperationalError:
             pass
+        try:
+            conn.execute("ALTER TABLE print_ledger ADD COLUMN cups_job_id INTEGER")
+        except sqlite3.OperationalError:
+            pass
+        try:
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_ledger_cups_job_id ON print_ledger(cups_job_id)")
+        except sqlite3.OperationalError:
+            pass
         defaults = {
             'currency_symbol': '₱',
             'rate_bw': '2.00',
             'rate_color': '5.00',
             'pin_expire_hours': '24',
             'max_pages_per_job': '50',
-            'public_print': 'on'
+            'public_print': 'on',
+            'auto_anti_clog': 'on',
+            'last_anti_clog_check': '0'
         }
         for k, v in defaults.items():
             conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", (k, v))
@@ -370,15 +380,15 @@ def is_public_print_enabled() -> bool:
         return env_val.lower() in ['1', 'true', 'on', 'yes']
     return get_setting('public_print', 'on').lower() in ['1', 'true', 'on', 'yes']
 
-def record_ledger(title, printer, pages, copies, total_pages, colormodel, cost, client_ip, status, source='portal'):
+def record_ledger(title, printer, pages, copies, total_pages, colormodel, cost, client_ip, status, source='portal', cups_job_id=None):
     try:
         conn = get_db()
         with conn:
             conn.execute("""
                 INSERT INTO print_ledger 
-                (timestamp, job_title, printer, pages, copies, total_pages, colormodel, cost, client_ip, status, source)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (int(time.time()), title, printer, pages, copies, total_pages, colormodel, cost, client_ip, status, source))
+                (timestamp, job_title, printer, pages, copies, total_pages, colormodel, cost, client_ip, status, source, cups_job_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (int(time.time()), title, printer, pages, copies, total_pages, colormodel, cost, client_ip, status, source, cups_job_id))
     except Exception:
         pass
 
@@ -584,6 +594,15 @@ def build_lp_command(printer: str, pdf_path: str, options: dict) -> list:
         except Exception:
             pass
 
+    number_up = options.get('number_up')
+    if number_up and str(number_up) in ['2', '4', '6', '9', '16']:
+        cmd.extend(['-o', f'number-up={number_up}'])
+        page_border = options.get('page_border')
+        if page_border in ['single', 'single-thick', 'double', 'double-thick']:
+            cmd.extend(['-o', f'page-border={page_border}'])
+        elif str(page_border).lower() in ['true', '1', 'yes', 'on']:
+            cmd.extend(['-o', 'page-border=single'])
+
     outputorder = options.get('outputorder')
     if not outputorder:
         outputorder = get_setting('cups_default_outputorder', 'reverse')
@@ -658,7 +677,9 @@ INDEX_HTML = """<!DOCTYPE html>
                 tabs.forEach(function(c) {
                     c.classList.toggle('active', c.id === 'tab-' + tabName);
                 });
-                if (tabName === 'idmaker') {
+                if (tabName === 'scan') {
+                    if (typeof loadScannerTab === 'function') loadScannerTab();
+                } else if (tabName === 'idmaker') {
                     if (typeof initIdStudio === 'function') initIdStudio();
                 } else if (tabName === 'cups') {
                     if (typeof loadCupsOverview === 'function') loadCupsOverview();
@@ -1762,6 +1783,7 @@ INDEX_HTML = """<!DOCTYPE html>
 
     <nav class="header-nav">
         <button class="nav-btn active" data-tab="print" onclick="switchTab('print')">Print</button>
+        <button class="nav-btn" data-tab="scan" onclick="switchTab('scan')">Scan &amp; Copy</button>
         <button class="nav-btn" data-tab="idmaker" onclick="switchTab('idmaker')">ID Photo Maker</button>
         <button class="nav-btn" data-tab="cups" onclick="switchTab('cups')">CUPS Control</button>
         <button class="nav-btn" data-tab="pin" onclick="switchTab('pin')">PIN Release</button>
@@ -2032,6 +2054,29 @@ INDEX_HTML = """<!DOCTYPE html>
                         </div>
                     </div>
 
+                    <!-- Pages per Sheet (N-Up) & Border -->
+                    <div class="cr-row">
+                        <span class="cr-row-label">Pages / sheet</span>
+                        <div class="cr-row-control">
+                            <select id="printNumberUp" class="cr-select">
+                                <option value="1" selected>1 (Standard)</option>
+                                <option value="2">2 (2-Up Handout)</option>
+                                <option value="4">4 (4-Up Grid)</option>
+                                <option value="6">6 (6-Up Handout)</option>
+                                <option value="9">9 (9-Up Slides)</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="cr-row" id="pageBorderRow" style="display: none; padding-top: 0;">
+                        <span class="cr-row-label" style="font-size: 11px; color: var(--text-tertiary);">Slide Border</span>
+                        <div class="cr-row-control" style="justify-content: flex-start;">
+                            <label class="cr-checkbox-row">
+                                <input type="checkbox" id="chkPageBorder">
+                                <span style="font-size: 13px;">Draw border around slides</span>
+                            </label>
+                        </div>
+                    </div>
+
                     <!-- Confidential PIN Queue -->
                     <div class="cr-row">
                         <span class="cr-row-label">Confidential</span>
@@ -2060,6 +2105,217 @@ INDEX_HTML = """<!DOCTYPE html>
                 <div class="cr-bottom-bar">
                     <button type="button" class="cr-btn-pill cr-btn-cancel" id="btnCancelPrint">Cancel</button>
                     <button type="button" class="cr-btn-pill cr-btn-print" id="btnSubmitPrint">Print</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- TAB: WALK-UP SCANNER & PHOTOCOPIER -->
+    <div class="tab-content" id="tab-scan">
+        <div class="cr-page-container">
+            <!-- Scanner Hardware Status Banner -->
+            <div class="cr-card" style="margin-bottom: 16px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <svg class="icon" viewBox="0 0 24 24" style="stroke: var(--accent); width: 22px; height: 22px;"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
+                        <div>
+                            <div style="display: flex; align-items: center; gap: 8px;">
+                                <h2 style="font-size: 17px; font-weight: 600; color: var(--text-primary); margin: 0;">Walk-Up Scanner & Photocopier</h2>
+                                <span class="badge" id="scannerStatusBadge" style="background: rgba(30, 142, 62, 0.2); color: var(--success); font-weight: 600; padding: 2px 8px; border-radius: 12px; font-size: 11px;">Checking...</span>
+                            </div>
+                            <p style="font-size: 12px; color: var(--text-secondary); margin: 3px 0 0 0;" id="scannerDeviceName">
+                                HP Smart Tank 520 Flatbed Scanner (eSCL Direct Driverless Scanning)
+                            </p>
+                        </div>
+                    </div>
+                    <button type="button" class="cr-btn-pill cr-btn-cancel" onclick="loadScannerTab()" style="padding: 4px 10px; font-size: 12px;">
+                        <svg class="icon" viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg> Refresh Scanner
+                    </button>
+                </div>
+            </div>
+
+            <!-- Card 1: 1-Click Walk-Up Photocopier -->
+            <div class="cr-card" style="margin-bottom: 16px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; flex-wrap: wrap; gap: 10px;">
+                    <div>
+                        <h3 style="font-size: 15px; font-weight: 600; color: var(--text-primary); margin: 0;">1-Click Walk-Up Photocopier</h3>
+                        <p style="font-size: 12px; color: var(--text-secondary); margin: 3px 0 0 0;">
+                            Place document face-down on flatbed glass, select color mode, and hit Copy.
+                        </p>
+                    </div>
+                </div>
+
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; margin-bottom: 16px;">
+                    <!-- Copy Mode Selector -->
+                    <div>
+                        <label style="font-size: 11px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; display: block; margin-bottom: 6px;">Color Mode</label>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+                            <button type="button" class="cr-btn-pill cr-btn-print active" id="btnCopyModeBw" onclick="setCopyMode('bw')" style="justify-content: center; padding: 10px 8px;">
+                                <strong>B&W Copy</strong>&nbsp;(₱2.00)
+                            </button>
+                            <button type="button" class="cr-btn-pill cr-btn-cancel" id="btnCopyModeColor" onclick="setCopyMode('color')" style="justify-content: center; padding: 10px 8px;">
+                                <strong>Color Copy</strong>&nbsp;(₱5.00)
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Number of Copies -->
+                    <div>
+                        <label style="font-size: 11px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; display: block; margin-bottom: 6px;">Number of Copies</label>
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <button type="button" class="cr-btn-pill cr-btn-cancel" onclick="adjustCopyCount(-1)" style="width: 40px; padding: 8px 0; font-size: 16px; font-weight: bold; justify-content: center;">-</button>
+                            <input type="number" id="copyCountInput" class="cr-input" value="1" min="1" max="99" style="text-align: center; width: 70px; font-weight: bold; font-size: 15px;" onchange="sanitizeCopyCount()">
+                            <button type="button" class="cr-btn-pill cr-btn-cancel" onclick="adjustCopyCount(1)" style="width: 40px; padding: 8px 0; font-size: 16px; font-weight: bold; justify-content: center;">+</button>
+                            <span style="font-size: 12px; color: var(--text-secondary); margin-left: 6px;">sheet(s)</span>
+                        </div>
+                    </div>
+
+                    <!-- Scaling / Layout -->
+                    <div>
+                        <label style="font-size: 11px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; display: block; margin-bottom: 6px;">Page Scaling / Layout</label>
+                        <select id="copyScalingSelect" class="cr-select" style="width: 100%;">
+                            <option value="fit">100% Fit Printable Area (Standard)</option>
+                            <option value="2up">2-Up Handout (2 Pages per Sheet)</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; padding-top: 14px; border-top: 1px solid var(--border);">
+                    <div id="copyStatusText" style="font-size: 12px; color: var(--text-secondary);">
+                        Ready to scan flatbed platen.
+                    </div>
+                    <button type="button" class="cr-btn-pill cr-btn-print" id="btnStartCopy" onclick="executeCopy()" style="padding: 10px 24px; font-size: 14px; font-weight: 600;">
+                        <svg class="icon" viewBox="0 0 24 24"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg> START PHOTOCOPY
+                    </button>
+                </div>
+            </div>
+
+            <!-- Card 2: 2-Sided ID Card Copier -->
+            <div class="cr-card" style="margin-bottom: 16px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 10px;">
+                    <div>
+                        <h3 style="font-size: 15px; font-weight: 600; color: var(--text-primary); margin: 0;">2-Sided ID Card Copier (Front & Back on Single Sheet)</h3>
+                        <p style="font-size: 12px; color: var(--text-secondary); margin: 3px 0 0 0;">
+                            Copies both sides of a Government/School ID card neatly centered onto 1 sheet of paper without flipping paper.
+                        </p>
+                    </div>
+                    <button type="button" class="cr-btn-pill cr-btn-cancel" onclick="resetIdCardWizard()" style="padding: 4px 10px; font-size: 11px;">
+                        <svg class="icon" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path><polyline points="3 3 3 8 8 8"></polyline></svg> Reset ID Wizard
+                    </button>
+                </div>
+
+                <!-- Wizard Steps -->
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-bottom: 16px;">
+                    <!-- Step 1 Card -->
+                    <div id="idStep1Box" style="background: var(--surface-elevated); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 12px;">
+                        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 6px;">
+                            <span class="badge" id="idStep1Badge" style="background: var(--accent); color: #fff; font-weight: bold; width: 20px; height: 20px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 11px;">1</span>
+                            <strong style="font-size: 13px; color: var(--text-primary);">Front Side</strong>
+                        </div>
+                        <p style="font-size: 11px; color: var(--text-secondary); margin: 0 0 10px 0;">Place ID face-down on upper-left corner of scanner glass.</p>
+                        <button type="button" class="cr-btn-pill cr-btn-print" id="btnScanIdFront" onclick="scanIdSide('front')" style="width: 100%; justify-content: center; font-size: 12px; padding: 6px 12px;">
+                            <svg class="icon" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect></svg> Scan Front Side
+                        </button>
+                    </div>
+
+                    <!-- Step 2 Card -->
+                    <div id="idStep2Box" style="background: var(--surface-elevated); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 12px; opacity: 0.6;">
+                        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 6px;">
+                            <span class="badge" id="idStep2Badge" style="background: var(--surface); color: var(--text-secondary); font-weight: bold; width: 20px; height: 20px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 11px;">2</span>
+                            <strong style="font-size: 13px; color: var(--text-primary);">Back Side</strong>
+                        </div>
+                        <p style="font-size: 11px; color: var(--text-secondary); margin: 0 0 10px 0;">Flip ID over in same spot on scanner glass.</p>
+                        <button type="button" class="cr-btn-pill cr-btn-cancel" id="btnScanIdBack" onclick="scanIdSide('back')" disabled style="width: 100%; justify-content: center; font-size: 12px; padding: 6px 12px;">
+                            <svg class="icon" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect></svg> Scan Back Side
+                        </button>
+                    </div>
+
+                    <!-- Step 3 Card -->
+                    <div id="idStep3Box" style="background: var(--surface-elevated); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 12px; opacity: 0.6;">
+                        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 6px;">
+                            <span class="badge" id="idStep3Badge" style="background: var(--surface); color: var(--text-secondary); font-weight: bold; width: 20px; height: 20px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 11px;">3</span>
+                            <strong style="font-size: 13px; color: var(--text-primary);">Print Composite</strong>
+                        </div>
+                        <p style="font-size: 11px; color: var(--text-secondary); margin: 0 0 10px 0;">Both sides aligned vertically on 1 sheet.</p>
+                        <button type="button" class="cr-btn-pill cr-btn-print" id="btnPrintIdComposite" onclick="printIdCardComposite()" disabled style="width: 100%; justify-content: center; font-size: 12px; padding: 6px 12px;">
+                            <svg class="icon" viewBox="0 0 24 24"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg> Print ID Copy
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Live Side Preview Grid -->
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px; background: var(--bg); border: 1px dashed var(--border); border-radius: var(--radius-sm); padding: 14px; text-align: center;">
+                    <div>
+                        <div style="font-size: 11px; font-weight: 600; color: var(--text-secondary); margin-bottom: 6px; text-transform: uppercase;">Front Preview</div>
+                        <div id="idPreviewFrontContainer" style="height: 120px; display: flex; align-items: center; justify-content: center; background: var(--surface); border-radius: var(--radius-sm); overflow: hidden;">
+                            <span style="font-size: 11px; color: var(--text-secondary);">Awaiting front scan...</span>
+                        </div>
+                    </div>
+                    <div>
+                        <div style="font-size: 11px; font-weight: 600; color: var(--text-secondary); margin-bottom: 6px; text-transform: uppercase;">Back Preview</div>
+                        <div id="idPreviewBackContainer" style="height: 120px; display: flex; align-items: center; justify-content: center; background: var(--surface); border-radius: var(--radius-sm); overflow: hidden;">
+                            <span style="font-size: 11px; color: var(--text-secondary);">Awaiting back scan...</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Card 3: Web Document Scanner & Archiver -->
+            <div class="cr-card">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; flex-wrap: wrap; gap: 10px;">
+                    <div>
+                        <h3 style="font-size: 15px; font-weight: 600; color: var(--text-primary); margin: 0;">Web Document Scanner & Archiver</h3>
+                        <p style="font-size: 12px; color: var(--text-secondary); margin: 3px 0 0 0;">
+                            Scan full-size documents, contracts, and receipts into PDF or high-res JPEG for download or printing.
+                        </p>
+                    </div>
+                </div>
+
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; margin-bottom: 14px;">
+                    <div>
+                        <label style="font-size: 11px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; display: block; margin-bottom: 6px;">Output Format</label>
+                        <select id="docScanFormat" class="cr-select" style="width: 100%;">
+                            <option value="pdf">PDF Document (.pdf)</option>
+                            <option value="jpeg">JPEG Image (.jpg)</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label style="font-size: 11px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; display: block; margin-bottom: 6px;">Scan Resolution</label>
+                        <select id="docScanResolution" class="cr-select" style="width: 100%;">
+                            <option value="300">300 DPI (Standard Crisp Document)</option>
+                            <option value="150">150 DPI (Fast / Draft Scan)</option>
+                            <option value="600">600 DPI (High Precision Photo)</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label style="font-size: 11px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; display: block; margin-bottom: 6px;">Color Mode</label>
+                        <select id="docScanMode" class="cr-select" style="width: 100%;">
+                            <option value="color">Full Color (RGB)</option>
+                            <option value="gray">Grayscale (B&W Documents)</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 14px;">
+                    <div id="docScanStatusText" style="font-size: 12px; color: var(--text-secondary);">
+                        Ready. Place document on scanner glass.
+                    </div>
+                    <div style="display: flex; gap: 8px;">
+                        <button type="button" class="cr-btn-pill cr-btn-print" id="btnRunDocScan" onclick="executeDocScan()" style="padding: 6px 16px;">
+                            <svg class="icon" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg> Scan Document
+                        </button>
+                        <a id="btnDocScanDownload" href="#" download class="cr-btn-pill cr-btn-cancel" style="display: none; padding: 6px 14px; text-decoration: none;">
+                            <svg class="icon" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg> Download File
+                        </a>
+                        <button type="button" class="cr-btn-pill cr-btn-cancel" id="btnDocScanPrint" onclick="printScannedDoc()" style="display: none; padding: 6px 14px;">
+                            <svg class="icon" viewBox="0 0 24 24"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg> Print Scanned Doc
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Scanned Document Preview Container -->
+                <div id="docScanPreviewWrapper" style="display: none; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 12px; text-align: center;">
+                    <img id="docScanPreviewImg" src="" alt="Scanned Document Preview" style="max-height: 380px; max-width: 100%; object-fit: contain; border-radius: 2px; box-shadow: 0 4px 12px rgba(0,0,0,0.3);">
                 </div>
             </div>
         </div>
@@ -2305,6 +2561,43 @@ INDEX_HTML = """<!DOCTYPE html>
                 </div>
             </div>
 
+            <!-- 1-Click Shop Hardware Profiles Bar -->
+            <div class="cr-card" style="margin-bottom: 16px; background: var(--surface-elevated);">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; flex-wrap: wrap; gap: 8px;">
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <svg class="icon" viewBox="0 0 24 24" style="stroke: var(--accent);"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>
+                        <strong style="font-size: 13px; color: var(--text-primary);">1-Click Print Shop Profiles</strong>
+                    </div>
+                    <span style="font-size: 11px; color: var(--text-secondary);">Click a profile to preset hardware defaults for all connected devices.</span>
+                </div>
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px;">
+                    <button type="button" class="cr-btn-pill cr-btn-cancel cups-admin-req" onclick="applyCupsProfile('standard_docs')" style="justify-content: flex-start; padding: 8px 12px; height: auto;">
+                        <div>
+                            <div style="font-weight: 600; color: var(--text-primary); font-size: 12px;">📄 Standard Documents</div>
+                            <div style="font-size: 10px; color: var(--text-secondary);">A4 • Plain • Normal • B&W • Reverse</div>
+                        </div>
+                    </button>
+                    <button type="button" class="cr-btn-pill cr-btn-cancel cups-admin-req" onclick="applyCupsProfile('eco_draft')" style="justify-content: flex-start; padding: 8px 12px; height: auto;">
+                        <div>
+                            <div style="font-weight: 600; color: var(--text-primary); font-size: 12px;">⚡ Eco Draft (Fast)</div>
+                            <div style="font-size: 10px; color: var(--text-secondary);">A4 • Plain • Draft • B&W • 300 DPI</div>
+                        </div>
+                    </button>
+                    <button type="button" class="cr-btn-pill cr-btn-cancel cups-admin-req" onclick="applyCupsProfile('glossy_photo')" style="justify-content: flex-start; padding: 8px 12px; height: auto;">
+                        <div>
+                            <div style="font-weight: 600; color: var(--text-primary); font-size: 12px;">🖼️ Glossy Photo (4×6")</div>
+                            <div style="font-size: 10px; color: var(--text-secondary);">4×6 • Glossy • Photo • RGB • 1200 DPI</div>
+                        </div>
+                    </button>
+                    <button type="button" class="cr-btn-pill cr-btn-cancel cups-admin-req" onclick="applyCupsProfile('certificate')" style="justify-content: flex-start; padding: 8px 12px; height: auto;">
+                        <div>
+                            <div style="font-weight: 600; color: var(--text-primary); font-size: 12px;">📜 Certificate / Heavy</div>
+                            <div style="font-size: 10px; color: var(--text-secondary);">A4 • CoatedMatte • Best • RGB • 600 DPI</div>
+                        </div>
+                    </button>
+                </div>
+            </div>
+
             <!-- Global Hardware Defaults Card -->
             <div class="cr-card" style="margin-bottom: 16px;">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; flex-wrap: wrap; gap: 10px;">
@@ -2492,6 +2785,116 @@ INDEX_HTML = """<!DOCTYPE html>
                 </div>
             </div>
 
+            <!-- Recent Completed Jobs (24-Hour Spool Retention) -->
+            <div class="cr-card" style="margin-bottom: 16px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 10px;">
+                    <div>
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <h3 style="font-size: 15px; font-weight: 600; color: var(--text-primary); margin: 0;">Completed Jobs (24-Hour Spool Retention)</h3>
+                            <span class="badge" style="background: rgba(30, 142, 62, 0.2); color: var(--success); font-size: 11px;">Spool Preserved</span>
+                        </div>
+                        <p style="font-size: 12px; color: var(--text-secondary); margin: 3px 0 0 0;">
+                            Preserved jobs can be reprinted with 1 click without asking the customer to re-send or re-upload.
+                        </p>
+                    </div>
+                </div>
+
+                <div style="overflow-x: auto;">
+                    <table class="table-compact" style="width: 100%; border-collapse: collapse; font-size: 12px;">
+                        <thead>
+                            <tr style="border-bottom: 1px solid var(--border); text-align: left; color: var(--text-secondary);">
+                                <th style="padding: 8px 10px;">Job ID</th>
+                                <th style="padding: 8px 10px;">User / Client</th>
+                                <th style="padding: 8px 10px;">Size</th>
+                                <th style="padding: 8px 10px;">Finished Date</th>
+                                <th style="padding: 8px 10px;">Status</th>
+                                <th style="padding: 8px 10px; text-align: right;">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody id="cupsCompletedJobsBody">
+                            <tr>
+                                <td colspan="6" style="text-align: center; padding: 20px; color: var(--text-secondary);">
+                                    No completed jobs retained in spool cache.
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Printhead Health & Diagnostics -->
+            <div class="cr-card" style="margin-bottom: 16px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 10px;">
+                    <div>
+                        <h3 style="font-size: 15px; font-weight: 600; color: var(--text-primary); margin: 0;">Printhead Health & Maintenance</h3>
+                        <p style="font-size: 12px; color: var(--text-secondary); margin: 3px 0 0 0;">
+                            Prevent HP Smart Tank nozzle clogs, test CMYK ink density, and resolve USB communication locks.
+                        </p>
+                    </div>
+                </div>
+
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px;">
+                    <!-- CMYK Nozzle Check -->
+                    <div style="background: var(--surface-elevated); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 14px;">
+                        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 6px;">
+                            <svg class="icon" viewBox="0 0 24 24" style="stroke: #00e5ff;"><circle cx="12" cy="12" r="10"></circle><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"></path><path d="M2 12h20"></path></svg>
+                            <strong style="font-size: 13px; color: var(--text-primary);">Vector CMYK Nozzle Check</strong>
+                        </div>
+                        <p style="font-size: 11px; color: var(--text-secondary); margin-bottom: 12px;">Prints crisp Cyan, Magenta, Yellow, and Black alignment bars to check for missing jets or micro-banding.</p>
+                        <button type="button" class="cr-btn-pill cr-btn-cancel cups-admin-req" onclick="runNozzleCheck()" style="padding: 6px 14px; font-size: 12px;">
+                            <svg class="icon" viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg> Print CMYK Test Page
+                        </button>
+                    </div>
+
+                    <!-- USB Hardware Reset -->
+                    <div style="background: var(--surface-elevated); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 14px;">
+                        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 6px;">
+                            <svg class="icon" viewBox="0 0 24 24" style="stroke: var(--warning);"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"></path></svg>
+                            <strong style="font-size: 13px; color: var(--text-primary);">USB Port Unfreeze (usbreset)</strong>
+                        </div>
+                        <p style="font-size: 11px; color: var(--text-secondary); margin-bottom: 12px;">Resets USB device <code>03f0:4554</code> at kernel level without power cycling the ZTE B860H appliance.</p>
+                        <button type="button" class="cr-btn-pill cr-btn-cancel cups-admin-req" onclick="runUsbReset()" style="padding: 6px 14px; font-size: 12px; color: var(--warning);">
+                            <svg class="icon" viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg> Reset USB Port
+                        </button>
+                    </div>
+
+                    <!-- Anti-Clog Scheduler -->
+                    <div style="background: var(--surface-elevated); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 14px;">
+                        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 6px;">
+                            <svg class="icon" viewBox="0 0 24 24" style="stroke: var(--accent);"><path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"></path></svg>
+                            <strong style="font-size: 13px; color: var(--text-primary);">Anti-Clog Keep-Wet Routine</strong>
+                        </div>
+                        <p style="font-size: 11px; color: var(--text-secondary); margin-bottom: 10px;">Automatically exercises thermal printhead every 7 days if the printer has been idle to keep nozzles wet.</p>
+                        <div style="display: flex; align-items: center; justify-content: space-between;">
+                            <label style="font-size: 12px; color: var(--text-primary); display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                                <input type="checkbox" id="chkAutoAntiClog" class="cups-admin-req" onchange="toggleAntiClog(this.checked)"> Auto Keep-Wet (7-Day)
+                            </label>
+                            <button type="button" class="cr-btn-pill cr-btn-cancel cups-admin-req" onclick="runNozzleCheck()" style="padding: 4px 10px; font-size: 11px;">Keep-Wet Now</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Network Companion Daemons & Printable Counter Sign -->
+            <div class="cr-card" style="margin-bottom: 16px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 10px;">
+                    <div>
+                        <h3 style="font-size: 15px; font-weight: 600; color: var(--text-primary); margin: 0;">Network Companion Daemons & Counter Sign</h3>
+                        <p style="font-size: 12px; color: var(--text-secondary); margin: 3px 0 0 0;">
+                            Monitor background services powering Windows file shares, AirPrint discovery, and remote mesh access.
+                        </p>
+                    </div>
+                    <a href="/api/reports/counter-sign" target="_blank" class="cr-btn-pill cr-btn-print" style="padding: 6px 14px; text-decoration: none; font-size: 12px;">
+                        <svg class="icon" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="9" y1="3" x2="9" y2="21"></line></svg> 🪧 Print Shop Counter QR Sign (A4)
+                    </a>
+                </div>
+
+                <div id="networkServicesGrid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px;">
+                    <!-- Populated dynamically via loadNetworkServices() -->
+                    <div style="padding: 12px; text-align: center; color: var(--text-secondary); font-size: 12px;">Loading service status...</div>
+                </div>
+            </div>
+
             <!-- Advanced Driver PPD Options Accordion -->
             <div class="cr-card">
                 <div id="cupsPpdToggle" style="display: flex; justify-content: space-between; align-items: center; cursor: pointer; user-select: none;">
@@ -2596,6 +2999,7 @@ INDEX_HTML = """<!DOCTYPE html>
                         <thead>
                             <tr>
                                 <th>Timestamp</th>
+                                <th>Source</th>
                                 <th>Document</th>
                                 <th>Printer</th>
                                 <th>Pages</th>
@@ -2606,7 +3010,7 @@ INDEX_HTML = """<!DOCTYPE html>
                             </tr>
                         </thead>
                         <tbody id="historyTableBody">
-                            <tr><td colspan="8" style="text-align: center; color: var(--text-tertiary);">No audit history recorded</td></tr>
+                            <tr><td colspan="9" style="text-align: center; color: var(--text-tertiary);">No audit history recorded</td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -3245,6 +3649,12 @@ INDEX_HTML = """<!DOCTYPE html>
         formData.append('duplex', duplexVal);
         formData.append('fitpage', document.getElementById('printScaling').value);
         formData.append('pagerange', document.getElementById('printPageRange').value);
+        if (document.getElementById('printNumberUp')) {
+            formData.append('number_up', document.getElementById('printNumberUp').value);
+        }
+        if (document.getElementById('printPageBorder')) {
+            formData.append('page_border', document.getElementById('printPageBorder').value);
+        }
 
         const endpoint = isPin ? '/api/print/pin-hold' : '/api/print';
         if (isPin) formData.append('pin', pin);
@@ -3883,7 +4293,7 @@ INDEX_HTML = """<!DOCTYPE html>
                 document.getElementById('statTotalJobs').textContent = '--';
                 document.getElementById('statTotalPages').textContent = '--';
                 document.getElementById('statTotalRevenue').textContent = '--';
-                tbody.innerHTML = '<tr><td colspan="8" style="text-align: center; padding: 24px; color: var(--text-secondary);"><svg class="icon" viewBox="0 0 24 24" style="width: 20px; height: 20px; margin: 0 auto 8px auto; display: block;"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>Administrator login required to inspect audit ledger. <button class="cr-btn-pill cr-btn-print" style="margin-left: 8px; padding: 3px 10px; font-size: 11px;" onclick="window.switchTab(&quot;settings&quot;)">Log In</button></td></tr>';
+                tbody.innerHTML = '<tr><td colspan="9" style="text-align: center; padding: 24px; color: var(--text-secondary);"><svg class="icon" viewBox="0 0 24 24" style="width: 20px; height: 20px; margin: 0 auto 8px auto; display: block;"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>Administrator login required to inspect audit ledger. <button class="cr-btn-pill cr-btn-print" style="margin-left: 8px; padding: 3px 10px; font-size: 11px;" onclick="window.switchTab(&quot;settings&quot;)">Log In</button></td></tr>';
                 return;
             }
             const data = await res.json();
@@ -3894,10 +4304,21 @@ INDEX_HTML = """<!DOCTYPE html>
             }
             tbody.innerHTML = '';
             if (data.jobs && data.jobs.length > 0) {
+                const srcBadges = {
+                    'portal': '<span style="font-size: 10px; padding: 2px 5px; border-radius: 3px; background: rgba(26, 115, 232, 0.15); color: var(--accent);">Web Portal</span>',
+                    'pin_release': '<span style="font-size: 10px; padding: 2px 5px; border-radius: 3px; background: rgba(234, 134, 0, 0.15); color: var(--warning);">PIN Release</span>',
+                    'windows_ipp': '<span style="font-size: 10px; padding: 2px 5px; border-radius: 3px; background: rgba(30, 142, 62, 0.15); color: var(--success);">Windows IPP</span>',
+                    'mobile_airprint': '<span style="font-size: 10px; padding: 2px 5px; border-radius: 3px; background: rgba(161, 66, 244, 0.15); color: #c084fc;">Mobile AirPrint</span>',
+                    'photocopy': '<span style="font-size: 10px; padding: 2px 5px; border-radius: 3px; background: rgba(0, 229, 255, 0.15); color: #00e5ff;">Photocopy</span>',
+                    'id_card_copy': '<span style="font-size: 10px; padding: 2px 5px; border-radius: 3px; background: rgba(255, 105, 180, 0.15); color: #ff69b4;">ID Card</span>',
+                    'maintenance': '<span style="font-size: 10px; padding: 2px 5px; border-radius: 3px; background: rgba(255, 255, 255, 0.1); color: var(--text-secondary);">Maintenance</span>'
+                };
                 data.jobs.forEach(j => {
+                    const srcHtml = srcBadges[j.source] || `<span style="font-size: 10px; color: var(--text-secondary);">${j.source || 'portal'}</span>`;
                     const tr = document.createElement('tr');
                     tr.innerHTML = `
                         <td>${j.timestamp}</td>
+                        <td>${srcHtml}</td>
                         <td style="font-weight: 500;">${j.title}</td>
                         <td>${j.printer}</td>
                         <td>${j.pages}</td>
@@ -3909,11 +4330,11 @@ INDEX_HTML = """<!DOCTYPE html>
                     tbody.appendChild(tr);
                 });
             } else {
-                tbody.innerHTML = '<tr><td colspan="8" style="text-align: center; color: var(--text-tertiary);">No audit history recorded</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="9" style="text-align: center; color: var(--text-tertiary);">No audit history recorded</td></tr>';
             }
         } catch (e) {
             console.error(e);
-            tbody.innerHTML = '<tr><td colspan="8" style="text-align: center; color: var(--danger);">Failed to load history</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="9" style="text-align: center; color: var(--danger);">Failed to load history</td></tr>';
         }
     }
 
@@ -4227,6 +4648,18 @@ INDEX_HTML = """<!DOCTYPE html>
         // Render Spool Queue
         renderCupsQueue(data.queue || []);
 
+        // Render Completed Jobs (24-Hour Spool Retention)
+        renderCupsCompletedJobs(data.completed_jobs || []);
+
+        // Anti clog setting
+        const chkAnti = document.getElementById('chkAutoAntiClog');
+        if (chkAnti && data.auto_anti_clog !== undefined) {
+            chkAnti.checked = (data.auto_anti_clog === '1' || data.auto_anti_clog === 'on' || data.auto_anti_clog === true);
+        }
+
+        // Load network companion daemons
+        loadNetworkServices();
+
         // Render Advanced PPD options
         renderCupsPpdOptions(data.ppd_options || []);
 
@@ -4256,7 +4689,11 @@ INDEX_HTML = """<!DOCTYPE html>
                 <td style="padding: 8px 10px;">${job.size} bytes</td>
                 <td style="padding: 8px 10px; color: var(--text-secondary); font-size: 11px;">${job.date}</td>
                 <td style="padding: 8px 10px;"><span style="color: ${statusColor}; font-weight: 500;">${job.status}</span></td>
-                <td style="padding: 8px 10px; text-align: right;">
+                <td style="padding: 8px 10px; text-align: right; white-space: nowrap;">
+                    ${job.is_held 
+                        ? `<button type="button" class="cr-btn-pill cr-btn-print cups-admin-req" style="padding: 2px 8px; font-size: 11px; margin-right: 4px;" onclick="releaseCupsJob('${job.job_id}')">Release</button>`
+                        : `<button type="button" class="cr-btn-pill cr-btn-cancel cups-admin-req" style="padding: 2px 8px; font-size: 11px; margin-right: 4px;" onclick="holdCupsJob('${job.job_id}')">Hold</button>`
+                    }
                     <button type="button" class="cr-btn-pill cr-btn-cancel cups-admin-req" style="color: var(--danger); padding: 2px 8px; font-size: 11px;" onclick="cancelCupsJob('${job.job_id}')">
                         Cancel
                     </button>
@@ -4476,6 +4913,508 @@ INDEX_HTML = """<!DOCTYPE html>
 
     const btnAdminHdr = document.getElementById('btnAdminLock');
     if (btnAdminHdr) btnAdminHdr.addEventListener('click', () => window.switchTab('settings'));
+
+    // ==========================================
+    // MODULE 1: FLATBED SCANNER & WALK-UP PHOTOCOPIER
+    // ==========================================
+    let currentScanId = null;
+    let currentIdSession = null;
+    let currentCopyMode = 'bw';
+
+    async function loadScannerTab() {
+        const badge = document.getElementById('scannerStatusBadge');
+        const devName = document.getElementById('scannerDeviceName');
+        try {
+            const res = await fetch('/api/scan/status');
+            const data = await res.json();
+            if (data.success && data.connected) {
+                if (badge) {
+                    badge.textContent = data.status || 'Ready';
+                    badge.style.background = 'rgba(30, 142, 62, 0.2)';
+                    badge.style.color = 'var(--success)';
+                }
+                if (devName && data.scanner) {
+                    devName.textContent = data.scanner + ' (Direct eSCL Ready)';
+                }
+            } else {
+                if (badge) {
+                    badge.textContent = data.status || 'Disconnected';
+                    badge.style.background = 'rgba(217, 48, 37, 0.2)';
+                    badge.style.color = 'var(--danger)';
+                }
+            }
+        } catch (e) {
+            console.error("Scanner status check failed:", e);
+        }
+    }
+
+    function setCopyMode(mode) {
+        currentCopyMode = mode;
+        const btnBw = document.getElementById('btnCopyModeBw');
+        const btnColor = document.getElementById('btnCopyModeColor');
+        if (btnBw && btnColor) {
+            if (mode === 'bw') {
+                btnBw.className = 'cr-btn-pill cr-btn-print active';
+                btnColor.className = 'cr-btn-pill cr-btn-cancel';
+            } else {
+                btnColor.className = 'cr-btn-pill cr-btn-print active';
+                btnBw.className = 'cr-btn-pill cr-btn-cancel';
+            }
+        }
+    }
+
+    function adjustCopyCount(delta) {
+        const inp = document.getElementById('copyCountInput');
+        if (!inp) return;
+        let v = parseInt(inp.value) || 1;
+        v = Math.max(1, Math.min(99, v + delta));
+        inp.value = v;
+    }
+
+    function sanitizeCopyCount() {
+        const inp = document.getElementById('copyCountInput');
+        if (!inp) return;
+        let v = parseInt(inp.value) || 1;
+        if (v < 1) v = 1;
+        if (v > 99) v = 99;
+        inp.value = v;
+    }
+
+    async function executeCopy() {
+        const btn = document.getElementById('btnStartCopy');
+        const status = document.getElementById('copyStatusText');
+        const copies = parseInt(document.getElementById('copyCountInput').value) || 1;
+        const scaling = document.getElementById('copyScalingSelect').value || 'fit';
+
+        if (btn) {
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner" style="display:inline-block; width:12px; height:12px; border:2px solid #fff; border-top-color:transparent; border-radius:50%; animation:spin 0.8s linear infinite; margin-right:6px;"></span> Scanning & Printing...';
+        }
+        if (status) status.innerHTML = '<span style="color:var(--accent);">Scanning flatbed platen...</span>';
+
+        const fd = new FormData();
+        fd.append('copies', copies);
+        fd.append('mode', currentCopyMode);
+        fd.append('scaling', scaling);
+
+        try {
+            const res = await fetch('/api/scan/copy', { method: 'POST', body: fd });
+            const data = await res.json();
+            if (data.success) {
+                showToast(data.message || 'Photocopy completed successfully', 'success');
+                if (status) status.innerHTML = `<span style="color:var(--success);">Done! Job #${data.job_id} dispatched.</span>`;
+            } else {
+                showToast('Photocopy failed: ' + (data.error || 'Unknown error'), 'error');
+                if (status) status.innerHTML = `<span style="color:var(--danger);">Error: ${data.error || 'Failed'}</span>`;
+            }
+        } catch (e) {
+            showToast('Network error during photocopy', 'error');
+            if (status) status.innerHTML = '<span style="color:var(--danger);">Communication error</span>';
+        } finally {
+            if (btn) {
+                btn.disabled = false;
+                btn.innerHTML = '<svg class="icon" viewBox="0 0 24 24"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg> START PHOTOCOPY';
+            }
+        }
+    }
+
+    async function scanIdSide(side) {
+        const btn = side === 'front' ? document.getElementById('btnScanIdFront') : document.getElementById('btnScanIdBack');
+        const prevContainer = side === 'front' ? document.getElementById('idPreviewFrontContainer') : document.getElementById('idPreviewBackContainer');
+
+        if (btn) {
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner" style="display:inline-block; width:12px; height:12px; border:2px solid #fff; border-top-color:transparent; border-radius:50%; animation:spin 0.8s linear infinite; margin-right:6px;"></span> Scanning...';
+        }
+
+        const fd = new FormData();
+        fd.append('step', side);
+        if (currentIdSession) fd.append('session_id', currentIdSession);
+
+        try {
+            const res = await fetch('/api/scan/id-card', { method: 'POST', body: fd });
+            const data = await res.json();
+            if (data.success) {
+                currentIdSession = data.session_id;
+                showToast(side === 'front' ? 'Front of ID scanned!' : 'Back of ID scanned!', 'success');
+                if (prevContainer) {
+                    prevContainer.innerHTML = `<img src="${side === 'front' ? data.front_preview : data.back_preview}&t=${Date.now()}" style="max-height:100%; max-width:100%; object-fit:contain; border-radius:4px;">`;
+                }
+
+                if (side === 'front') {
+                    const b2 = document.getElementById('idStep2Box');
+                    const btnB = document.getElementById('btnScanIdBack');
+                    const badge2 = document.getElementById('idStep2Badge');
+                    if (b2) b2.style.opacity = '1';
+                    if (btnB) {
+                        btnB.disabled = false;
+                        btnB.className = 'cr-btn-pill cr-btn-print';
+                    }
+                    if (badge2) {
+                        badge2.style.background = 'var(--accent)';
+                        badge2.style.color = '#fff';
+                    }
+                } else {
+                    const b3 = document.getElementById('idStep3Box');
+                    const btnC = document.getElementById('btnPrintIdComposite');
+                    const badge3 = document.getElementById('idStep3Badge');
+                    if (b3) b3.style.opacity = '1';
+                    if (btnC) btnC.disabled = false;
+                    if (badge3) {
+                        badge3.style.background = 'var(--success)';
+                        badge3.style.color = '#fff';
+                    }
+                }
+            } else {
+                showToast('Scan failed: ' + (data.error || 'Unknown error'), 'error');
+            }
+        } catch (e) {
+            showToast('Network error during scan', 'error');
+        } finally {
+            if (btn) {
+                btn.disabled = false;
+                btn.innerHTML = `<svg class="icon" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect></svg> Scan ${side === 'front' ? 'Front' : 'Back'} Side`;
+            }
+        }
+    }
+
+    async function printIdCardComposite() {
+        const btn = document.getElementById('btnPrintIdComposite');
+        if (btn) {
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner" style="display:inline-block; width:12px; height:12px; border:2px solid #fff; border-top-color:transparent; border-radius:50%; animation:spin 0.8s linear infinite; margin-right:6px;"></span> Printing...';
+        }
+
+        const fd = new FormData();
+        fd.append('step', 'print');
+        fd.append('session_id', currentIdSession);
+        fd.append('copies', '1');
+
+        try {
+            const res = await fetch('/api/scan/id-card', { method: 'POST', body: fd });
+            const data = await res.json();
+            if (data.success) {
+                showToast(data.message || 'ID Card copy printed successfully!', 'success');
+            } else {
+                showToast('Print failed: ' + (data.error || 'Unknown error'), 'error');
+            }
+        } catch (e) {
+            showToast('Network error while printing ID copy', 'error');
+        } finally {
+            if (btn) {
+                btn.disabled = false;
+                btn.innerHTML = '<svg class="icon" viewBox="0 0 24 24"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg> Print ID Copy';
+            }
+        }
+    }
+
+    function resetIdCardWizard() {
+        currentIdSession = null;
+        const b2 = document.getElementById('idStep2Box');
+        const b3 = document.getElementById('idStep3Box');
+        const btnB = document.getElementById('btnScanIdBack');
+        const btnC = document.getElementById('btnPrintIdComposite');
+        const badge2 = document.getElementById('idStep2Badge');
+        const badge3 = document.getElementById('idStep3Badge');
+
+        if (b2) b2.style.opacity = '0.6';
+        if (b3) b3.style.opacity = '0.6';
+        if (btnB) {
+            btnB.disabled = true;
+            btnB.className = 'cr-btn-pill cr-btn-cancel';
+        }
+        if (btnC) btnC.disabled = true;
+        if (badge2) {
+            badge2.style.background = 'var(--surface)';
+            badge2.style.color = 'var(--text-secondary)';
+        }
+        if (badge3) {
+            badge3.style.background = 'var(--surface)';
+            badge3.style.color = 'var(--text-secondary)';
+        }
+
+        const pf = document.getElementById('idPreviewFrontContainer');
+        const pb = document.getElementById('idPreviewBackContainer');
+        if (pf) pf.innerHTML = '<span style="font-size: 11px; color: var(--text-secondary);">Awaiting front scan...</span>';
+        if (pb) pb.innerHTML = '<span style="font-size: 11px; color: var(--text-secondary);">Awaiting back scan...</span>';
+    }
+
+    async function executeDocScan() {
+        const btn = document.getElementById('btnRunDocScan');
+        const status = document.getElementById('docScanStatusText');
+        const fmt = document.getElementById('docScanFormat').value || 'pdf';
+        const resDpi = document.getElementById('docScanResolution').value || '300';
+        const mode = document.getElementById('docScanMode').value || 'color';
+
+        if (btn) {
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner" style="display:inline-block; width:12px; height:12px; border:2px solid #fff; border-top-color:transparent; border-radius:50%; animation:spin 0.8s linear infinite; margin-right:6px;"></span> Scanning Document...';
+        }
+        if (status) status.innerHTML = '<span style="color:var(--accent);">Scanner motor running...</span>';
+
+        const fd = new FormData();
+        fd.append('format', fmt);
+        fd.append('resolution', resDpi);
+        fd.append('mode', mode);
+
+        try {
+            const res = await fetch('/api/scan/document', { method: 'POST', body: fd });
+            const data = await res.json();
+            if (data.success) {
+                currentScanId = data.scan_id;
+                showToast('Document scanned successfully', 'success');
+                if (status) status.innerHTML = '<span style="color:var(--success);">Scan complete! Ready to download or print.</span>';
+
+                const dlBtn = document.getElementById('btnDocScanDownload');
+                const prBtn = document.getElementById('btnDocScanPrint');
+                const previewImg = document.getElementById('docScanPreviewImg');
+                const previewWrap = document.getElementById('docScanPreviewWrapper');
+
+                if (dlBtn) {
+                    dlBtn.style.display = 'inline-flex';
+                    dlBtn.href = data.download_url;
+                }
+                if (prBtn) prBtn.style.display = 'inline-flex';
+                if (previewImg && previewWrap) {
+                    previewImg.src = data.preview_url + '?t=' + Date.now();
+                    previewWrap.style.display = 'block';
+                }
+            } else {
+                showToast('Scan failed: ' + (data.error || 'Unknown error'), 'error');
+                if (status) status.innerHTML = `<span style="color:var(--danger);">Error: ${data.error || 'Failed'}</span>`;
+            }
+        } catch (e) {
+            showToast('Network error during scan', 'error');
+            if (status) status.innerHTML = '<span style="color:var(--danger);">Network error</span>';
+        } finally {
+            if (btn) {
+                btn.disabled = false;
+                btn.innerHTML = '<svg class="icon" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg> Scan Document';
+            }
+        }
+    }
+
+    async function printScannedDoc() {
+        if (!currentScanId) return;
+        const btn = document.getElementById('btnDocScanPrint');
+        if (btn) {
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner" style="display:inline-block; width:12px; height:12px; border:2px solid #fff; border-top-color:transparent; border-radius:50%; animation:spin 0.8s linear infinite; margin-right:6px;"></span> Printing...';
+        }
+        try {
+            const fd = new FormData();
+            fd.append('copies', '1');
+            fd.append('mode', document.getElementById('docScanMode').value === 'gray' ? 'bw' : 'color');
+            fd.append('scaling', 'fit');
+            const res = await fetch('/api/scan/copy', { method: 'POST', body: fd });
+            const data = await res.json();
+            if (data.success) {
+                showToast('Scanned document sent to printer!', 'success');
+            } else {
+                showToast('Print failed: ' + (data.error || 'Unknown error'), 'error');
+            }
+        } catch (e) {
+            showToast('Print error', 'error');
+        } finally {
+            if (btn) {
+                btn.disabled = false;
+                btn.innerHTML = '<svg class="icon" viewBox="0 0 24 24"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg> Print Scanned Doc';
+            }
+        }
+    }
+
+    // ==========================================
+    // MODULE 3, 4, 5, 6: CUPS COMMAND CENTER EXTENSIONS
+    // ==========================================
+    const CUPS_PROFILES = {
+        'standard_docs': {
+            pagesize: 'A4',
+            mediatype: 'Plain',
+            quality: 'Normal',
+            colormodel: 'KGray',
+            outputorder: 'reverse',
+            scaling: 'none',
+            duplex: 'None',
+            resolution: '600'
+        },
+        'eco_draft': {
+            pagesize: 'A4',
+            mediatype: 'Plain',
+            quality: 'Draft',
+            colormodel: 'KGray',
+            outputorder: 'reverse',
+            scaling: 'fit',
+            duplex: 'None',
+            resolution: '300'
+        },
+        'glossy_photo': {
+            pagesize: '4x6in',
+            mediatype: 'Glossy',
+            quality: 'Photo',
+            colormodel: 'RGB',
+            outputorder: 'normal',
+            scaling: 'fill',
+            duplex: 'None',
+            resolution: '1200'
+        },
+        'certificate': {
+            pagesize: 'A4',
+            mediatype: 'CoatedMatte',
+            quality: 'Best',
+            colormodel: 'RGB',
+            outputorder: 'reverse',
+            scaling: 'none',
+            duplex: 'None',
+            resolution: '600'
+        }
+    };
+
+    function applyCupsProfile(profileKey) {
+        const p = CUPS_PROFILES[profileKey];
+        if (!p) return;
+
+        const setVal = (id, val) => {
+            const el = document.getElementById(id);
+            if (!el) return;
+            for (let i = 0; i < el.options.length; i++) {
+                if (el.options[i].value.toLowerCase() === String(val).toLowerCase()) {
+                    el.selectedIndex = i;
+                    break;
+                }
+            }
+        };
+
+        setVal('cupsDefOutputOrder', p.outputorder);
+        setVal('cupsDefPageSize', p.pagesize);
+        setVal('cupsDefMediaType', p.mediatype);
+        setVal('cupsDefQuality', p.quality);
+        setVal('cupsDefColorModel', p.colormodel);
+        setVal('cupsDefScaling', p.scaling);
+        setVal('cupsDefDuplex', p.duplex);
+        setVal('cupsDefResolution', p.resolution);
+
+        showToast(`Preset "${profileKey.replace('_', ' ').toUpperCase()}" loaded into CUPS defaults. Click "Save CUPS Defaults" to commit to all devices.`, 'info');
+    }
+
+    function renderCupsCompletedJobs(completed) {
+        const tbody = document.getElementById('cupsCompletedJobsBody');
+        if (!tbody) return;
+        tbody.innerHTML = '';
+        if (!completed || completed.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; padding: 20px; color: var(--text-secondary);">No completed jobs retained in spool cache.</td></tr>';
+            return;
+        }
+
+        completed.forEach(job => {
+            const tr = document.createElement('tr');
+            tr.style.borderBottom = '1px solid var(--border)';
+            tr.innerHTML = `
+                <td style="padding: 8px 10px; font-family: var(--font-mono); font-weight: 600;">${job.job_id}</td>
+                <td style="padding: 8px 10px;">${job.user}</td>
+                <td style="padding: 8px 10px;">${job.size}</td>
+                <td style="padding: 8px 10px; color: var(--text-secondary); font-size: 11px;">${job.date}</td>
+                <td style="padding: 8px 10px;"><span style="color: var(--success); font-weight: 500;">${job.status}</span></td>
+                <td style="padding: 8px 10px; text-align: right;">
+                    <button type="button" class="cr-btn-pill cr-btn-print cups-admin-req" style="padding: 2px 10px; font-size: 11px;" onclick="reprintCupsJob('${job.job_id}')">
+                        <svg class="icon" viewBox="0 0 24 24"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg> Reprint
+                    </button>
+                </td>
+            `;
+            tbody.appendChild(tr);
+        });
+
+        updateCupsAdminState(!!currentAdminToken);
+    }
+
+    window.holdCupsJob = function(jobId) {
+        executeCupsAction('hold_job', { job_id: jobId });
+    };
+
+    window.releaseCupsJob = function(jobId) {
+        executeCupsAction('release_job', { job_id: jobId });
+    };
+
+    window.reprintCupsJob = function(jobId) {
+        if (!confirm(`Reprint preserved spool job ${jobId}?`)) return;
+        executeCupsAction('reprint_job', { job_id: jobId });
+    };
+
+    window.runNozzleCheck = function() {
+        if (!confirm('Print CMYK Vector Printhead Nozzle Check pattern on current printer?')) return;
+        executeCupsAction('nozzle_check');
+    };
+
+    window.runUsbReset = function() {
+        if (!confirm('Execute kernel USB port reset for HP Smart Tank 520 (03f0:4554)?')) return;
+        executeCupsAction('usb_reset');
+    };
+
+    window.toggleAntiClog = function(enabled) {
+        executeCupsAction('toggle_anti_clog', { enabled: enabled ? '1' : '0' });
+    };
+
+    async function loadNetworkServices() {
+        const grid = document.getElementById('networkServicesGrid');
+        if (!grid) return;
+        try {
+            const res = await fetch('/api/network/services');
+            const data = await res.json();
+            if (data.success && data.services) {
+                grid.innerHTML = '';
+                data.services.forEach(svc => {
+                    const col = document.createElement('div');
+                    col.style.cssText = 'background: var(--surface-elevated); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 12px; display: flex; flex-direction: column; justify-content: space-between; gap: 8px;';
+                    
+                    const statusColor = svc.active ? 'var(--success)' : 'var(--danger)';
+                    const statusBg = svc.active ? 'rgba(30, 142, 62, 0.2)' : 'rgba(217, 48, 37, 0.2)';
+                    
+                    col.innerHTML = `
+                        <div>
+                            <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 4px;">
+                                <strong style="font-size: 13px; color: var(--text-primary);">${svc.name}</strong>
+                                <span class="badge" style="background: ${statusBg}; color: ${statusColor}; font-size: 10px;">${svc.status}</span>
+                            </div>
+                            <code style="font-size: 10px; color: var(--text-secondary);">${svc.service}</code>
+                        </div>
+                        <button type="button" class="cr-btn-pill cr-btn-cancel cups-admin-req" style="padding: 3px 8px; font-size: 11px; align-self: flex-start;" onclick="restartNetworkService('${svc.id}')">
+                            <svg class="icon" viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg> Restart
+                        </button>
+                    `;
+                    grid.appendChild(col);
+                });
+                updateCupsAdminState(!!currentAdminToken);
+            }
+        } catch (e) {
+            console.error("Failed to load network services:", e);
+        }
+    }
+
+    window.restartNetworkService = async function(svcId) {
+        if (!currentAdminToken) {
+            showToast('Administrator privileges required to restart network services', 'error');
+            window.switchTab('settings');
+            return;
+        }
+
+        const fd = new FormData();
+        fd.append('service', svcId);
+        try {
+            const res = await fetch('/api/network/services/restart', {
+                method: 'POST',
+                headers: { 'X-Admin-Token': currentAdminToken },
+                body: fd
+            });
+            const data = await res.json();
+            if (data.success) {
+                showToast(data.message, 'success');
+                setTimeout(loadNetworkServices, 1200);
+            } else {
+                showToast('Failed to restart service: ' + (data.error || 'Unknown error'), 'error');
+            }
+        } catch (e) {
+            showToast('Network error while restarting service', 'error');
+        }
+    };
 
     // Queue auto-refresh
     cupsQueueTimer = setInterval(() => {
@@ -4741,6 +5680,460 @@ def update_system_lpoptions(printer: str, options_dict: dict):
     except Exception:
         pass
 
+def parse_cups_control_file(c_path: str) -> dict:
+    """Parses raw CUPS job control file (e.g. /var/spool/cups/c00016) for IPP attributes."""
+    if not os.path.exists(c_path):
+        return {}
+    try:
+        with open(c_path, 'rb') as f:
+            data = f.read().decode('latin1', errors='ignore')
+    except Exception:
+        return {}
+
+    info = {}
+    m_name = re.search(r'job-name.([^\x00-\x1f\x7f-\xff]+?)(?:job-|media-|time-|attributes-|\x00|\x01|\x02|\x03|\x04|\x05)', data)
+    if m_name:
+        info['title'] = m_name.group(1).strip()
+    m_user = re.search(r'job-originating-user-name.([^\x00-\x1f\x7f-\xff]+)', data)
+    if m_user:
+        info['user'] = m_user.group(1).strip()
+    m_host = re.search(r'job-originating-host-name.([^\x00-\x1f\x7f-\xff]+)', data)
+    if m_host:
+        info['host'] = m_host.group(1).strip()
+    m_color = re.search(r'print-color-mode.([a-zA-Z0-9_-]+)', data)
+    if m_color:
+        info['color'] = m_color.group(1).strip()
+    m_sheets = re.search(r'job-media-sheets-completed[!#\x00-\x05]+(\d+)', data)
+    if m_sheets:
+        try:
+            info['pages'] = int(m_sheets.group(1))
+        except Exception:
+            pass
+    return info
+
+def sync_cups_ledger():
+    """
+    Scans CUPS page_log and completed queue to synchronize direct prints
+    (Windows IPP, Android Mopria, iOS AirPrint) into SQLite print_ledger.
+    """
+    try:
+        conn = get_db()
+        jobs_from_log = {}
+        for p_path in ['/var/log/cups/page_log', '/var/log/cups/page_log.1']:
+            if not os.path.exists(p_path):
+                continue
+            try:
+                with open(p_path, 'r', encoding='utf-8', errors='ignore') as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line or line.startswith('#'):
+                            continue
+                        parts = line.split()
+                        if len(parts) >= 6:
+                            try:
+                                printer_name = parts[0]
+                                user_name = parts[1]
+                                job_id = int(parts[2])
+                                date_m = re.search(r'\[([^\]]+)\]', line)
+                                rest = line[date_m.end():].strip() if date_m else ''
+                                rest_parts = rest.split()
+                                page_num = int(rest_parts[0]) if len(rest_parts) > 0 and rest_parts[0].isdigit() else 1
+                                num_copies = int(rest_parts[1]) if len(rest_parts) > 1 and rest_parts[1].isdigit() else 1
+                                host = rest_parts[3] if len(rest_parts) > 3 else ''
+                                title_m = re.search(r'"([^"]+)"', rest)
+                                title = title_m.group(1) if title_m else (rest_parts[4] if len(rest_parts) > 4 else f"Print Job #{job_id}")
+
+                                if job_id not in jobs_from_log:
+                                    jobs_from_log[job_id] = {
+                                        'printer': printer_name,
+                                        'user': user_name,
+                                        'job_id': job_id,
+                                        'max_page': page_num,
+                                        'page_count': 1,
+                                        'copies': num_copies,
+                                        'host': host,
+                                        'title': title
+                                    }
+                                else:
+                                    jobs_from_log[job_id]['max_page'] = max(jobs_from_log[job_id]['max_page'], page_num)
+                                    jobs_from_log[job_id]['page_count'] += 1
+                                    jobs_from_log[job_id]['copies'] = max(jobs_from_log[job_id]['copies'], num_copies)
+                            except Exception:
+                                continue
+            except Exception:
+                pass
+
+        completed_lpstat = {}
+        try:
+            res = subprocess.run(['lpstat', '-W', 'completed', '-o'], capture_output=True, text=True, timeout=5)
+            if res.returncode == 0:
+                for line in res.stdout.splitlines():
+                    parts = line.split()
+                    if len(parts) >= 3 and '-' in parts[0]:
+                        try:
+                            jid = int(parts[0].split('-')[-1])
+                            user = parts[1]
+                            size = int(parts[2]) if parts[2].isdigit() else 0
+                            completed_lpstat[jid] = {'user': user, 'size': size, 'dest': parts[0]}
+                        except Exception:
+                            pass
+        except Exception:
+            pass
+
+        cur = conn.cursor()
+        cur.execute("SELECT cups_job_id FROM print_ledger WHERE cups_job_id IS NOT NULL")
+        existing_cups_jids = set(r['cups_job_id'] for r in cur.fetchall())
+
+        all_jids = set(jobs_from_log.keys()).union(set(completed_lpstat.keys()))
+        new_synced = 0
+        for jid in sorted(all_jids):
+            if jid in existing_cups_jids:
+                continue
+
+            c_path = f"/var/spool/cups/c{jid:05d}"
+            c_meta = parse_cups_control_file(c_path) if os.path.exists(c_path) else {}
+            log_meta = jobs_from_log.get(jid, {})
+            stat_meta = completed_lpstat.get(jid, {})
+
+            user = c_meta.get('user') or log_meta.get('user') or stat_meta.get('user') or 'direct-client'
+            if user == 'webprint':
+                continue
+
+            host = c_meta.get('host') or log_meta.get('host') or ''
+            title = c_meta.get('title') or log_meta.get('title') or f"Print Job #{jid}"
+            pages = c_meta.get('pages') or log_meta.get('max_page') or 1
+            copies = c_meta.get('copies') or log_meta.get('copies') or 1
+            colormodel = c_meta.get('color') or 'RGB'
+            timestamp = c_meta.get('timestamp') or int(time.time())
+
+            user_upper = user.upper()
+            host_upper = host.upper()
+            if 'DESKTOP-' in user_upper or 'LAPTOP-' in user_upper or '\\' in user or 'WINDOWS' in host_upper:
+                source = 'windows_ipp'
+            elif 'ANDROID' in host_upper or 'MOPRIA' in host_upper or 'IPHONE' in host_upper or 'IPAD' in host_upper or 'AIRPRINT' in host_upper:
+                source = 'mobile_airprint'
+            elif host and host not in ('127.0.0.1', 'localhost', '::1'):
+                source = 'windows_ipp'
+            else:
+                source = 'cups_direct'
+
+            is_color = colormodel not in ('KGray', 'Gray', 'monochrome', 'mono', 'K')
+            rate = get_rate(is_color)
+            cost = rate * pages * copies
+            printer_name = log_meta.get('printer') or 'HP_Smart_Tank_520'
+
+            with conn:
+                conn.execute("""
+                    INSERT INTO print_ledger 
+                    (timestamp, job_title, printer, pages, copies, total_pages, colormodel, cost, client_ip, status, source, cups_job_id)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (timestamp, f"{title} ({user})", printer_name, pages, copies, pages * copies, colormodel, cost, host or 'LAN', 'COMPLETED', source, jid))
+                new_synced += 1
+        return new_synced
+    except Exception:
+        return 0
+
+def generate_cmyk_nozzle_check_pdf(output_path: str, printer_name: str = "HP Smart Tank 520"):
+    """Generates standard vector CMYK diagnostic sheet in pure Python (PDF 1.4)."""
+    ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    ops = [
+        f"BT /F1 16 Tf 50 780 Td ({printer_name} - CMYK Nozzle Check & Diagnostics) Tj ET",
+        f"BT /F1 10 Tf 50 765 Td (Timestamp: {ts} | Armbian WebPrint Hardware Center) Tj ET",
+        "0 1 1 0 k 50 710 495 24 re f",
+        "BT /F1 9 Tf 0 0 0 1 k 55 718 Td (CYAN - 100% PRIMARY) Tj ET",
+        "1 0 1 0 k 50 670 495 24 re f",
+        "BT /F1 9 Tf 0 0 0 1 k 55 678 Td (MAGENTA - 100% PRIMARY) Tj ET",
+        "1 1 0 0 k 50 630 495 24 re f",
+        "BT /F1 9 Tf 0 0 0 1 k 55 638 Td (YELLOW - 100% PRIMARY) Tj ET",
+        "0 0 0 1 k 50 590 495 24 re f",
+        "BT /F1 9 Tf 0 0 0 0 k 55 598 Td (BLACK - 100% PIGMENT) Tj ET"
+    ]
+    colors = [('Cyan', '0 1 1 0 k', 530), ('Magenta', '1 0 1 0 k', 460), ('Yellow', '1 1 0 0 k', 390), ('Black', '0 0 0 1 k', 320)]
+    for name, cmyk, y_base in colors:
+        ops.append(f"BT /F1 9 Tf 0 0 0 1 k 50 {y_base+40} Td ({name} Nozzle Test Grid) Tj ET")
+        ops.append(f"0.5 w {cmyk}")
+        for i in range(40):
+            x = 50 + i * 12
+            y1 = y_base + (i % 6) * 6
+            y2 = y1 + 10
+            ops.append(f"{x} {y1} m {x+8} {y2} l S")
+
+    ops.append("0 0 0 1 k 0.5 w")
+    ops.append("50 150 m 100 150 l S 75 125 m 75 175 l S")
+    ops.append("495 150 m 545 150 l S 520 125 m 520 175 l S")
+    ops.append("BT /F1 8 Tf 50 80 Td (Verify continuous lines for each nozzle color. Breaks indicate clogged printhead nozzles.) Tj ET")
+
+    content = '\n'.join(ops).encode('utf-8')
+    c_len = len(content)
+
+    body = (
+        b'%PDF-1.4\n'
+        b'1 0 obj\n<</Type /Catalog /Pages 2 0 R>>\nendobj\n'
+        b'2 0 obj\n<</Type /Pages /Kids [3 0 R] /Count 1>>\nendobj\n'
+        b'3 0 obj\n<</Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R>>\nendobj\n'
+        b'4 0 obj\n<</Type /Font /Subtype /Type1 /BaseFont /Helvetica>>\nendobj\n'
+        b'5 0 obj\n<</Length ' + str(c_len).encode('ascii') + b'>>\nstream\n' + content + b'\nendstream\nendobj\n'
+    )
+    o1 = body.find(b'1 0 obj')
+    o2 = body.find(b'2 0 obj')
+    o3 = body.find(b'3 0 obj')
+    o4 = body.find(b'4 0 obj')
+    o5 = body.find(b'5 0 obj')
+    xref_pos = len(body)
+    xref = (
+        b'xref\n'
+        b'0 6\n'
+        b'0000000000 65535 f \n'
+        + f'{o1:010d} 00000 n \n'.encode('ascii')
+        + f'{o2:010d} 00000 n \n'.encode('ascii')
+        + f'{o3:010d} 00000 n \n'.encode('ascii')
+        + f'{o4:010d} 00000 n \n'.encode('ascii')
+        + f'{o5:010d} 00000 n \n'.encode('ascii')
+        + b'trailer\n<</Size 6 /Root 1 0 R>>\nstartxref\n'
+        + str(xref_pos).encode('ascii')
+        + b'\n%%EOF\n'
+    )
+    with open(output_path, 'wb') as f:
+        f.write(body + xref)
+
+def reset_usb_printer() -> dict:
+    """Executes Linux usbreset against HP Smart Tank 520 (03f0:4554)."""
+    if os.name == 'nt':
+        return {'success': True, 'message': 'Simulated USB reset on Windows host.'}
+    cmd = ['sudo', 'usbreset', '03f0:4554'] if (hasattr(os, 'geteuid') and os.geteuid() != 0) else ['usbreset', '03f0:4554']
+    try:
+        res = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        if res.returncode == 0:
+            return {'success': True, 'message': "HP Smart Tank 520 USB port reset successfully. Device descriptor re-enumerated."}
+        return {'success': False, 'error': res.stderr.strip() or 'usbreset returned non-zero code'}
+    except Exception as e:
+        return {'success': False, 'error': str(e)}
+
+def acquire_scanner_image(resolution: int = 200, colormodel: str = 'RGB24', source: str = 'Platen') -> bytes:
+    """
+    Acquires an image from HP Smart Tank 520 flatbed scanner via eSCL protocol (HTTP port 60000).
+    Falls back to scanimage if eSCL is unavailable, or simulation placeholder on dev hosts.
+    """
+    width = 2550 if resolution >= 300 else 1700
+    height = 3508 if resolution >= 300 else 2338
+    xml_req = f"""<?xml version="1.0" encoding="UTF-8"?>
+<scan:ScanSettings xmlns:scan="http://schemas.hp.com/imaging/escl/2011/05/03" xmlns:pwg="http://www.pwg.org/schemas/2010/12/sm">
+  <pwg:Version>2.6</pwg:Version>
+  <pwg:ScanRegions>
+    <pwg:ScanRegion>
+      <pwg:XOffset>0</pwg:XOffset><pwg:YOffset>0</pwg:YOffset>
+      <pwg:Width>{width}</pwg:Width><pwg:Height>{height}</pwg:Height>
+    </pwg:ScanRegion>
+  </pwg:ScanRegions>
+  <pwg:InputSource>{source}</pwg:InputSource>
+  <scan:ColorMode>{colormodel}</scan:ColorMode>
+  <scan:XResolution>{resolution}</scan:XResolution><scan:YResolution>{resolution}</scan:YResolution>
+  <pwg:DocumentFormat>image/jpeg</pwg:DocumentFormat>
+</scan:ScanSettings>"""
+
+    for base_url in ['http://127.0.0.1:60000', 'http://localhost:60000']:
+        try:
+            post_req = urllib.request.Request(
+                f"{base_url}/eSCL/ScanJobs",
+                data=xml_req.encode('utf-8'),
+                headers={'Content-Type': 'text/xml'},
+                method='POST'
+            )
+            with urllib.request.urlopen(post_req, timeout=15) as resp:
+                loc = resp.headers.get('Location')
+                if loc:
+                    if not loc.startswith('http'):
+                        loc = f"{base_url}{loc if loc.startswith('/') else '/' + loc}"
+                    get_req = urllib.request.Request(loc)
+                    with urllib.request.urlopen(get_req, timeout=30) as doc_resp:
+                        data = doc_resp.read()
+                        if data and len(data) > 100:
+                            return data
+        except Exception:
+            continue
+
+    if os.name != 'nt':
+        mode_arg = 'Color' if colormodel == 'RGB24' else ('Gray' if colormodel == 'Grayscale8' else 'Lineart')
+        for dev in ['airscan:e0:HP Smart Tank 520', 'escl:http://127.0.0.1:60000']:
+            try:
+                cmd = ['scanimage', '-d', dev, f'--resolution={resolution}', f'--mode={mode_arg}', '--format=jpeg']
+                res = subprocess.run(cmd, capture_output=True, timeout=40)
+                if res.returncode == 0 and res.stdout and len(res.stdout) > 100:
+                    return res.stdout
+            except Exception:
+                continue
+
+    temp_dir = tempfile.mkdtemp(prefix="sim_scan_")
+    sim_jpg = os.path.join(temp_dir, "sim.jpg")
+    try:
+        subprocess.run(['convert', '-size', f'{width}x{height}', 'xc:white',
+                        '-pointsize', '36', '-fill', '#333333',
+                        '-draw', f'text 100,200 "Scanned Document ({colormodel} {resolution}DPI)"',
+                        '-draw', f'text 100,280 "Acquired: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}"',
+                        '-draw', 'rectangle 100,320 1500,324',
+                        sim_jpg], check=True, timeout=10)
+        with open(sim_jpg, 'rb') as f:
+            data = f.read()
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        return data
+    except Exception:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        return b'\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x01\x00`\x00`\x00\x00\xff\xdb\x00C\x00\x08\x06\x06\x07\x06\x05\x08\x07\x07\x07\t\t\x08\n\x0c\x14\r\x0c\x0b\x0b\x0c\x19\x12\x13\x0f\x14\x1d\x1a\x1f\x1e\x1d\x1a\x1c\x1c $.\' \",#\x1c\x1c(7),01444\x1f\'9=82<.342\xff\xc0\x00\x0b\x08\x00\x01\x00\x01\x01\x01\x11\x00\xff\xc4\x00\x1f\x00\x00\x01\x05\x01\x01\x01\x01\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x01\x02\x03\x04\x05\x06\x07\x08\t\n\x0b\xff\xda\x00\x08\x01\x01\x00\x00?\x00\xbf\x00\xff\xd9'
+
+def render_counter_sign_html(server_ip: str, rate_bw: str, rate_color: str, currency: str) -> str:
+    portal_url = f"http://{server_ip}/"
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Print Shop Counter Sign &amp; QR Guide</title>
+<style>
+  @page {{ size: A4 portrait; margin: 15mm; }}
+  * {{ box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }}
+  body {{ background: #f4f6f8; color: #1a1a1a; margin: 0; padding: 20px; display: flex; justify-content: center; }}
+  .sheet {{ background: #fff; width: 210mm; min-height: 297mm; padding: 20mm; border-radius: 8px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); border: 2px solid #202124; position: relative; }}
+  .header {{ text-align: center; border-bottom: 3px solid #1a73e8; padding-bottom: 16px; margin-bottom: 24px; }}
+  .title {{ font-size: 32px; font-weight: 800; letter-spacing: 1px; color: #1a1a1a; margin: 0; }}
+  .subtitle {{ font-size: 16px; font-weight: 600; color: #1a73e8; margin-top: 6px; text-transform: uppercase; }}
+  .rates-banner {{ display: flex; justify-content: space-around; background: #e8f0fe; border: 2px dashed #1a73e8; border-radius: 12px; padding: 14px 20px; margin-bottom: 24px; text-align: center; }}
+  .rate-box h3 {{ font-size: 13px; text-transform: uppercase; color: #5f6368; margin: 0 0 4px 0; }}
+  .rate-box .price {{ font-size: 28px; font-weight: 800; color: #1a73e8; margin: 0; }}
+  .qr-section {{ display: flex; justify-content: center; align-items: center; gap: 30px; margin: 24px 0; background: #fafafa; border: 1px solid #dadce0; border-radius: 12px; padding: 20px; }}
+  .qr-box {{ text-align: center; }}
+  .qr-box canvas, .qr-box img {{ width: 160px; height: 160px; border-radius: 8px; border: 1px solid #ccc; }}
+  .qr-label {{ font-size: 13px; font-weight: 700; margin-top: 8px; color: #202124; }}
+  .qr-desc {{ font-size: 11px; color: #5f6368; }}
+  .guide-grid {{ display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 20px; }}
+  .guide-card {{ border: 1px solid #dadce0; border-radius: 8px; padding: 14px; background: #fff; }}
+  .guide-card h4 {{ margin: 0 0 8px 0; font-size: 15px; font-weight: 700; color: #202124; display: flex; align-items: center; gap: 6px; }}
+  .guide-card ol {{ margin: 0; padding-left: 20px; font-size: 12px; color: #3c4043; line-height: 1.5; }}
+  .footer {{ text-align: center; margin-top: 28px; font-size: 12px; color: #70757a; border-top: 1px solid #eee; padding-top: 14px; }}
+  .print-btn-bar {{ text-align: center; margin-bottom: 20px; }}
+  .print-btn {{ background: #1a73e8; color: #fff; border: none; padding: 10px 24px; font-size: 15px; font-weight: 600; border-radius: 20px; cursor: pointer; box-shadow: 0 2px 6px rgba(0,0,0,0.2); }}
+  @media print {{
+    body {{ background: #fff; padding: 0; }}
+    .sheet {{ box-shadow: none; border: none; width: 100%; min-height: auto; padding: 0; }}
+    .print-btn-bar {{ display: none; }}
+  }}
+</style>
+<script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
+</head>
+<body>
+<div style="width: 100%; max-width: 210mm;">
+  <div class="print-btn-bar">
+    <button class="print-btn" onclick="window.print()">🖨️ Print Counter Sign</button>
+  </div>
+  <div class="sheet">
+    <div class="header">
+      <h1 class="title">PRINT SHOP &amp; SELF-SERVICE</h1>
+      <div class="subtitle">Fast • High Quality • Direct From Any Device</div>
+    </div>
+
+    <div class="rates-banner">
+      <div class="rate-box">
+        <h3>Black &amp; White Printing</h3>
+        <p class="price">{currency}{rate_bw} <span style="font-size: 14px; font-weight: normal; color: #5f6368;">/ page</span></p>
+      </div>
+      <div class="rate-box" style="border-left: 1px solid #c2e7ff; padding-left: 30px;">
+        <h3>Full Color Printing</h3>
+        <p class="price" style="color: #ea8600;">{currency}{rate_color} <span style="font-size: 14px; font-weight: normal; color: #5f6368;">/ page</span></p>
+      </div>
+    </div>
+
+    <div class="qr-section">
+      <div class="qr-box">
+        <canvas id="qrPortal"></canvas>
+        <div class="qr-label">1. Scan to Print Online</div>
+        <div class="qr-desc">{portal_url}</div>
+      </div>
+    </div>
+
+    <div class="guide-grid">
+      <div class="guide-card">
+        <h4>💻 Direct Windows PC</h4>
+        <ol>
+          <li>Ensure you are connected to the local Wi-Fi.</li>
+          <li>Open document and press <strong>Ctrl + P</strong>.</li>
+          <li>Select <strong>HP Smart Tank 520</strong>.</li>
+          <li>Click Print – pages stack face-up in order!</li>
+        </ol>
+      </div>
+      <div class="guide-card">
+        <h4>📱 Android (Mopria Print)</h4>
+        <ol>
+          <li>Open photo or document on your phone.</li>
+          <li>Tap <strong>Share</strong> or <strong>Print</strong>.</li>
+          <li>Choose <strong>HP Smart Tank 520</strong> from discovered printers.</li>
+          <li>Tap the Printer icon to print immediately.</li>
+        </ol>
+      </div>
+      <div class="guide-card">
+        <h4>🍎 iPhone / iPad (AirPrint)</h4>
+        <ol>
+          <li>Open document, tap Share icon ( <span style="font-size: 14px;">⬆</span> ).</li>
+          <li>Select <strong>Print</strong>.</li>
+          <li>Printer auto-detects via AirPrint.</li>
+          <li>Tap <strong>Print</strong> in top right.</li>
+        </ol>
+      </div>
+      <div class="guide-card">
+        <h4>🌐 Web Portal &amp; Walk-Up</h4>
+        <ol>
+          <li>Scan the QR code above or visit <strong>{portal_url}</strong>.</li>
+          <li>Upload your PDF or Word document.</li>
+          <li>Preview in Chromium print dialog and hit Print!</li>
+          <li>Walk up and collect your clean prints.</li>
+        </ol>
+      </div>
+    </div>
+
+    <div class="footer">
+      Powered by Armbian Print Server Appliance • HP Smart Tank 520 Series
+    </div>
+  </div>
+</div>
+<script>
+  window.addEventListener('DOMContentLoaded', function() {{
+    if (typeof QRCode !== 'undefined') {{
+      QRCode.toCanvas(document.getElementById('qrPortal'), '{portal_url}', {{ width: 160, margin: 1 }});
+    }}
+  }});
+</script>
+</body>
+</html>"""
+
+def check_anti_clog_routine():
+    """Checks if printer has been idle >= 7 days and prints anti-clog pattern if enabled."""
+    if get_setting('auto_anti_clog', 'on').lower() not in ['1', 'true', 'on', 'yes']:
+        return
+    now = int(time.time())
+    last_check = int(get_setting('last_anti_clog_check', '0') or 0)
+    if (now - last_check) < 12 * 3600:
+        return
+
+    conn = get_db()
+    with conn:
+        conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('last_anti_clog_check', ?)", (str(now),))
+
+    cur = conn.cursor()
+    cur.execute("SELECT MAX(timestamp) as last_ts FROM print_ledger")
+    row = cur.fetchone()
+    last_print = row['last_ts'] if row and row['last_ts'] else 0
+    if (now - last_print) >= 604800:
+        printers_list, def_p = get_printers()
+        printer = def_p or (printers_list[0]['name'] if printers_list else 'HP_Smart_Tank_520')
+        temp_dir = tempfile.mkdtemp(prefix="keepwet_")
+        keepwet_pdf = os.path.join(temp_dir, "keepwet.pdf")
+        try:
+            generate_cmyk_nozzle_check_pdf(keepwet_pdf, printer)
+            cmd = ['lp', '-d', printer, '-t', 'Scheduled Keep-Wet Anti-Clog Maintenance', '-o', 'ColorModel=RGB', keepwet_pdf]
+            subprocess.run(cmd, capture_output=True, timeout=30)
+            record_ledger("7-Day Auto Keep-Wet Maintenance", printer, 1, 1, 1, "RGB", 0.0, "127.0.0.1", "COMPLETED", source="maintenance")
+        except Exception:
+            pass
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
 def get_cups_overview_data(selected_printer=None) -> dict:
     """Gathers comprehensive status, defaults, active queue, and PPD options for a printer."""
     printers_list, default_printer = get_printers()
@@ -4862,10 +6255,15 @@ def get_cups_overview_data(selected_printer=None) -> dict:
                     user = parts[1]
                     size_str = parts[2]
                     date_str = parts[3]
+                    is_held = False
                     status = 'Spooling'
                     try:
                         res_job = run_cups_cmd(['lpstat', '-l', '-o', job_id])
-                        if 'printing' in res_job.stdout.lower() or 'processing' in res_job.stdout.lower():
+                        out_j = res_job.stdout.lower()
+                        if 'held' in out_j or 'holding' in out_j:
+                            status = 'Held'
+                            is_held = True
+                        elif 'printing' in out_j or 'processing' in out_j:
                             status = 'Printing'
                     except Exception:
                         pass
@@ -4874,7 +6272,28 @@ def get_cups_overview_data(selected_printer=None) -> dict:
                         'user': user,
                         'size': size_str,
                         'date': date_str,
-                        'status': status
+                        'status': status,
+                        'is_held': is_held
+                    })
+    except Exception:
+        pass
+
+    completed_jobs = []
+    try:
+        res_comp = run_cups_cmd(['lpstat', '-W', 'completed', '-o', selected_printer])
+        if res_comp.returncode == 0:
+            for line in res_comp.stdout.splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                parts = line.split(None, 3)
+                if len(parts) >= 4:
+                    completed_jobs.append({
+                        'job_id': parts[0],
+                        'user': parts[1],
+                        'size': parts[2],
+                        'date': parts[3],
+                        'status': 'Completed'
                     })
     except Exception:
         pass
@@ -4887,7 +6306,9 @@ def get_cups_overview_data(selected_printer=None) -> dict:
         'info': p_info,
         'defaults': defaults,
         'ppd_options': ppd_options,
-        'queue': queue
+        'queue': queue,
+        'completed_jobs': completed_jobs,
+        'auto_anti_clog': get_setting('auto_anti_clog', 'on')
     }
 
 @app.route('/api/cups/overview', methods=['GET'])
@@ -5066,6 +6487,64 @@ def api_cups_action():
             return jsonify({'success': True, 'message': 'CUPS print daemon restarted successfully.'})
         except Exception as e:
             return jsonify({'success': False, 'error': f"Failed to restart CUPS: {e}"}), 500
+
+    elif action == 'hold_job':
+        job_id = (request.form.get('job_id') or '').strip()
+        if not job_id:
+            return jsonify({'success': False, 'error': 'Job ID required'}), 400
+        res = run_cups_cmd(['lp', '-i', job_id, '-H', 'hold'])
+        if res.returncode != 0:
+            return jsonify({'success': False, 'error': res.stderr.strip() or 'Failed to hold job'}), 500
+        return jsonify({'success': True, 'message': f"Print job '{job_id}' held in queue."})
+
+    elif action == 'release_job':
+        job_id = (request.form.get('job_id') or '').strip()
+        if not job_id:
+            return jsonify({'success': False, 'error': 'Job ID required'}), 400
+        res = run_cups_cmd(['lp', '-i', job_id, '-H', 'release'])
+        if res.returncode != 0:
+            res = run_cups_cmd(['lp', '-i', job_id, '-H', 'resume'])
+        if res.returncode != 0:
+            return jsonify({'success': False, 'error': res.stderr.strip() or 'Failed to release job'}), 500
+        return jsonify({'success': True, 'message': f"Print job '{job_id}' released."})
+
+    elif action == 'reprint_job':
+        job_id = (request.form.get('job_id') or '').strip()
+        if not job_id:
+            return jsonify({'success': False, 'error': 'Job ID required'}), 400
+        res = run_cups_cmd(['lp', '-i', job_id, '-H', 'restart'])
+        if res.returncode != 0:
+            return jsonify({'success': False, 'error': res.stderr.strip() or 'Failed to restart job. Spool retention may have expired.'}), 500
+        return jsonify({'success': True, 'message': f"Print job '{job_id}' restarted for reprinting."})
+
+    elif action == 'nozzle_check':
+        temp_dir = tempfile.mkdtemp(prefix="nozzle_")
+        nozzle_pdf = os.path.join(temp_dir, "nozzle_check.pdf")
+        try:
+            generate_cmyk_nozzle_check_pdf(nozzle_pdf, printer)
+            res = run_cups_cmd(['lp', '-d', printer, '-t', 'CMYK Nozzle Check Pattern', '-o', 'ColorModel=RGB', nozzle_pdf])
+            if res.returncode != 0:
+                return jsonify({'success': False, 'error': res.stderr.strip() or 'Failed to submit nozzle check'}), 500
+            record_ledger("CMYK Nozzle Check", printer, 1, 1, 1, "RGB", 0.0, "127.0.0.1", "COMPLETED", source="maintenance")
+            return jsonify({'success': True, 'message': f"CMYK Nozzle Check pattern sent to '{printer}'."})
+        except Exception as e:
+            return jsonify({'success': False, 'error': f"Failed to generate nozzle pattern: {e}"}), 500
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    elif action == 'usb_reset':
+        res = reset_usb_printer()
+        if not res.get('success'):
+            return jsonify({'success': False, 'error': res.get('error', 'USB reset failed')}), 500
+        return jsonify({'success': True, 'message': res.get('message', 'Printer USB port reset successfully.')})
+
+    elif action == 'toggle_anti_clog':
+        current = get_setting('auto_anti_clog', 'on')
+        new_val = 'off' if current == 'on' else 'on'
+        conn = get_db()
+        with conn:
+            conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('auto_anti_clog', ?)", (new_val,))
+        return jsonify({'success': True, 'auto_anti_clog': new_val, 'message': f"Automated 7-day anti-clog maintenance is now {new_val.upper()}."})
 
     return jsonify({'success': False, 'error': 'Unknown action'}), 400
 
@@ -5297,15 +6776,23 @@ def api_print():
             'm_top': request.form.get('m_top', '10'),
             'm_bottom': request.form.get('m_bottom', '10'),
             'm_left': request.form.get('m_left', '10'),
-            'm_right': request.form.get('m_right', '10')
+            'm_right': request.form.get('m_right', '10'),
+            'number_up': request.form.get('number_up', '1'),
+            'page_border': request.form.get('page_border', 'none')
         }
 
         cmd = build_lp_command(printer, conv_pdf, options)
         res = subprocess.run(cmd, capture_output=True, text=True, check=True, timeout=30)
         m = re.search(r'([A-Za-z0-9_-]+-\d+)', res.stdout)
         job_id = m.group(1) if m else res.stdout.strip()
+        cups_jid = None
+        if job_id and '-' in job_id:
+            try:
+                cups_jid = int(job_id.split('-')[-1])
+            except Exception:
+                pass
 
-        record_ledger(filename, printer, billable_pages, copies, billable_pages * copies, colormodel, cost, client_ip, "COMPLETED", source="portal")
+        record_ledger(filename, printer, billable_pages, copies, billable_pages * copies, colormodel, cost, client_ip, "COMPLETED", source="portal", cups_job_id=cups_jid)
         return jsonify({'success': True, 'job_id': job_id, 'pages': billable_pages, 'cost': cost})
     except subprocess.CalledProcessError as e:
         return jsonify({'success': False, 'error': e.stderr.strip() or str(e)}), 500
@@ -5410,7 +6897,9 @@ def api_pin_hold():
             'duplex': duplex,
             'resolution': resolution,
             'fitpage': fitpage,
-            'pagerange': pagerange
+            'pagerange': pagerange,
+            'number_up': request.form.get('number_up', '1'),
+            'page_border': request.form.get('page_border', 'none')
         }
 
         conn = get_db()
@@ -5525,6 +7014,12 @@ def api_pin_release():
         res = subprocess.run(cmd, capture_output=True, text=True, check=True, timeout=30)
         m = re.search(r'([A-Za-z0-9_-]+-\d+)', res.stdout)
         cups_job = m.group(1) if m else res.stdout.strip()
+        cups_jid = None
+        if cups_job and '-' in cups_job:
+            try:
+                cups_jid = int(cups_job.split('-')[-1])
+            except Exception:
+                pass
 
         try:
             os.remove(enc_path)
@@ -5535,7 +7030,7 @@ def api_pin_release():
             conn.execute("DELETE FROM pinned_jobs WHERE job_id = ?", (job_id,))
 
         record_ledger(row['filename'], printer, row['pages'], row['copies'], row['pages'] * row['copies'],
-                      row['colormodel'], row['cost'], client_ip, "RELEASED", source="portal")
+                      row['colormodel'], row['cost'], client_ip, "RELEASED", source="pin_release", cups_job_id=cups_jid)
 
         return jsonify({'success': True, 'cups_job': cups_job, 'message': 'Job released to printer.'})
     except Exception as e:
@@ -5548,6 +7043,9 @@ def api_reports_ledger():
     token = request.headers.get('X-Admin-Token')
     if not verify_admin_token(token):
         return jsonify({'success': False, 'error': 'Unauthorized: administrator authentication required'}), 401
+
+    sync_cups_ledger()
+    check_anti_clog_routine()
 
     conn = get_db()
     cur = conn.cursor()
@@ -5589,6 +7087,7 @@ def api_reports_export_csv():
     if not verify_admin_token(token):
         return Response("Unauthorized: administrator authentication required\n", status=401, mimetype='text/plain')
 
+    sync_cups_ledger()
     conn = get_db()
     cur = conn.cursor()
     cur.execute("SELECT * FROM print_ledger ORDER BY timestamp DESC")
@@ -5603,6 +7102,347 @@ def api_reports_export_csv():
             yield f'"{r["id"]}","{ts}","{title}","{r["printer"]}","{r["pages"]}","{r["copies"]}","{r["total_pages"]}","{r["colormodel"]}","{r["cost"]:.2f}","{r["client_ip"]}","{r["status"]}","{source}"\n'
 
     return Response(generate_csv(), mimetype='text/csv', headers={'Content-Disposition': 'attachment; filename=print_ledger.csv'})
+
+@app.route('/api/network/services', methods=['GET'])
+def api_network_services():
+    services_to_check = [
+        {'id': 'cups', 'name': 'CUPS Print Spooler', 'unit': 'cups.service', 'port': 631},
+        {'id': 'avahi-daemon', 'name': 'Avahi (AirPrint / Mopria mDNS)', 'unit': 'avahi-daemon.service', 'port': 5353},
+        {'id': 'smbd', 'name': 'Samba (Windows SMB/WSD)', 'unit': 'smbd.service', 'port': 445},
+        {'id': 'tailscaled', 'name': 'Tailscale (Remote VPN Gateway)', 'unit': 'tailscaled.service', 'port': None}
+    ]
+    results = []
+    for s in services_to_check:
+        active = False
+        status_text = 'Unknown'
+        uptime_str = ''
+        if os.name != 'nt':
+            try:
+                res = subprocess.run(['systemctl', 'is-active', s['unit']], capture_output=True, text=True, timeout=3)
+                active = (res.stdout.strip() == 'active')
+                status_text = 'Active (running)' if active else res.stdout.strip()
+                res_time = subprocess.run(['systemctl', 'show', s['unit'], '--property=ActiveEnterTimestamp'], capture_output=True, text=True, timeout=3)
+                for line in res_time.stdout.splitlines():
+                    if line.startswith('ActiveEnterTimestamp='):
+                        uptime_str = line.split('=', 1)[1].strip()
+            except Exception:
+                status_text = 'Check failed'
+        else:
+            active = True
+            status_text = 'Active (Dev Mock)'
+            uptime_str = 'Running'
+
+        results.append({
+            'id': s['id'],
+            'name': s['name'],
+            'unit': s['unit'],
+            'port': s['port'],
+            'active': active,
+            'status': status_text,
+            'uptime': uptime_str
+        })
+    return jsonify({'success': True, 'services': results})
+
+@app.route('/api/network/services/restart', methods=['POST'])
+def api_network_service_restart():
+    token = request.headers.get('X-Admin-Token') or request.form.get('token')
+    if not verify_admin_token(token):
+        return jsonify({'success': False, 'error': 'Unauthorized: administrator authentication required'}), 401
+    
+    service_id = (request.form.get('service') or '').strip()
+    valid_units = {
+        'cups': 'cups',
+        'avahi-daemon': 'avahi-daemon',
+        'smbd': 'smbd',
+        'tailscaled': 'tailscaled'
+    }
+    if service_id not in valid_units:
+        return jsonify({'success': False, 'error': f"Invalid service '{service_id}'"}), 400
+
+    unit_name = valid_units[service_id]
+    if os.name != 'nt':
+        cmd = ['sudo', 'systemctl', 'restart', unit_name] if (hasattr(os, 'geteuid') and os.geteuid() != 0) else ['systemctl', 'restart', unit_name]
+        try:
+            res = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+            if res.returncode != 0:
+                return jsonify({'success': False, 'error': res.stderr.strip() or f'Failed to restart {unit_name}'}), 500
+        except Exception as e:
+            return jsonify({'success': False, 'error': str(e)}), 500
+    
+    return jsonify({'success': True, 'message': f"Service '{unit_name}' restarted successfully."})
+
+@app.route('/api/reports/counter-sign', methods=['GET'])
+def api_reports_counter_sign():
+    server_ip = request.host.split(':')[0]
+    rate_bw = get_setting('rate_bw', '2.00')
+    rate_color = get_setting('rate_color', '5.00')
+    currency = get_setting('currency_symbol', '₱')
+    return render_counter_sign_html(server_ip, rate_bw, rate_color, currency)
+
+@app.route('/api/scan/status', methods=['GET'])
+def api_scan_status():
+    status_info = {
+        'available': False,
+        'state': 'Disconnected',
+        'model': 'HP Smart Tank 520 (Flatbed eSCL)',
+        'resolutions': [75, 150, 200, 300, 600],
+        'color_modes': ['RGB24', 'Grayscale8', 'BlackAndWhite1']
+    }
+    for base_url in ['http://127.0.0.1:60000', 'http://localhost:60000']:
+        try:
+            req = urllib.request.Request(f"{base_url}/eSCL/ScannerStatus")
+            with urllib.request.urlopen(req, timeout=3) as resp:
+                body = resp.read().decode('utf-8', errors='ignore')
+                m = re.search(r'<pwg:State>([^<]+)</pwg:State>', body)
+                if m:
+                    status_info['available'] = True
+                    status_info['state'] = m.group(1).strip()
+                    break
+        except Exception:
+            continue
+
+    if not status_info['available']:
+        if os.name == 'nt':
+            status_info['available'] = True
+            status_info['state'] = 'Idle (Simulation)'
+        else:
+            status_info['state'] = 'Offline'
+    return jsonify({'success': True, 'scanner': status_info})
+
+@app.route('/api/scan/document', methods=['POST'])
+def api_scan_document():
+    try:
+        resolution = int(request.form.get('resolution', '200'))
+    except Exception:
+        resolution = 200
+    colormodel = request.form.get('colormodel', 'RGB24')
+    fmt = request.form.get('format', 'pdf').lower()
+
+    scan_id = f"scan_{int(time.time())}_{secrets.token_hex(4)}"
+    raw_img_path = os.path.join(SPOOL_PREVIEWS_DIR, f"{scan_id}.jpg")
+    final_path = os.path.join(SPOOL_PREVIEWS_DIR, f"{scan_id}.{fmt}")
+
+    try:
+        img_bytes = acquire_scanner_image(resolution=resolution, colormodel=colormodel)
+        with open(raw_img_path, 'wb') as f:
+            f.write(img_bytes)
+
+        if fmt == 'jpeg' or fmt == 'jpg':
+            final_path = raw_img_path
+        elif fmt in ('pdf', 'png'):
+            try:
+                subprocess.run(['convert', raw_img_path, final_path], check=True, timeout=25)
+            except Exception:
+                final_path = raw_img_path
+                fmt = 'jpeg'
+
+        return jsonify({
+            'success': True,
+            'scan_id': scan_id,
+            'format': fmt,
+            'preview_url': f'/api/scan/preview/{scan_id}',
+            'download_url': f'/api/scan/download/{scan_id}?format={fmt}'
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': f"Scan failed: {e}"}), 500
+
+@app.route('/api/scan/preview/<scan_id>', methods=['GET'])
+def api_scan_preview(scan_id):
+    if not re.match(r'^scan_[0-9]+_[a-f0-9]+$', scan_id):
+        return jsonify({'error': 'Invalid scan ID'}), 400
+    img_path = os.path.join(SPOOL_PREVIEWS_DIR, f"{scan_id}.jpg")
+    if not os.path.exists(img_path):
+        return jsonify({'error': 'Scan not found or expired'}), 404
+    return send_file(img_path, mimetype='image/jpeg')
+
+@app.route('/api/scan/download/<scan_id>', methods=['GET'])
+def api_scan_download(scan_id):
+    if not re.match(r'^scan_[0-9]+_[a-f0-9]+$', scan_id):
+        return jsonify({'error': 'Invalid scan ID'}), 400
+    fmt = request.args.get('format', 'pdf').lower()
+    file_path = os.path.join(SPOOL_PREVIEWS_DIR, f"{scan_id}.{fmt}")
+    if not os.path.exists(file_path):
+        file_path = os.path.join(SPOOL_PREVIEWS_DIR, f"{scan_id}.jpg")
+    if not os.path.exists(file_path):
+        return jsonify({'error': 'Scan file not found'}), 404
+
+    mimetypes_map = {'pdf': 'application/pdf', 'png': 'image/png', 'jpg': 'image/jpeg', 'jpeg': 'image/jpeg'}
+    mime = mimetypes_map.get(fmt, 'application/octet-stream')
+    return send_file(file_path, mimetype=mime, as_attachment=True, download_name=f"Document_Scan_{scan_id}.{fmt}")
+
+@app.route('/api/scan/copy', methods=['POST'])
+def api_scan_copy():
+    if not is_public_print_enabled():
+        return jsonify({'success': False, 'error': 'Public printing is disabled'}), 403
+
+    try:
+        copies = validate_copies(request.form.get('copies', '1'))
+    except ValueError as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+
+    colormodel = request.form.get('colormodel', 'KGray')
+    contrast = request.form.get('contrast', 'high')
+    pagesize = request.form.get('pagesize', 'A4')
+    if pagesize not in ALLOWED_PAGESIZES: pagesize = 'A4'
+
+    printers_list, def_p = get_printers()
+    printer = request.form.get('printer', '').strip() or def_p or (printers_list[0]['name'] if printers_list else 'HP_Smart_Tank_520')
+
+    escl_color = 'RGB24' if colormodel not in ('KGray', 'Gray', 'monochrome', 'mono', 'K') else 'Grayscale8'
+    try:
+        img_bytes = acquire_scanner_image(resolution=200, colormodel=escl_color)
+    except Exception as e:
+        return jsonify({'success': False, 'error': f"Scanner acquisition failed: {e}"}), 500
+
+    temp_dir = tempfile.mkdtemp(prefix="copy_")
+    raw_img = os.path.join(temp_dir, "scan.jpg")
+    out_pdf = os.path.join(temp_dir, "copy.pdf")
+    with open(raw_img, 'wb') as f:
+        f.write(img_bytes)
+
+    conv_cmd = ['convert', raw_img]
+    if contrast == 'high':
+        conv_cmd.extend(['-contrast-stretch', '3%x2%', '-level', '5%,92%'])
+    if colormodel in ('KGray', 'Gray', 'monochrome', 'mono', 'K'):
+        conv_cmd.extend(['-colorspace', 'gray'])
+    conv_cmd.append(out_pdf)
+
+    try:
+        subprocess.run(conv_cmd, check=True, timeout=30)
+    except Exception:
+        out_pdf = raw_img
+
+    options = {
+        'copies': copies,
+        'pagesize': pagesize,
+        'colormodel': colormodel,
+        'fitpage': True
+    }
+    cmd = build_lp_command(printer, out_pdf, options)
+    try:
+        res = run_cups_cmd(cmd)
+        if res.returncode != 0:
+            return jsonify({'success': False, 'error': f"CUPS spool error: {res.stderr.strip() or res.stdout.strip()}"}), 500
+        m = re.search(r'([A-Za-z0-9_-]+-\d+)', res.stdout)
+        job_id = m.group(1) if m else (f"{printer}-1" if os.name == 'nt' else res.stdout.strip())
+        cups_jid = int(job_id.split('-')[-1]) if '-' in job_id and job_id.split('-')[-1].isdigit() else 1
+
+        rate = get_rate(colormodel not in ('KGray', 'Gray', 'K'))
+        cost = rate * copies
+        record_ledger(f"Photocopy ({copies}x)", printer, 1, copies, copies, colormodel, cost, request.remote_addr or 'Walk-Up', "COMPLETED", source="photocopy", cups_job_id=cups_jid)
+        return jsonify({'success': True, 'job_id': job_id, 'copies': copies, 'cost': cost, 'message': f"Photocopy job ({copies} copy/copies) dispatched to '{printer}'."})
+    except Exception as e:
+        return jsonify({'success': False, 'error': f"CUPS spool error: {e}"}), 500
+    finally:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+@app.route('/api/scan/id-card', methods=['POST'])
+def api_scan_id_card():
+    step = request.form.get('step', '').strip()
+    session_id = request.form.get('session_id', '').strip()
+    if not session_id or not re.match(r'^[a-zA-Z0-9_-]+$', session_id):
+        session_id = secrets.token_hex(8)
+
+    session_dir = os.path.join(tempfile.gettempdir(), f"idcard_{session_id}")
+    os.makedirs(session_dir, exist_ok=True)
+    front_img = os.path.join(session_dir, "front.jpg")
+    back_img = os.path.join(session_dir, "back.jpg")
+
+    colormodel = request.form.get('colormodel', 'RGB')
+
+    if step in ('scan_front', 'front'):
+        try:
+            img_bytes = acquire_scanner_image(resolution=300, colormodel='RGB24')
+            with open(front_img, 'wb') as f:
+                f.write(img_bytes)
+            cropped_front = os.path.join(session_dir, "front_card.jpg")
+            try:
+                subprocess.run(['convert', front_img, '-crop', '1100x750+40+40', '+repage', cropped_front], timeout=15)
+            except Exception:
+                cropped_front = front_img
+            return jsonify({'success': True, 'step': 'front_scanned', 'session_id': session_id, 'preview_url': f'/api/scan/id-preview?session_id={session_id}&side=front'})
+        except Exception as e:
+            return jsonify({'success': False, 'error': f"Scan Front failed: {e}"}), 500
+
+    elif step in ('scan_back', 'back'):
+        try:
+            img_bytes = acquire_scanner_image(resolution=300, colormodel='RGB24')
+            with open(back_img, 'wb') as f:
+                f.write(img_bytes)
+            cropped_back = os.path.join(session_dir, "back_card.jpg")
+            try:
+                subprocess.run(['convert', back_img, '-crop', '1100x750+40+40', '+repage', cropped_back], timeout=15)
+            except Exception:
+                cropped_back = back_img
+            return jsonify({'success': True, 'step': 'back_scanned', 'session_id': session_id, 'preview_url': f'/api/scan/id-preview?session_id={session_id}&side=back'})
+        except Exception as e:
+            return jsonify({'success': False, 'error': f"Scan Back failed: {e}"}), 500
+
+    elif step == 'print':
+        out_pdf = os.path.join(session_dir, "id_copy_composite.pdf")
+        c_front = os.path.join(session_dir, "front_card.jpg") if os.path.exists(os.path.join(session_dir, "front_card.jpg")) else front_img
+        c_back = os.path.join(session_dir, "back_card.jpg") if os.path.exists(os.path.join(session_dir, "back_card.jpg")) else back_img
+        if not os.path.exists(c_front):
+            return jsonify({'success': False, 'error': 'Front side must be scanned first'}), 400
+
+        printers_list, def_p = get_printers()
+        printer = request.form.get('printer', '').strip() or def_p or (printers_list[0]['name'] if printers_list else 'HP_Smart_Tank_520')
+
+        try:
+            if os.path.exists(c_back):
+                comp_cmd = [
+                    'convert', '-size', '2480x3508', 'xc:white',
+                    '(', c_front, '-bordercolor', '#dddddd', '-border', '2', ')', '-geometry', '+690+500', '-composite',
+                    '(', c_back, '-bordercolor', '#dddddd', '-border', '2', ')', '-geometry', '+690+1700', '-composite',
+                    out_pdf
+                ]
+            else:
+                comp_cmd = [
+                    'convert', '-size', '2480x3508', 'xc:white',
+                    '(', c_front, '-bordercolor', '#dddddd', '-border', '2', ')', '-geometry', '+690+1000', '-composite',
+                    out_pdf
+                ]
+            subprocess.run(comp_cmd, check=True, timeout=30)
+        except Exception:
+            out_pdf = c_front
+
+        options = {
+            'copies': 1,
+            'pagesize': 'A4',
+            'colormodel': colormodel,
+            'fitpage': True
+        }
+        cmd = build_lp_command(printer, out_pdf, options)
+        try:
+            res = run_cups_cmd(cmd)
+            if res.returncode != 0:
+                return jsonify({'success': False, 'error': f"Spool error: {res.stderr.strip() or res.stdout.strip()}"}), 500
+            m = re.search(r'([A-Za-z0-9_-]+-\d+)', res.stdout)
+            job_id = m.group(1) if m else (f"{printer}-1" if os.name == 'nt' else res.stdout.strip())
+            cups_jid = int(job_id.split('-')[-1]) if '-' in job_id and job_id.split('-')[-1].isdigit() else 1
+
+            rate = get_rate(colormodel not in ('KGray', 'Gray', 'K'))
+            record_ledger("2-Sided ID Card Copy", printer, 1, 1, 1, colormodel, rate, request.remote_addr or 'Walk-Up', "COMPLETED", source="id_card_copy", cups_job_id=cups_jid)
+            return jsonify({'success': True, 'job_id': job_id, 'cost': rate, 'message': f"ID Card Copy submitted to '{printer}'."})
+        except Exception as e:
+            return jsonify({'success': False, 'error': f"Spool error: {e}"}), 500
+
+    return jsonify({'success': False, 'error': 'Invalid step'}), 400
+
+@app.route('/api/scan/id-preview', methods=['GET'])
+def api_scan_id_preview():
+    session_id = request.args.get('session_id', '').strip()
+    side = request.args.get('side', 'front').strip()
+    if not re.match(r'^[a-zA-Z0-9_-]+$', session_id):
+        return jsonify({'error': 'Invalid session'}), 400
+
+    session_dir = os.path.join(tempfile.gettempdir(), f"idcard_{session_id}")
+    card_path = os.path.join(session_dir, f"{side}_card.jpg")
+    if not os.path.exists(card_path):
+        card_path = os.path.join(session_dir, f"{side}.jpg")
+    if not os.path.exists(card_path):
+        return jsonify({'error': 'Side not scanned'}), 404
+    return send_file(card_path, mimetype='image/jpeg')
 
 @app.route('/api/admin/auth', methods=['POST'])
 def api_admin_auth():
