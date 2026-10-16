@@ -50,10 +50,16 @@ apt-get install -y \
 
 echo -e "\n${CLR_YLW}[2/7] Creating unprivileged webprint system user & directories...${CLR_RST}"
 if ! id -u webprint &>/dev/null; then
-    useradd -r -s /usr/sbin/nologin -d /var/lib/webprint -M -G lp webprint
+    useradd -r -s /usr/sbin/nologin -d /var/lib/webprint -M -G lp,lpadmin webprint
 else
-    usermod -aG lp webprint
+    usermod -aG lp,lpadmin webprint
 fi
+
+# Allow webprint to restart cups and power manage without password
+cat > /etc/sudoers.d/webprint <<'SUDOEOF'
+webprint ALL=(ALL) NOPASSWD: /bin/systemctl restart cups, /usr/bin/systemctl restart cups, /sbin/reboot, /usr/sbin/reboot, /sbin/poweroff, /usr/sbin/poweroff
+SUDOEOF
+chmod 0440 /etc/sudoers.d/webprint
 
 mkdir -p /var/lib/webprint
 mkdir -p /var/spool/webprint/pinned
@@ -147,13 +153,18 @@ for loc in '/' '/printers'; do
     done
 # Configure face-up print queues to default to reverse order printing (Page 1 stacks on top)
 echo "Default HP_Smart_Tank_520 outputorder=reverse" > /etc/cups/lpoptions
-chmod 644 /etc/cups/lpoptions
+chgrp lpadmin /etc/cups/lpoptions 2>/dev/null || true
+chmod 664 /etc/cups/lpoptions
+chmod 775 /etc/cups/ppd 2>/dev/null || true
 if lpstat -p HP_Smart_Tank_520 &>/dev/null; then
     lpadmin -p HP_Smart_Tank_520 -o outputorder-default=reverse || true
 fi
 for ppd in /etc/cups/ppd/*.ppd; do
-    if [[ -f "$ppd" ]] && ! grep -q "DefaultOutputOrder" "$ppd"; then
-        echo -e "\n*DefaultOutputOrder: Reverse\n*PageStackOrder: Reverse" >> "$ppd"
+    if [[ -f "$ppd" ]]; then
+        chmod 664 "$ppd" 2>/dev/null || true
+        if ! grep -q "DefaultOutputOrder" "$ppd"; then
+            echo -e "\n*DefaultOutputOrder: Reverse\n*PageStackOrder: Reverse" >> "$ppd"
+        fi
     fi
 done
 

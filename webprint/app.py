@@ -584,7 +584,9 @@ def build_lp_command(printer: str, pdf_path: str, options: dict) -> list:
         except Exception:
             pass
 
-    outputorder = options.get('outputorder', 'reverse')
+    outputorder = options.get('outputorder')
+    if not outputorder:
+        outputorder = get_setting('cups_default_outputorder', 'reverse')
     if outputorder in ('reverse', 'normal'):
         cmd.extend(['-o', f'outputorder={outputorder}'])
 
@@ -658,6 +660,8 @@ INDEX_HTML = """<!DOCTYPE html>
                 });
                 if (tabName === 'idmaker') {
                     if (typeof initIdStudio === 'function') initIdStudio();
+                } else if (tabName === 'cups') {
+                    if (typeof loadCupsOverview === 'function') loadCupsOverview();
                 } else if (tabName === 'pin') {
                     if (typeof loadPinList === 'function') loadPinList();
                 } else if (tabName === 'history') {
@@ -1759,6 +1763,7 @@ INDEX_HTML = """<!DOCTYPE html>
     <nav class="header-nav">
         <button class="nav-btn active" data-tab="print" onclick="switchTab('print')">Print</button>
         <button class="nav-btn" data-tab="idmaker" onclick="switchTab('idmaker')">ID Photo Maker</button>
+        <button class="nav-btn" data-tab="cups" onclick="switchTab('cups')">CUPS Control</button>
         <button class="nav-btn" data-tab="pin" onclick="switchTab('pin')">PIN Release</button>
         <button class="nav-btn" data-tab="history" onclick="switchTab('history')">History</button>
         <button class="nav-btn" data-tab="settings" onclick="switchTab('settings')">Settings</button>
@@ -2224,6 +2229,292 @@ INDEX_HTML = """<!DOCTYPE html>
                 <div class="cr-bottom-bar">
                     <button type="button" class="cr-btn-pill cr-btn-cancel" id="btnIdDownloadBottom">Save PNG</button>
                     <button type="button" class="cr-btn-pill cr-btn-print" id="btnIdGeneratePrint">Print Sheet</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- TAB: CUPS HARDWARE COMMAND CENTER -->
+    <div class="tab-content" id="tab-cups">
+        <div class="cr-page-container">
+            <!-- Admin Lock Banner if locked -->
+            <div id="cupsAdminBanner" style="display: none; background: rgba(234, 134, 0, 0.12); border: 1px solid rgba(234, 134, 0, 0.35); border-radius: var(--radius-md); padding: 12px 16px; margin-bottom: 16px; align-items: center; justify-content: space-between; gap: 12px;">
+                <div style="display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--warning);">
+                    <svg class="icon" viewBox="0 0 24 24" style="stroke: var(--warning); flex-shrink: 0;"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+                    <span><strong>Read-Only Mode:</strong> Hardware settings and spooler actions require administrator authentication.</span>
+                </div>
+                <button type="button" class="cr-btn-pill cr-btn-print" style="padding: 4px 14px; font-size: 12px;" onclick="window.switchTab('settings')">Unlock Admin</button>
+            </div>
+
+            <!-- Top Header & Printer Selector -->
+            <div class="cr-card" style="margin-bottom: 16px;">
+                <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 14px;">
+                    <div>
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <h2 style="font-size: 18px; font-weight: 600; color: var(--text-primary); margin: 0;">CUPS Hardware Command Center</h2>
+                            <span class="badge" id="cupsStatusBadge" style="background: rgba(30, 142, 62, 0.2); color: var(--success); font-weight: 600; padding: 2px 8px; border-radius: 12px; font-size: 11px;">Ready</span>
+                        </div>
+                        <p style="font-size: 12px; color: var(--text-secondary); margin: 4px 0 0 0;">
+                            Configure hardware defaults for all devices (Direct Windows PCs, Android Mopria, iOS AirPrint & Web Portal).
+                        </p>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <select id="cupsPrinterSelect" class="cr-select" style="min-width: 200px; font-weight: 500;">
+                            <option value="">Loading printers...</option>
+                        </select>
+                        <button type="button" class="cr-btn-pill cr-btn-cancel" id="btnRefreshCups" title="Refresh CUPS Status" style="padding: 6px 12px;">
+                            <svg class="icon" viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg> Refresh
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Hardware info details grid -->
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border);">
+                    <div style="font-size: 12px;">
+                        <span style="color: var(--text-secondary); display: block; font-size: 10px; text-transform: uppercase;">Device URI</span>
+                        <code id="cupsInfoUri" style="color: var(--text-primary); font-size: 11px; word-break: break-all;">--</code>
+                    </div>
+                    <div style="font-size: 12px;">
+                        <span style="color: var(--text-secondary); display: block; font-size: 10px; text-transform: uppercase;">Make & Driver</span>
+                        <span id="cupsInfoDriver" style="color: var(--text-primary); font-weight: 500;">--</span>
+                    </div>
+                    <div style="font-size: 12px;">
+                        <span style="color: var(--text-secondary); display: block; font-size: 10px; text-transform: uppercase;">Spooler Queue State</span>
+                        <span id="cupsInfoAccepting" style="color: var(--success); font-weight: 500;">Accepting Jobs</span>
+                    </div>
+                    <div style="font-size: 12px;">
+                        <span style="color: var(--text-secondary); display: block; font-size: 10px; text-transform: uppercase;">Network Sharing</span>
+                        <span id="cupsInfoShared" style="color: var(--accent); font-weight: 500;">Shared Network Queue</span>
+                    </div>
+                </div>
+
+                <!-- Quick Printer Hardware Actions -->
+                <div style="display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border);">
+                    <button type="button" class="cr-btn-pill cr-btn-cancel cups-admin-req" id="btnCupsPauseResume">
+                        <svg class="icon" viewBox="0 0 24 24"><rect x="6" y="4" width="4" height="16"></rect><rect x="14" y="4" width="4" height="16"></rect></svg> Pause Printer
+                    </button>
+                    <button type="button" class="cr-btn-pill cr-btn-cancel cups-admin-req" id="btnCupsAcceptReject">
+                        <svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle><line x1="15" y1="9" x2="9" y2="15"></line><line x1="9" y1="9" x2="15" y2="15"></line></svg> Reject Jobs
+                    </button>
+                    <button type="button" class="cr-btn-pill cr-btn-cancel cups-admin-req" id="btnCupsTestPage">
+                        <svg class="icon" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg> Print Official Test Page
+                    </button>
+                    <button type="button" class="cr-btn-pill cr-btn-cancel cups-admin-req" id="btnCupsRestartDaemon">
+                        <svg class="icon" viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg> Restart CUPS Spooler
+                    </button>
+                </div>
+            </div>
+
+            <!-- Global Hardware Defaults Card -->
+            <div class="cr-card" style="margin-bottom: 16px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; flex-wrap: wrap; gap: 10px;">
+                    <div>
+                        <h3 style="font-size: 15px; font-weight: 600; color: var(--text-primary); margin: 0;">Global Hardware Defaults</h3>
+                        <p style="font-size: 12px; color: var(--text-secondary); margin: 3px 0 0 0;">
+                            Changes update CUPS PPD and <code>lpoptions</code>. All connected computers and mobile devices inherit these defaults.
+                        </p>
+                    </div>
+                    <button type="button" class="cr-btn-pill cr-btn-print cups-admin-req" id="btnSaveCupsDefaults">
+                        <svg class="icon" viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg> Save CUPS Defaults
+                    </button>
+                </div>
+
+                <form id="cupsDefaultsForm" onsubmit="return false;">
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px;">
+                        <!-- Page Stack Order -->
+                        <div>
+                            <label style="font-size: 11px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; display: block; margin-bottom: 6px;">
+                                Page Stack Order (Reverse / Normal)
+                            </label>
+                            <select id="cupsDefOutputOrder" class="cr-select" style="width: 100%;">
+                                <option value="reverse">Reverse (Page 1 on Top - Face-Up Tray) [Default]</option>
+                                <option value="normal">Normal (Page 1 on Bottom - Face-Down Tray)</option>
+                            </select>
+                            <div style="font-size: 11px; color: var(--text-secondary); margin-top: 4px;">
+                                Prints last page first so sheets stack face-up in 1 to N order without rearranging.
+                            </div>
+                        </div>
+
+                        <!-- Default Paper Size -->
+                        <div>
+                            <label style="font-size: 11px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; display: block; margin-bottom: 6px;">
+                                Default Paper Size (PageSize)
+                            </label>
+                            <select id="cupsDefPageSize" class="cr-select" style="width: 100%;">
+                                <option value="A4">A4 (210 × 297 mm)</option>
+                                <option value="Letter">Letter (8.5 × 11 in)</option>
+                                <option value="Legal">Legal (8.5 × 14 in)</option>
+                                <option value="4x6in">4 × 6 in (Photo Card)</option>
+                                <option value="5x7in">5 × 7 in (Photo Card)</option>
+                                <option value="8x10">8 × 10 in (Photo Print)</option>
+                                <option value="EnvelopeDL">Envelope DL (110 × 220 mm)</option>
+                            </select>
+                            <div style="font-size: 11px; color: var(--text-secondary); margin-top: 4px;">
+                                Standard sheet size assumed when clients do not specify paper dimensions.
+                            </div>
+                        </div>
+
+                        <!-- Default Media Type -->
+                        <div>
+                            <label style="font-size: 11px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; display: block; margin-bottom: 6px;">
+                                Default Media Type (MediaType)
+                            </label>
+                            <select id="cupsDefMediaType" class="cr-select" style="width: 100%;">
+                                <option value="Plain">Plain Paper (Standard Copy & Bond)</option>
+                                <option value="Glossy">HP Photo Paper / Glossy</option>
+                                <option value="FastGlossy">Everyday Glossy Photo</option>
+                                <option value="CoatedMatte">Matte Presentation Paper</option>
+                                <option value="Brochure">Brochure Paper</option>
+                            </select>
+                            <div style="font-size: 11px; color: var(--text-secondary); margin-top: 4px;">
+                                Calibrates ink delivery and drying time for media surface.
+                            </div>
+                        </div>
+
+                        <!-- Default Print Quality -->
+                        <div>
+                            <label style="font-size: 11px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; display: block; margin-bottom: 6px;">
+                                Default Print Quality (OutputMode)
+                            </label>
+                            <select id="cupsDefQuality" class="cr-select" style="width: 100%;">
+                                <option value="Normal">Normal (Standard 600 DPI, Fast & Balanced)</option>
+                                <option value="Best">Best (Enhanced Quality, High Contrast)</option>
+                                <option value="Photo">Photo (Ultra-Fine Photo Definition)</option>
+                                <option value="Draft">Draft (High Speed Ink-Saver)</option>
+                            </select>
+                            <div style="font-size: 11px; color: var(--text-secondary); margin-top: 4px;">
+                                Determines printhead passes and detail density.
+                            </div>
+                        </div>
+
+                        <!-- Default Color Mode -->
+                        <div>
+                            <label style="font-size: 11px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; display: block; margin-bottom: 6px;">
+                                Default Color Mode (ColorModel)
+                            </label>
+                            <select id="cupsDefColorModel" class="cr-select" style="width: 100%;">
+                                <option value="RGB">Color (RGB - Full Color Printing)</option>
+                                <option value="KGray">Monochrome (Black & White Only)</option>
+                            </select>
+                            <div style="font-size: 11px; color: var(--text-secondary); margin-top: 4px;">
+                                Restrict to Black ink cartridge only or allow color printing by default.
+                            </div>
+                        </div>
+
+                        <!-- Hardware Scaling Mode -->
+                        <div>
+                            <label style="font-size: 11px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; display: block; margin-bottom: 6px;">
+                                Hardware Scaling (print-scaling)
+                            </label>
+                            <select id="cupsDefScaling" class="cr-select" style="width: 100%;">
+                                <option value="none">100% Exact Scale (None / 1:1 Size)</option>
+                                <option value="fit">Fit to Page (Shrink / Expand to Margins)</option>
+                                <option value="fill">Fill Entire Page (Full Bleed)</option>
+                            </select>
+                            <div style="font-size: 11px; color: var(--text-secondary); margin-top: 4px;">
+                                Automatically adapts documents that slightly exceed printable bounds.
+                            </div>
+                        </div>
+
+                        <!-- Two-Sided Printing -->
+                        <div>
+                            <label style="font-size: 11px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; display: block; margin-bottom: 6px;">
+                                Duplex Mode (Two-Sided)
+                            </label>
+                            <select id="cupsDefDuplex" class="cr-select" style="width: 100%;">
+                                <option value="None">None (Single-Sided)</option>
+                                <option value="DuplexNoTumble">Duplex Long-Edge (Book Binding)</option>
+                                <option value="DuplexTumble">Duplex Short-Edge (Flip-Top Binding)</option>
+                            </select>
+                            <div style="font-size: 11px; color: var(--text-secondary); margin-top: 4px;">
+                                Manual duplex prompt or hardware duplexer configuration.
+                            </div>
+                        </div>
+
+                        <!-- Resolution -->
+                        <div>
+                            <label style="font-size: 11px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; display: block; margin-bottom: 6px;">
+                                Hardware Resolution (DPI)
+                            </label>
+                            <select id="cupsDefResolution" class="cr-select" style="width: 100%;">
+                                <option value="600">600 DPI (Standard Crisp Text & Images)</option>
+                                <option value="300">300 DPI (Draft / Fast)</option>
+                                <option value="1200">1200 DPI (High Precision Photo)</option>
+                            </select>
+                            <div style="font-size: 11px; color: var(--text-secondary); margin-top: 4px;">
+                                Hardware rasterizer rendering density.
+                            </div>
+                        </div>
+                    </div>
+                </form>
+            </div>
+
+            <!-- Live Spool Queue Card -->
+            <div class="cr-card" style="margin-bottom: 16px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 10px;">
+                    <div>
+                        <h3 style="font-size: 15px; font-weight: 600; color: var(--text-primary); margin: 0;">Live CUPS Spool Queue</h3>
+                        <p style="font-size: 12px; color: var(--text-secondary); margin: 3px 0 0 0;">
+                            Real-time monitor of active and pending jobs in the hardware spooler.
+                        </p>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <label style="font-size: 12px; color: var(--text-secondary); display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                            <input type="checkbox" id="chkAutoRefreshQueue" checked> Auto-refresh (5s)
+                        </label>
+                        <button type="button" class="cr-btn-pill cr-btn-cancel" id="btnRefreshQueueManual" style="padding: 4px 10px; font-size: 12px;">Refresh</button>
+                        <button type="button" class="cr-btn-pill cr-btn-cancel cups-admin-req" id="btnPurgeQueue" style="color: var(--danger); padding: 4px 10px; font-size: 12px;">
+                            <svg class="icon" viewBox="0 0 24 24" style="stroke: var(--danger);"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg> Purge Queue
+                        </button>
+                    </div>
+                </div>
+
+                <div style="overflow-x: auto;">
+                    <table class="table-compact" style="width: 100%; border-collapse: collapse; font-size: 12px;">
+                        <thead>
+                            <tr style="border-bottom: 1px solid var(--border); text-align: left; color: var(--text-secondary);">
+                                <th style="padding: 8px 10px;">Job ID</th>
+                                <th style="padding: 8px 10px;">User / Client</th>
+                                <th style="padding: 8px 10px;">Size</th>
+                                <th style="padding: 8px 10px;">Submitted</th>
+                                <th style="padding: 8px 10px;">Status</th>
+                                <th style="padding: 8px 10px; text-align: right;">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody id="cupsQueueBody">
+                            <tr>
+                                <td colspan="6" style="text-align: center; padding: 20px; color: var(--text-secondary);">
+                                    Loading spool queue...
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Advanced Driver PPD Options Accordion -->
+            <div class="cr-card">
+                <div id="cupsPpdToggle" style="display: flex; justify-content: space-between; align-items: center; cursor: pointer; user-select: none;">
+                    <div>
+                        <h3 style="font-size: 14px; font-weight: 600; color: var(--text-primary); margin: 0; display: flex; align-items: center; gap: 8px;">
+                            <span>Advanced PPD Driver Inspector</span>
+                            <span class="badge" id="cupsPpdCountBadge" style="background: var(--surface-elevated); font-size: 11px; padding: 2px 6px; border-radius: 4px; border: 1px solid var(--border);">0 options</span>
+                        </h3>
+                        <p style="font-size: 11px; color: var(--text-secondary); margin: 2px 0 0 0;">
+                            Inspect and fine-tune all low-level hardware options defined in the printer PPD driver.
+                        </p>
+                    </div>
+                    <svg class="icon" id="cupsPpdArrow" viewBox="0 0 24 24" style="transition: transform 0.2s;"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                </div>
+                <div id="cupsPpdContent" style="display: none; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border);">
+                    <div id="cupsPpdGrid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; margin-bottom: 14px;">
+                        <!-- Dynamically filled with PPD options -->
+                    </div>
+                    <div style="display: flex; justify-content: flex-end;">
+                        <button type="button" class="cr-btn-pill cr-btn-print cups-admin-req" id="btnApplyRawPpdOptions">
+                            Apply Advanced PPD Settings
+                        </button>
+                    </div>
                 </div>
             </div>
         </div>
@@ -3665,6 +3956,7 @@ INDEX_HTML = """<!DOCTYPE html>
                 document.getElementById('adminLockedState').style.display = 'none';
                 document.getElementById('adminUnlockedState').style.display = 'block';
                 document.getElementById('btnAdminLock').innerHTML = '<svg class="icon" viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 9.9-1"></path></svg> <span>Admin</span>';
+                if (typeof updateCupsAdminState === 'function') updateCupsAdminState(true);
                 showToast('Administrator privileges unlocked', 'success');
             } else {
                 showToast(data.error || 'Invalid password', 'error');
@@ -3792,11 +4084,416 @@ INDEX_HTML = """<!DOCTYPE html>
     loadInbox();
     inboxTimer = setInterval(loadInbox, 10000);
 
+    // ==========================================
+    // CUPS HARDWARE COMMAND CENTER
+    // ==========================================
+    let cupsQueueTimer = null;
+    let cachedCupsData = null;
+
+    function updateCupsAdminState(isUnlocked) {
+        const banner = document.getElementById('cupsAdminBanner');
+        if (banner) banner.style.display = isUnlocked ? 'none' : 'flex';
+        
+        document.querySelectorAll('.cups-admin-req').forEach(el => {
+            el.disabled = !isUnlocked;
+            el.style.opacity = isUnlocked ? '1' : '0.55';
+            el.style.cursor = isUnlocked ? 'pointer' : 'not-allowed';
+        });
+
+        const formInputs = document.querySelectorAll('#cupsDefaultsForm select, #cupsDefaultsForm input');
+        formInputs.forEach(el => {
+            el.disabled = !isUnlocked;
+        });
+    }
+
+    async function loadCupsOverview(printerName) {
+        const pSelect = document.getElementById('cupsPrinterSelect');
+        const selected = printerName || (pSelect ? pSelect.value : '');
+        const url = '/api/cups/overview' + (selected ? '?printer=' + encodeURIComponent(selected) : '');
+        
+        try {
+            const res = await fetch(url);
+            const data = await res.json();
+            if (!data.success) {
+                showToast('Failed to query CUPS status: ' + (data.error || 'Unknown error'), 'error');
+                return;
+            }
+            cachedCupsData = data;
+            renderCupsOverview(data);
+        } catch (e) {
+            console.error("CUPS overview error:", e);
+        }
+    }
+
+    function renderCupsOverview(data) {
+        // Populate printer select
+        const pSelect = document.getElementById('cupsPrinterSelect');
+        if (pSelect && data.printers) {
+            const curVal = data.selected_printer;
+            pSelect.innerHTML = '';
+            data.printers.forEach(p => {
+                const opt = document.createElement('option');
+                opt.value = p.name;
+                opt.textContent = p.name + (p.is_default ? ' (Default)' : '');
+                if (p.name === curVal) opt.selected = true;
+                pSelect.appendChild(opt);
+            });
+        }
+
+        // Status badge
+        const badge = document.getElementById('cupsStatusBadge');
+        if (badge) {
+            const st = (data.info.status || 'idle').toLowerCase();
+            badge.textContent = data.info.status_text || 'Ready';
+            if (st === 'printing' || st === 'processing') {
+                badge.style.background = 'rgba(26, 115, 232, 0.2)';
+                badge.style.color = 'var(--accent)';
+            } else if (st === 'stopped' || st === 'disabled') {
+                badge.style.background = 'rgba(217, 48, 37, 0.2)';
+                badge.style.color = 'var(--danger)';
+            } else {
+                badge.style.background = 'rgba(30, 142, 62, 0.2)';
+                badge.style.color = 'var(--success)';
+            }
+        }
+
+        // Hardware details
+        const elUri = document.getElementById('cupsInfoUri');
+        if (elUri) elUri.textContent = data.info.uri || 'Direct USB / Network Interface';
+        const elDriver = document.getElementById('cupsInfoDriver');
+        if (elDriver) elDriver.textContent = data.info.make_and_model || 'Standard CUPS Driver';
+        const elAcc = document.getElementById('cupsInfoAccepting');
+        if (elAcc) {
+            elAcc.textContent = data.info.accepting ? 'Accepting Jobs' : 'Rejecting Jobs';
+            elAcc.style.color = data.info.accepting ? 'var(--success)' : 'var(--warning)';
+        }
+        const elShared = document.getElementById('cupsInfoShared');
+        if (elShared) {
+            elShared.textContent = data.info.shared ? 'Shared Network Queue (IPP/mDNS)' : 'Local Only (Not Shared)';
+            elShared.style.color = data.info.shared ? 'var(--accent)' : 'var(--text-secondary)';
+        }
+
+        // Action buttons labels
+        const btnPause = document.getElementById('btnCupsPauseResume');
+        if (btnPause) {
+            const isStopped = (data.info.status || '').toLowerCase().includes('stop') || (data.info.status || '').toLowerCase().includes('disable');
+            btnPause.innerHTML = isStopped
+                ? '<svg class="icon" viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg> Resume Printer'
+                : '<svg class="icon" viewBox="0 0 24 24"><rect x="6" y="4" width="4" height="16"></rect><rect x="14" y="4" width="4" height="16"></rect></svg> Pause Printer';
+            btnPause.setAttribute('data-action', isStopped ? 'resume' : 'pause');
+        }
+
+        const btnAccept = document.getElementById('btnCupsAcceptReject');
+        if (btnAccept) {
+            btnAccept.innerHTML = data.info.accepting
+                ? '<svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle><line x1="15" y1="9" x2="9" y2="15"></line><line x1="9" y1="9" x2="15" y2="15"></line></svg> Reject Jobs'
+                : '<svg class="icon" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"></polyline></svg> Accept Jobs';
+            btnAccept.setAttribute('data-action', data.info.accepting ? 'reject' : 'accept');
+        }
+
+        // Defaults Form
+        const defs = data.defaults || {};
+        const setVal = (id, val) => {
+            const el = document.getElementById(id);
+            if (!el) return;
+            if (val) {
+                let found = false;
+                for (let i = 0; i < el.options.length; i++) {
+                    if (el.options[i].value.toLowerCase() === String(val).toLowerCase()) {
+                        el.selectedIndex = i;
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found && String(val).trim()) {
+                    const opt = document.createElement('option');
+                    opt.value = val;
+                    opt.textContent = val;
+                    opt.selected = true;
+                    el.appendChild(opt);
+                }
+            }
+        };
+
+        setVal('cupsDefOutputOrder', defs.outputorder || 'reverse');
+        setVal('cupsDefPageSize', defs.pagesize || 'A4');
+        setVal('cupsDefMediaType', defs.mediatype || 'Plain');
+        setVal('cupsDefQuality', defs.quality || 'Normal');
+        setVal('cupsDefColorModel', defs.colormodel || 'RGB');
+        setVal('cupsDefScaling', defs.scaling || 'none');
+        setVal('cupsDefDuplex', defs.duplex || 'None');
+        setVal('cupsDefResolution', defs.resolution ? defs.resolution.replace('dpi', '') : '600');
+
+        // Render Spool Queue
+        renderCupsQueue(data.queue || []);
+
+        // Render Advanced PPD options
+        renderCupsPpdOptions(data.ppd_options || []);
+
+        // Sync admin lock state
+        updateCupsAdminState(!!currentAdminToken);
+    }
+
+    function renderCupsQueue(queue) {
+        const tbody = document.getElementById('cupsQueueBody');
+        if (!tbody) return;
+        tbody.innerHTML = '';
+        if (!queue || queue.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; padding: 24px; color: var(--text-secondary);"><svg class="icon" viewBox="0 0 24 24" style="stroke: var(--success); width: 20px; height: 20px; display: block; margin: 0 auto 6px auto;"><polyline points="20 6 9 17 4 12"></polyline></svg>Spool queue is empty. Printer is ready.</td></tr>';
+            return;
+        }
+
+        queue.forEach(job => {
+            const tr = document.createElement('tr');
+            tr.style.borderBottom = '1px solid var(--border)';
+            
+            const isProcessing = (job.status || '').toLowerCase().includes('print') || (job.status || '').toLowerCase().includes('proc');
+            const statusColor = isProcessing ? 'var(--accent)' : 'var(--text-secondary)';
+
+            tr.innerHTML = `
+                <td style="padding: 8px 10px; font-family: var(--font-mono); font-weight: 600;">${job.job_id}</td>
+                <td style="padding: 8px 10px;">${job.user}</td>
+                <td style="padding: 8px 10px;">${job.size} bytes</td>
+                <td style="padding: 8px 10px; color: var(--text-secondary); font-size: 11px;">${job.date}</td>
+                <td style="padding: 8px 10px;"><span style="color: ${statusColor}; font-weight: 500;">${job.status}</span></td>
+                <td style="padding: 8px 10px; text-align: right;">
+                    <button type="button" class="cr-btn-pill cr-btn-cancel cups-admin-req" style="color: var(--danger); padding: 2px 8px; font-size: 11px;" onclick="cancelCupsJob('${job.job_id}')">
+                        Cancel
+                    </button>
+                </td>
+            `;
+            tbody.appendChild(tr);
+        });
+
+        updateCupsAdminState(!!currentAdminToken);
+    }
+
+    function renderCupsPpdOptions(ppdOptions) {
+        const grid = document.getElementById('cupsPpdGrid');
+        const countBadge = document.getElementById('cupsPpdCountBadge');
+        if (!grid) return;
+        grid.innerHTML = '';
+        if (countBadge) countBadge.textContent = ppdOptions.length + ' options';
+
+        if (!ppdOptions || ppdOptions.length === 0) {
+            grid.innerHTML = '<div style="grid-column: 1 / -1; color: var(--text-secondary); font-size: 12px; padding: 10px 0;">No raw PPD options reported by driver.</div>';
+            return;
+        }
+
+        ppdOptions.forEach(opt => {
+            const col = document.createElement('div');
+            col.style.fontSize = '12px';
+            
+            const label = document.createElement('label');
+            label.style.cssText = 'display: block; font-weight: 600; margin-bottom: 4px; color: var(--text-secondary); font-size: 11px;';
+            label.textContent = opt.label + ' (' + opt.name + ')';
+            
+            const sel = document.createElement('select');
+            sel.className = 'cr-select raw-ppd-input';
+            sel.setAttribute('data-ppd-key', opt.name);
+            sel.style.width = '100%';
+
+            opt.choices.forEach(ch => {
+                const o = document.createElement('option');
+                o.value = ch;
+                o.textContent = ch + (ch === opt.current ? ' *' : '');
+                if (ch === opt.current) o.selected = true;
+                sel.appendChild(o);
+            });
+
+            col.appendChild(label);
+            col.appendChild(sel);
+            grid.appendChild(col);
+        });
+
+        updateCupsAdminState(!!currentAdminToken);
+    }
+
+    async function executeCupsAction(action, extraParams = {}) {
+        if (!currentAdminToken) {
+            showToast('Administrator privileges required to control printer', 'error');
+            window.switchTab('settings');
+            return;
+        }
+
+        const printer = document.getElementById('cupsPrinterSelect') ? document.getElementById('cupsPrinterSelect').value : '';
+        const fd = new FormData();
+        fd.append('action', action);
+        fd.append('printer', printer);
+        fd.append('token', currentAdminToken);
+        for (let k in extraParams) fd.append(k, extraParams[k]);
+
+        try {
+            const res = await fetch('/api/cups/action', {
+                method: 'POST',
+                headers: { 'X-Admin-Token': currentAdminToken },
+                body: fd
+            });
+            const data = await res.json();
+            if (data.success) {
+                showToast(data.message, 'success');
+                loadCupsOverview();
+            } else {
+                showToast('Action failed: ' + (data.error || 'Unknown error'), 'error');
+            }
+        } catch (e) {
+            showToast('Network error while sending CUPS action', 'error');
+        }
+    }
+
+    async function saveCupsDefaults() {
+        if (!currentAdminToken) {
+            showToast('Administrator privileges required to save CUPS defaults', 'error');
+            window.switchTab('settings');
+            return;
+        }
+
+        const printer = document.getElementById('cupsPrinterSelect') ? document.getElementById('cupsPrinterSelect').value : '';
+        const payload = {
+            printer: printer,
+            outputorder: document.getElementById('cupsDefOutputOrder').value,
+            pagesize: document.getElementById('cupsDefPageSize').value,
+            mediatype: document.getElementById('cupsDefMediaType').value,
+            quality: document.getElementById('cupsDefQuality').value,
+            colormodel: document.getElementById('cupsDefColorModel').value,
+            scaling: document.getElementById('cupsDefScaling').value,
+            duplex: document.getElementById('cupsDefDuplex').value,
+            resolution: document.getElementById('cupsDefResolution').value
+        };
+
+        try {
+            const res = await fetch('/api/cups/settings', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Admin-Token': currentAdminToken
+                },
+                body: JSON.stringify(payload)
+            });
+            const data = await res.json();
+            if (data.success) {
+                showToast(data.message, 'success');
+                loadCupsOverview();
+            } else {
+                showToast('Failed to save CUPS defaults: ' + (data.error || 'Unknown error'), 'error');
+            }
+        } catch (e) {
+            showToast('Network error while saving CUPS defaults', 'error');
+        }
+    }
+
+    async function applyRawPpdOptions() {
+        if (!currentAdminToken) {
+            showToast('Administrator privileges required to modify PPD options', 'error');
+            window.switchTab('settings');
+            return;
+        }
+
+        const printer = document.getElementById('cupsPrinterSelect') ? document.getElementById('cupsPrinterSelect').value : '';
+        const raw_options = {};
+        document.querySelectorAll('.raw-ppd-input').forEach(sel => {
+            const key = sel.getAttribute('data-ppd-key');
+            if (key) raw_options[key] = sel.value;
+        });
+
+        try {
+            const res = await fetch('/api/cups/settings', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Admin-Token': currentAdminToken
+                },
+                body: JSON.stringify({ printer: printer, raw_options: raw_options })
+            });
+            const data = await res.json();
+            if (data.success) {
+                showToast('Advanced PPD options updated', 'success');
+                loadCupsOverview();
+            } else {
+                showToast('PPD update failed: ' + (data.error || 'Unknown error'), 'error');
+            }
+        } catch (e) {
+            showToast('Network error while applying PPD options', 'error');
+        }
+    }
+
+    window.cancelCupsJob = function(jobId) {
+        if (!confirm('Cancel print job ' + jobId + '?')) return;
+        executeCupsAction('cancel_job', { job_id: jobId });
+    };
+
+    // CUPS Event Listeners
+    const pSel = document.getElementById('cupsPrinterSelect');
+    if (pSel) pSel.addEventListener('change', (e) => loadCupsOverview(e.target.value));
+
+    const btnRefCups = document.getElementById('btnRefreshCups');
+    if (btnRefCups) btnRefCups.addEventListener('click', () => loadCupsOverview());
+
+    const btnRefQueue = document.getElementById('btnRefreshQueueManual');
+    if (btnRefQueue) btnRefQueue.addEventListener('click', () => loadCupsOverview());
+
+    const btnSaveDefs = document.getElementById('btnSaveCupsDefaults');
+    if (btnSaveDefs) btnSaveDefs.addEventListener('click', saveCupsDefaults);
+
+    const btnPauseRes = document.getElementById('btnCupsPauseResume');
+    if (btnPauseRes) btnPauseRes.addEventListener('click', () => {
+        const action = btnPauseRes.getAttribute('data-action') || 'pause';
+        executeCupsAction(action);
+    });
+
+    const btnAccRej = document.getElementById('btnCupsAcceptReject');
+    if (btnAccRej) btnAccRej.addEventListener('click', () => {
+        const action = btnAccRej.getAttribute('data-action') || 'reject';
+        executeCupsAction(action);
+    });
+
+    const btnTestPg = document.getElementById('btnCupsTestPage');
+    if (btnTestPg) btnTestPg.addEventListener('click', () => executeCupsAction('test_page'));
+
+    const btnRestartCupsDaemon = document.getElementById('btnCupsRestartDaemon');
+    if (btnRestartCupsDaemon) btnRestartCupsDaemon.addEventListener('click', () => executeCupsAction('restart_cups'));
+
+    const btnPurgeQ = document.getElementById('btnPurgeQueue');
+    if (btnPurgeQ) btnPurgeQ.addEventListener('click', () => {
+        if (confirm('Warning: Are you sure you want to purge ALL queued print jobs from the spooler?')) {
+            executeCupsAction('purge_queue');
+        }
+    });
+
+    const cupsPpdToggle = document.getElementById('cupsPpdToggle');
+    const cupsPpdContent = document.getElementById('cupsPpdContent');
+    const cupsPpdArrow = document.getElementById('cupsPpdArrow');
+    if (cupsPpdToggle && cupsPpdContent) {
+        cupsPpdToggle.addEventListener('click', () => {
+            const isOpen = cupsPpdContent.style.display !== 'none';
+            cupsPpdContent.style.display = isOpen ? 'none' : 'block';
+            if (cupsPpdArrow) cupsPpdArrow.style.transform = isOpen ? 'rotate(0deg)' : 'rotate(180deg)';
+        });
+    }
+
+    const btnApplyPpd = document.getElementById('btnApplyRawPpdOptions');
+    if (btnApplyPpd) btnApplyPpd.addEventListener('click', applyRawPpdOptions);
+
+    const btnAdminHdr = document.getElementById('btnAdminLock');
+    if (btnAdminHdr) btnAdminHdr.addEventListener('click', () => window.switchTab('settings'));
+
+    // Queue auto-refresh
+    cupsQueueTimer = setInterval(() => {
+        const tabCups = document.getElementById('tab-cups');
+        const autoCheck = document.getElementById('chkAutoRefreshQueue');
+        if (tabCups && tabCups.classList.contains('active') && autoCheck && autoCheck.checked) {
+            loadCupsOverview();
+        }
+    }, 5000);
+
     // Initial boot
     if (currentAdminToken) {
         document.getElementById('adminLockedState').style.display = 'none';
         document.getElementById('adminUnlockedState').style.display = 'block';
         document.getElementById('btnAdminLock').innerHTML = '<svg class="icon" viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 9.9-1"></path></svg> <span>Admin</span>';
+        updateCupsAdminState(true);
+    } else {
+        updateCupsAdminState(false);
     }
     loadPrinters();
     updatePreviewLayout();
@@ -3899,6 +4596,478 @@ def api_status():
 def api_printers():
     printers, def_p = get_printers()
     return jsonify({'printers': printers, 'default': def_p})
+
+# ============================================================
+# CUPS COMMAND CENTER: BACKEND HELPERS & ENDPOINTS
+# ============================================================
+def find_cups_binary(name: str) -> str:
+    """Finds binary in standard system binary paths or PATH."""
+    for p in ['/usr/sbin', '/sbin', '/usr/bin', '/bin']:
+        candidate = os.path.join(p, name)
+        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            return candidate
+    return shutil.which(name) or name
+
+def run_cups_cmd(cmd_args: list, timeout=10) -> subprocess.CompletedProcess:
+    """Runs a command ensuring /usr/sbin is present in PATH and resolving binary."""
+    env = os.environ.copy()
+    env['PATH'] = f"/usr/sbin:/sbin:/usr/bin:/bin:{env.get('PATH', '')}"
+    bin_name = cmd_args[0]
+    resolved = find_cups_binary(bin_name)
+    exec_args = [resolved] + cmd_args[1:]
+    try:
+        return subprocess.run(exec_args, capture_output=True, text=True, timeout=timeout, env=env)
+    except FileNotFoundError:
+        # Fallback for dev environments without CUPS binaries
+        return subprocess.CompletedProcess(args=exec_args, returncode=0, stdout='', stderr='')
+
+def parse_lpoptions_l(raw_output: str) -> list:
+    """Parses `lpoptions -l` output into structured options with choices and current default choice."""
+    options = []
+    for line in raw_output.splitlines():
+        line = line.strip()
+        if not line or ':' not in line:
+            continue
+        header, choices_str = line.split(':', 1)
+        if '/' in header:
+            opt_name, opt_label = header.split('/', 1)
+        else:
+            opt_name = header.strip()
+            opt_label = opt_name
+        opt_name = opt_name.strip()
+        opt_label = opt_label.strip()
+
+        choices = []
+        current = None
+        for item in choices_str.split():
+            item = item.strip()
+            if not item:
+                continue
+            if item.startswith('*'):
+                val = item[1:]
+                current = val
+                choices.append(val)
+            else:
+                choices.append(item)
+
+        options.append({
+            'name': opt_name,
+            'label': opt_label,
+            'current': current,
+            'choices': choices
+        })
+    return options
+
+def update_ppd_outputorder(printer: str, order: str):
+    """Updates PPD DefaultOutputOrder and PageStackOrder keywords and tests with cupstestppd."""
+    ppd_path = f"/etc/cups/ppd/{printer}.ppd"
+    if not os.path.exists(ppd_path):
+        return
+    cap_order = 'Reverse' if order.lower() == 'reverse' else 'Normal'
+    try:
+        with open(ppd_path, 'r', encoding='utf-8', errors='ignore') as f:
+            content = f.read()
+
+        if re.search(r'^\*DefaultOutputOrder:\s*\w+', content, re.MULTILINE):
+            content = re.sub(r'^\*DefaultOutputOrder:\s*\w+', f'*DefaultOutputOrder: {cap_order}', content, flags=re.MULTILINE)
+        else:
+            content += f"\n*DefaultOutputOrder: {cap_order}\n"
+
+        if re.search(r'^\*PageStackOrder:\s*\w+', content, re.MULTILINE):
+            content = re.sub(r'^\*PageStackOrder:\s*\w+', f'*PageStackOrder: {cap_order}', content, flags=re.MULTILINE)
+        else:
+            content += f"*PageStackOrder: {cap_order}\n"
+
+        temp_ppd = ppd_path + '.tmp'
+        with open(temp_ppd, 'w', encoding='utf-8') as f:
+            f.write(content)
+
+        test_res = run_cups_cmd(['cupstestppd', '-q', temp_ppd])
+        if test_res.returncode == 0:
+            shutil.move(temp_ppd, ppd_path)
+            try:
+                os.chmod(ppd_path, 0o664)
+            except Exception:
+                pass
+        else:
+            if os.path.exists(temp_ppd):
+                os.remove(temp_ppd)
+    except Exception:
+        pass
+
+def update_system_lpoptions(printer: str, options_dict: dict):
+    """Updates /etc/cups/lpoptions with system-wide default options for printer."""
+    lpoptions_path = '/etc/cups/lpoptions'
+    lines = []
+    target_prefix = f'Default {printer}'
+    dest_prefix = f'Dest {printer}'
+    found = False
+
+    if os.path.exists(lpoptions_path):
+        try:
+            with open(lpoptions_path, 'r', encoding='utf-8') as f:
+                lines = f.readlines()
+        except Exception:
+            lines = []
+
+    new_lines = []
+    for line in lines:
+        if line.startswith(target_prefix) or line.startswith(dest_prefix):
+            tokens = line.strip().split()
+            prefix = tokens[0] + ' ' + tokens[1]
+            existing_opts = {}
+            for t in tokens[2:]:
+                if '=' in t:
+                    k, v = t.split('=', 1)
+                    existing_opts[k] = v
+            existing_opts.update(options_dict)
+            opt_str = ' '.join(f"{k}={v}" for k, v in existing_opts.items())
+            new_lines.append(f"{prefix} {opt_str}\n")
+            found = True
+        else:
+            new_lines.append(line)
+
+    if not found:
+        opt_str = ' '.join(f"{k}={v}" for k, v in options_dict.items())
+        new_lines.append(f"Default {printer} {opt_str}\n")
+
+    try:
+        with open(lpoptions_path, 'w', encoding='utf-8') as f:
+            f.writelines(new_lines)
+        try:
+            os.chmod(lpoptions_path, 0o664)
+        except Exception:
+            pass
+    except Exception:
+        pass
+
+def get_cups_overview_data(selected_printer=None) -> dict:
+    """Gathers comprehensive status, defaults, active queue, and PPD options for a printer."""
+    printers_list, default_printer = get_printers()
+    if not selected_printer:
+        selected_printer = default_printer or (printers_list[0]['name'] if printers_list else 'HP_Smart_Tank_520')
+
+    p_info = {
+        'name': selected_printer,
+        'status': 'idle',
+        'status_text': 'Ready',
+        'accepting': True,
+        'shared': True,
+        'uri': '',
+        'make_and_model': '',
+        'ppd_file': f"/etc/cups/ppd/{selected_printer}.ppd"
+    }
+
+    for p in printers_list:
+        if p['name'] == selected_printer:
+            p_info['status'] = p.get('status', 'idle')
+            p_info['status_text'] = p.get('status_text', 'Ready')
+            break
+
+    try:
+        res = run_cups_cmd(['lpstat', '-a'])
+        for line in res.stdout.splitlines():
+            if selected_printer in line:
+                if 'not accepting' in line.lower():
+                    p_info['accepting'] = False
+                elif 'accepting' in line.lower():
+                    p_info['accepting'] = True
+    except Exception:
+        pass
+
+    opts_kv = {}
+    try:
+        res = run_cups_cmd(['lpoptions', '-p', selected_printer])
+        if res.returncode == 0:
+            for item in re.findall(r'(\S+)=(?:\'([^\']*)\'|"([^"]*)"|(\S+))', res.stdout):
+                key = item[0]
+                val = item[1] or item[2] or item[3]
+                opts_kv[key] = val
+            p_info['uri'] = opts_kv.get('device-uri', '')
+            p_info['make_and_model'] = opts_kv.get('printer-make-and-model', '')
+            p_info['shared'] = (opts_kv.get('printer-is-shared', 'true').lower() == 'true')
+    except Exception:
+        pass
+
+    ppd_options = []
+    try:
+        res_l = run_cups_cmd(['lpoptions', '-p', selected_printer, '-l'])
+        if res_l.returncode == 0:
+            ppd_options = parse_lpoptions_l(res_l.stdout)
+    except Exception:
+        pass
+
+    defaults = {
+        'outputorder': get_setting('cups_default_outputorder', opts_kv.get('outputorder', 'reverse')),
+        'pagesize': get_setting('cups_default_pagesize', 'A4'),
+        'mediatype': get_setting('cups_default_mediatype', 'Plain'),
+        'quality': get_setting('cups_default_quality', 'Normal'),
+        'colormodel': get_setting('cups_default_colormodel', 'RGB'),
+        'scaling': get_setting('cups_default_scaling', opts_kv.get('print-scaling', 'none')),
+        'resolution': '600',
+        'duplex': 'None'
+    }
+
+    if os.path.exists('/etc/cups/lpoptions'):
+        try:
+            with open('/etc/cups/lpoptions', 'r', encoding='utf-8') as f:
+                for line in f:
+                    if line.startswith(f'Default {selected_printer}') or line.startswith(f'Dest {selected_printer}'):
+                        m = re.search(r'outputorder=(\w+)', line)
+                        if m:
+                            defaults['outputorder'] = m.group(1).lower()
+                        m_scale = re.search(r'print-scaling=(\w+)', line)
+                        if m_scale:
+                            defaults['scaling'] = m_scale.group(1).lower()
+        except Exception:
+            pass
+
+    ppd_path = f"/etc/cups/ppd/{selected_printer}.ppd"
+    if os.path.exists(ppd_path):
+        try:
+            with open(ppd_path, 'r', encoding='utf-8', errors='ignore') as f:
+                ppd_text = f.read()
+                m_ord = re.search(r'^\*DefaultOutputOrder:\s*(\w+)', ppd_text, re.MULTILINE)
+                if m_ord:
+                    defaults['outputorder'] = m_ord.group(1).lower()
+        except Exception:
+            pass
+
+    for opt in ppd_options:
+        name = opt['name'].lower()
+        if name == 'pagesize' and opt['current']:
+            defaults['pagesize'] = opt['current']
+        elif name == 'mediatype' and opt['current']:
+            defaults['mediatype'] = opt['current']
+        elif name == 'outputmode' and opt['current']:
+            defaults['quality'] = opt['current']
+        elif name == 'colormodel' and opt['current']:
+            defaults['colormodel'] = opt['current']
+        elif name == 'duplex' and opt['current']:
+            defaults['duplex'] = opt['current']
+        elif name == 'resolution' and opt['current']:
+            defaults['resolution'] = opt['current']
+
+    queue = []
+    try:
+        res_o = run_cups_cmd(['lpstat', '-o', selected_printer])
+        if res_o.returncode == 0:
+            for line in res_o.stdout.splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                parts = line.split(None, 3)
+                if len(parts) >= 4:
+                    job_id = parts[0]
+                    user = parts[1]
+                    size_str = parts[2]
+                    date_str = parts[3]
+                    status = 'Spooling'
+                    try:
+                        res_job = run_cups_cmd(['lpstat', '-l', '-o', job_id])
+                        if 'printing' in res_job.stdout.lower() or 'processing' in res_job.stdout.lower():
+                            status = 'Printing'
+                    except Exception:
+                        pass
+                    queue.append({
+                        'job_id': job_id,
+                        'user': user,
+                        'size': size_str,
+                        'date': date_str,
+                        'status': status
+                    })
+    except Exception:
+        pass
+
+    return {
+        'success': True,
+        'printers': printers_list,
+        'selected_printer': selected_printer,
+        'is_default': (selected_printer == default_printer),
+        'info': p_info,
+        'defaults': defaults,
+        'ppd_options': ppd_options,
+        'queue': queue
+    }
+
+@app.route('/api/cups/overview', methods=['GET'])
+def api_cups_overview():
+    printer = request.args.get('printer')
+    try:
+        data = get_cups_overview_data(printer)
+        return jsonify(data)
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/cups/settings', methods=['POST'])
+def api_cups_settings():
+    token = request.headers.get('X-Admin-Token') or request.form.get('token')
+    if not verify_admin_token(token):
+        return jsonify({'success': False, 'error': 'Unauthorized: admin login required to modify CUPS hardware settings'}), 401
+
+    data = request.get_json(silent=True) or request.form.to_dict()
+    printer = (data.get('printer') or '').strip()
+    if not printer:
+        printers_list, def_p = get_printers()
+        printer = def_p or (printers_list[0]['name'] if printers_list else 'HP_Smart_Tank_520')
+
+    outputorder = (data.get('outputorder') or '').strip().lower()
+    pagesize = (data.get('pagesize') or '').strip()
+    mediatype = (data.get('mediatype') or '').strip()
+    quality = (data.get('quality') or '').strip()
+    colormodel = (data.get('colormodel') or '').strip()
+    scaling = (data.get('scaling') or '').strip().lower()
+    duplex = (data.get('duplex') or '').strip()
+    resolution = (data.get('resolution') or '').strip()
+    raw_options = data.get('raw_options', {})
+    if isinstance(raw_options, str):
+        try:
+            raw_options = json.loads(raw_options)
+        except Exception:
+            raw_options = {}
+
+    cmd = ['lpadmin', '-p', printer]
+    lpoptions_dict = {}
+
+    if pagesize:
+        cmd.extend(['-o', f'PageSize={pagesize}'])
+        lpoptions_dict['PageSize'] = pagesize
+    if mediatype:
+        cmd.extend(['-o', f'MediaType={mediatype}'])
+        lpoptions_dict['MediaType'] = mediatype
+    if quality:
+        cmd.extend(['-o', f'OutputMode={quality}'])
+        lpoptions_dict['OutputMode'] = quality
+    if colormodel:
+        if colormodel in ('KGray', 'Gray', 'monochrome', 'mono'):
+            cmd.extend(['-o', 'ColorModel=KGray', '-o', 'print-color-mode-default=monochrome'])
+            lpoptions_dict['ColorModel'] = 'KGray'
+            lpoptions_dict['print-color-mode'] = 'monochrome'
+        else:
+            cmd.extend(['-o', f'ColorModel={colormodel}', '-o', 'print-color-mode-default=color'])
+            lpoptions_dict['ColorModel'] = colormodel
+            lpoptions_dict['print-color-mode'] = 'color'
+    if outputorder in ('reverse', 'normal'):
+        cmd.extend(['-o', f'outputorder-default={outputorder}'])
+        lpoptions_dict['outputorder'] = outputorder
+    if scaling:
+        cmd.extend(['-o', f'print-scaling-default={scaling}'])
+        lpoptions_dict['print-scaling'] = scaling
+    if duplex and duplex != 'None':
+        cmd.extend(['-o', f'Duplex={duplex}'])
+        lpoptions_dict['Duplex'] = duplex
+    if resolution:
+        res_val = resolution if resolution.endswith('dpi') else f"{resolution}dpi"
+        cmd.extend(['-o', f'resolution-default={res_val}'])
+        lpoptions_dict['resolution'] = res_val
+
+    for k, v in raw_options.items():
+        if k and v:
+            cmd.extend(['-o', f'{k}={v}'])
+            lpoptions_dict[k] = v
+
+    res = run_cups_cmd(cmd)
+    if res.returncode != 0 and 'not found' not in res.stderr.lower():
+        return jsonify({'success': False, 'error': f"lpadmin failed: {res.stderr.strip() or res.stdout.strip()}"}), 500
+
+    if outputorder in ('reverse', 'normal'):
+        update_ppd_outputorder(printer, outputorder)
+
+    if lpoptions_dict:
+        update_system_lpoptions(printer, lpoptions_dict)
+
+    conn = get_db()
+    with conn:
+        if outputorder:
+            conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('cups_default_outputorder', ?)", (outputorder,))
+        if pagesize:
+            conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('cups_default_pagesize', ?)", (pagesize,))
+        if mediatype:
+            conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('cups_default_mediatype', ?)", (mediatype,))
+        if quality:
+            conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('cups_default_quality', ?)", (quality,))
+        if colormodel:
+            conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('cups_default_colormodel', ?)", (colormodel,))
+        if scaling:
+            conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('cups_default_scaling', ?)", (scaling,))
+
+    return jsonify({
+        'success': True,
+        'message': f"CUPS defaults for '{printer}' successfully applied across all clients (Windows, Android, iOS & Web)."
+    })
+
+@app.route('/api/cups/action', methods=['POST'])
+def api_cups_action():
+    token = request.headers.get('X-Admin-Token') or request.form.get('token')
+    if not verify_admin_token(token):
+        return jsonify({'success': False, 'error': 'Unauthorized: admin login required'}), 401
+
+    action = request.form.get('action')
+    printer = (request.form.get('printer') or '').strip()
+    if not printer:
+        printers_list, def_p = get_printers()
+        printer = def_p or (printers_list[0]['name'] if printers_list else 'HP_Smart_Tank_520')
+
+    if action == 'pause':
+        res = run_cups_cmd(['cupsdisable', printer])
+        if res.returncode != 0:
+            return jsonify({'success': False, 'error': res.stderr.strip() or 'Failed to pause printer'}), 500
+        return jsonify({'success': True, 'message': f"Printer '{printer}' paused (queue held)."})
+
+    elif action == 'resume':
+        res = run_cups_cmd(['cupsenable', printer])
+        if res.returncode != 0:
+            return jsonify({'success': False, 'error': res.stderr.strip() or 'Failed to resume printer'}), 500
+        return jsonify({'success': True, 'message': f"Printer '{printer}' resumed (ready to print)."})
+
+    elif action == 'accept':
+        res = run_cups_cmd(['cupsaccept', printer])
+        if res.returncode != 0:
+            return jsonify({'success': False, 'error': res.stderr.strip() or 'Failed to accept jobs'}), 500
+        return jsonify({'success': True, 'message': f"Printer '{printer}' is now accepting print jobs."})
+
+    elif action == 'reject':
+        res = run_cups_cmd(['cupsreject', printer])
+        if res.returncode != 0:
+            return jsonify({'success': False, 'error': res.stderr.strip() or 'Failed to reject jobs'}), 500
+        return jsonify({'success': True, 'message': f"Printer '{printer}' is rejecting new print jobs."})
+
+    elif action == 'cancel_job':
+        job_id = (request.form.get('job_id') or '').strip()
+        if not job_id:
+            return jsonify({'success': False, 'error': 'Job ID required'}), 400
+        res = run_cups_cmd(['cancel', job_id])
+        if res.returncode != 0:
+            return jsonify({'success': False, 'error': res.stderr.strip() or 'Failed to cancel job'}), 500
+        return jsonify({'success': True, 'message': f"Print job '{job_id}' cancelled."})
+
+    elif action == 'purge_queue':
+        res = run_cups_cmd(['cancel', '-a', '-x', printer])
+        if res.returncode != 0:
+            return jsonify({'success': False, 'error': res.stderr.strip() or 'Failed to purge queue'}), 500
+        return jsonify({'success': True, 'message': f"All print jobs for '{printer}' purged from spooler."})
+
+    elif action == 'test_page':
+        test_file = '/usr/share/cups/data/testprint'
+        if not os.path.exists(test_file):
+            temp_test = os.path.join(tempfile.gettempdir(), 'cups_test_page.txt')
+            with open(temp_test, 'w', encoding='utf-8') as f:
+                f.write(f"CUPS Command Center Test Print\nPrinter: {printer}\nTimestamp: {time.ctime()}\nServer: Armbian B860H Print Server\n")
+            test_file = temp_test
+        res = run_cups_cmd(['lp', '-d', printer, '-t', 'CUPS Command Center Test Page', test_file])
+        if res.returncode != 0:
+            return jsonify({'success': False, 'error': res.stderr.strip() or 'Failed to send test page'}), 500
+        return jsonify({'success': True, 'message': f"Official test page submitted to '{printer}' ({res.stdout.strip()})."})
+
+    elif action == 'restart_cups':
+        cmd = ['sudo', 'systemctl', 'restart', 'cups'] if (os.name != 'nt' and hasattr(os, 'geteuid') and os.geteuid() != 0) else ['systemctl', 'restart', 'cups']
+        try:
+            subprocess.run(cmd, check=True, timeout=15)
+            return jsonify({'success': True, 'message': 'CUPS print daemon restarted successfully.'})
+        except Exception as e:
+            return jsonify({'success': False, 'error': f"Failed to restart CUPS: {e}"}), 500
+
+    return jsonify({'success': False, 'error': 'Unknown action'}), 400
 
 def get_cups_job_status(job_id: str) -> dict:
     if not job_id:
@@ -4479,13 +5648,16 @@ def api_admin_action():
 
     action = request.form.get('action')
     if action == 'reboot':
-        subprocess.Popen(['reboot'])
+        cmd = ['sudo', 'reboot'] if (os.name != 'nt' and hasattr(os, 'geteuid') and os.geteuid() != 0) else ['reboot']
+        subprocess.Popen(cmd)
         return jsonify({'success': True, 'message': 'System rebooting in 3 seconds...'})
     elif action == 'shutdown':
-        subprocess.Popen(['poweroff'])
+        cmd = ['sudo', 'poweroff'] if (os.name != 'nt' and hasattr(os, 'geteuid') and os.geteuid() != 0) else ['poweroff']
+        subprocess.Popen(cmd)
         return jsonify({'success': True, 'message': 'System shutting down...'})
     elif action == 'restart_cups':
-        subprocess.run(['systemctl', 'restart', 'cups'], check=True, timeout=15)
+        cmd = ['sudo', 'systemctl', 'restart', 'cups'] if (os.name != 'nt' and hasattr(os, 'geteuid') and os.geteuid() != 0) else ['systemctl', 'restart', 'cups']
+        subprocess.run(cmd, check=True, timeout=15)
         return jsonify({'success': True, 'message': 'CUPS print spooler restarted successfully.'})
     elif action == 'purge_cache':
         purged = 0
