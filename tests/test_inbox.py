@@ -48,8 +48,11 @@ class TestInbox(unittest.TestCase):
 
     def setUp(self):
         conn = get_db()
-        with conn:
-            conn.execute("DELETE FROM inbox")
+        try:
+            with conn:
+                conn.execute("DELETE FROM inbox")
+        finally:
+            conn.close()
         for name in os.listdir(wp.SPOOL_INBOX_DIR):
             os.remove(os.path.join(wp.SPOOL_INBOX_DIR, name))
 
@@ -113,8 +116,11 @@ class TestInbox(unittest.TestCase):
         self.assertFalse(os.path.exists(path))
         self.send()
         conn = get_db()
-        with conn:
-            conn.execute("UPDATE inbox SET received_at = ?", (int(time.time()) - wp.INBOX_TTL_SECONDS - 5,))
+        try:
+            with conn:
+                conn.execute("UPDATE inbox SET received_at = ?", (int(time.time()) - wp.INBOX_TTL_SECONDS - 5,))
+        finally:
+            conn.close()
         wp.cleanup_expired_jobs()
         self.assertEqual(os.listdir(wp.SPOOL_INBOX_DIR), [])
 

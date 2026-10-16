@@ -14,7 +14,7 @@ import ipaddress
 import threading
 from urllib.parse import quote, unquote
 from datetime import datetime
-from flask import Flask, render_template_string, request, jsonify, Response, send_file
+from flask import Flask, render_template_string, request, jsonify, Response, send_file, g, has_app_context
 from werkzeug.security import generate_password_hash, check_password_hash
 
 try:
@@ -239,9 +239,26 @@ def decrypt_held_file(enc_path: str, output_path: str):
         pass
 
 def get_db():
+    if has_app_context():
+        if 'db' not in g:
+            g.db = sqlite3.connect(DB_PATH, timeout=20.0)
+            g.db.row_factory = sqlite3.Row
+            try:
+                g.db.execute("PRAGMA journal_mode=WAL;")
+                g.db.execute("PRAGMA synchronous=NORMAL;")
+                g.db.execute("PRAGMA busy_timeout=20000;")
+            except Exception:
+                pass
+        return g.db
     conn = sqlite3.connect(DB_PATH, timeout=20.0)
     conn.row_factory = sqlite3.Row
     return conn
+
+@app.teardown_appcontext
+def close_db(exception=None):
+    db = g.pop('db', None)
+    if db is not None:
+        db.close()
 
 def init_db():
     try:
@@ -252,109 +269,119 @@ def init_db():
     except Exception:
         pass
     get_or_create_secret_key()
-    conn = get_db()
-    with conn:
-        try:
-            conn.execute("PRAGMA journal_mode=WAL;")
-            conn.execute("PRAGMA synchronous=NORMAL;")
-            conn.execute("PRAGMA busy_timeout=20000;")
-        except Exception:
-            pass
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS settings (
-                key TEXT PRIMARY KEY,
-                value TEXT
-            )
-        """)
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS pinned_jobs (
-                job_id TEXT PRIMARY KEY,
-                file_path TEXT,
-                filename TEXT,
-                pin_hash TEXT,
-                pages INTEGER,
-                copies INTEGER,
-                colormodel TEXT,
-                printer TEXT,
-                options_json TEXT,
-                cost REAL,
-                created_at INTEGER,
-                expires_at INTEGER,
-                failed_attempts INTEGER DEFAULT 0
-            )
-        """)
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS inbox (
-                id TEXT PRIMARY KEY,
-                file_path TEXT,
-                filename TEXT,
-                size INTEGER,
-                device TEXT,
-                received_at INTEGER
-            )
-        """)
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS print_ledger (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                timestamp INTEGER,
-                job_title TEXT,
-                printer TEXT,
-                pages INTEGER,
-                copies INTEGER,
-                total_pages INTEGER,
-                colormodel TEXT,
-                cost REAL,
-                client_ip TEXT,
-                status TEXT,
-                source TEXT DEFAULT 'portal'
-            )
-        """)
-
-        try:
-            conn.execute("ALTER TABLE pinned_jobs ADD COLUMN failed_attempts INTEGER DEFAULT 0")
-        except sqlite3.OperationalError:
-            pass
-        try:
-            conn.execute("ALTER TABLE print_ledger ADD COLUMN source TEXT DEFAULT 'portal'")
-        except sqlite3.OperationalError:
-            pass
-        try:
-            conn.execute("ALTER TABLE print_ledger ADD COLUMN cups_job_id INTEGER")
-        except sqlite3.OperationalError:
-            pass
-        try:
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_ledger_cups_job_id ON print_ledger(cups_job_id)")
-        except sqlite3.OperationalError:
-            pass
-        defaults = {
-            'currency_symbol': '₱',
-            'rate_bw': '2.00',
-            'rate_color': '5.00',
-            'pin_expire_hours': '24',
-            'max_pages_per_job': '50',
-            'public_print': 'on',
-            'auto_anti_clog': 'on',
-            'last_anti_clog_check': '0'
-        }
-        for k, v in defaults.items():
-            conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", (k, v))
-
-        cur = conn.cursor()
-        cur.execute("SELECT value FROM settings WHERE key = 'admin_hash'")
-        row = cur.fetchone()
-        if not row:
-            initial_pass = secrets.token_urlsafe(12)
-            admin_hash = generate_password_hash(initial_pass, method='scrypt')
-            conn.execute("INSERT INTO settings (key, value) VALUES ('admin_hash', ?)", (admin_hash,))
-            init_pass_file = os.path.join(os.path.dirname(DB_PATH), 'initial_admin_password.txt')
+    conn = sqlite3.connect(DB_PATH, timeout=20.0)
+    conn.row_factory = sqlite3.Row
+    try:
+        with conn:
             try:
-                fd = os.open(init_pass_file, os.O_CREAT | os.O_WRONLY | os.O_TRUNC, 0o600)
-                with open(fd, 'w') as f:
-                    f.write(initial_pass + "\n")
+                conn.execute("PRAGMA journal_mode=WAL;")
+                conn.execute("PRAGMA synchronous=NORMAL;")
+                conn.execute("PRAGMA busy_timeout=20000;")
             except Exception:
                 pass
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS settings (
+                    key TEXT PRIMARY KEY,
+                    value TEXT
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS pinned_jobs (
+                    job_id TEXT PRIMARY KEY,
+                    file_path TEXT,
+                    filename TEXT,
+                    pin_hash TEXT,
+                    pages INTEGER,
+                    copies INTEGER,
+                    colormodel TEXT,
+                    printer TEXT,
+                    options_json TEXT,
+                    cost REAL,
+                    created_at INTEGER,
+                    expires_at INTEGER,
+                    failed_attempts INTEGER DEFAULT 0
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS inbox (
+                    id TEXT PRIMARY KEY,
+                    file_path TEXT,
+                    filename TEXT,
+                    size INTEGER,
+                    device TEXT,
+                    received_at INTEGER
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS print_ledger (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp INTEGER,
+                    job_title TEXT,
+                    printer TEXT,
+                    pages INTEGER,
+                    copies INTEGER,
+                    total_pages INTEGER,
+                    colormodel TEXT,
+                    cost REAL,
+                    client_ip TEXT,
+                    status TEXT,
+                    source TEXT DEFAULT 'portal',
+                    cups_job_id INTEGER
+                )
+            """)
+
+            try:
+                conn.execute("ALTER TABLE pinned_jobs ADD COLUMN failed_attempts INTEGER DEFAULT 0")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                conn.execute("ALTER TABLE print_ledger ADD COLUMN source TEXT DEFAULT 'portal'")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                conn.execute("ALTER TABLE print_ledger ADD COLUMN cups_job_id INTEGER")
+            except sqlite3.OperationalError:
+                pass
+
+            # Performance indexes
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_ledger_cups_job_id ON print_ledger(cups_job_id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_ledger_timestamp ON print_ledger(timestamp DESC)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_pinned_expires ON pinned_jobs(expires_at)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_inbox_received ON inbox(received_at)")
+
+            defaults = {
+                'currency_symbol': '₱',
+                'rate_bw': '2.00',
+                'rate_color': '5.00',
+                'pin_expire_hours': '24',
+                'max_pages_per_job': '50',
+                'public_print': 'on',
+                'auto_anti_clog': 'on',
+                'last_anti_clog_check': '0'
+            }
+            for k, v in defaults.items():
+                conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", (k, v))
+
+            cur = conn.cursor()
+            cur.execute("SELECT value FROM settings WHERE key = 'admin_hash'")
+            row = cur.fetchone()
+            if not row:
+                initial_pass = secrets.token_urlsafe(12)
+                admin_hash = generate_password_hash(initial_pass, method='scrypt')
+                conn.execute("INSERT INTO settings (key, value) VALUES ('admin_hash', ?)", (admin_hash,))
+                init_pass_file = os.path.join(os.path.dirname(DB_PATH), 'initial_admin_password.txt')
+                try:
+                    fd = os.open(init_pass_file, os.O_CREAT | os.O_WRONLY | os.O_TRUNC, 0o600)
+                    with open(fd, 'w') as f:
+                        f.write(initial_pass + "\n")
+                except Exception:
+                    pass
+    finally:
+        conn.close()
 
 def get_setting(key, default=''):
+    need_close = not has_app_context()
+    conn = None
     try:
         conn = get_db()
         cur = conn.cursor()
@@ -364,6 +391,9 @@ def get_setting(key, default=''):
             return row['value']
     except Exception:
         pass
+    finally:
+        if need_close and conn is not None:
+            conn.close()
     return default
 
 def get_rate(is_color=False):
@@ -381,6 +411,8 @@ def is_public_print_enabled() -> bool:
     return get_setting('public_print', 'on').lower() in ['1', 'true', 'on', 'yes']
 
 def record_ledger(title, printer, pages, copies, total_pages, colormodel, cost, client_ip, status, source='portal', cups_job_id=None):
+    need_close = not has_app_context()
+    conn = None
     try:
         conn = get_db()
         with conn:
@@ -391,6 +423,9 @@ def record_ledger(title, printer, pages, copies, total_pages, colormodel, cost, 
             """, (int(time.time()), title, printer, pages, copies, total_pages, colormodel, cost, client_ip, status, source, cups_job_id))
     except Exception:
         pass
+    finally:
+        if need_close and conn is not None:
+            conn.close()
 
 def get_printers():
     printers = []
@@ -4915,8 +4950,20 @@ INDEX_HTML = """<!DOCTYPE html>
 </body>
 </html>"""
 
-def cleanup_expired_jobs():
+_last_cleanup_lock = threading.Lock()
+_last_cleanup_time = 0
+
+def cleanup_expired_jobs(force=False):
+    global _last_cleanup_time
     now = int(time.time())
+    if not force and not app.config.get('TESTING', False):
+        with _last_cleanup_lock:
+            if now - _last_cleanup_time < 60:
+                return
+            _last_cleanup_time = now
+
+    need_close = not has_app_context()
+    conn = None
     try:
         conn = get_db()
         cur = conn.cursor()
@@ -4949,6 +4996,41 @@ def cleanup_expired_jobs():
                     pass
     except Exception:
         pass
+    finally:
+        if need_close and conn is not None:
+            conn.close()
+
+@app.after_request
+def set_security_headers(response):
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    response.headers['X-Frame-Options'] = 'SAMEORIGIN'
+    response.headers['X-XSS-Protection'] = '1; mode=block'
+    response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
+    return response
+
+@app.errorhandler(400)
+def handle_bad_request(e):
+    if request.path.startswith('/api/'):
+        return jsonify({'success': False, 'error': str(getattr(e, 'description', e))}), 400
+    return "Bad Request", 400
+
+@app.errorhandler(404)
+def handle_not_found(e):
+    if request.path.startswith('/api/'):
+        return jsonify({'success': False, 'error': 'Endpoint not found'}), 404
+    return "Not Found", 404
+
+@app.errorhandler(413)
+def handle_large_file(e):
+    if request.path.startswith('/api/'):
+        return jsonify({'success': False, 'error': 'File too large. Maximum file upload limit is 50MB.'}), 413
+    return "File Too Large", 413
+
+@app.errorhandler(500)
+def handle_server_error(e):
+    if request.path.startswith('/api/'):
+        return jsonify({'success': False, 'error': 'Internal server error'}), 500
+    return "Internal Server Error", 500
 
 @app.route('/')
 def index():
@@ -5191,6 +5273,8 @@ def sync_cups_ledger():
     Parses CUPS page_log and completed queue to synchronize direct prints
     (Windows IPP, Android Mopria, iOS AirPrint) into SQLite print_ledger.
     """
+    need_close = not has_app_context()
+    conn = None
     try:
         conn = get_db()
         jobs_from_log = {}
@@ -5307,6 +5391,9 @@ def sync_cups_ledger():
         return new_synced
     except Exception:
         return 0
+    finally:
+        if need_close and conn is not None:
+            conn.close()
 
 def generate_cmyk_nozzle_check_pdf(output_path: str, printer_name: str = "HP Smart Tank 520"):
     """Generates standard vector CMYK diagnostic sheet in pure Python (PDF 1.4)."""
