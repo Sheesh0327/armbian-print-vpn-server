@@ -4095,8 +4095,6 @@ INDEX_HTML = """<!DOCTYPE html>
                     'pin_release': '<span style="font-size: 10px; padding: 2px 5px; border-radius: 3px; background: rgba(234, 134, 0, 0.15); color: var(--warning);">PIN Release</span>',
                     'windows_ipp': '<span style="font-size: 10px; padding: 2px 5px; border-radius: 3px; background: rgba(30, 142, 62, 0.15); color: var(--success);">Windows IPP</span>',
                     'mobile_airprint': '<span style="font-size: 10px; padding: 2px 5px; border-radius: 3px; background: rgba(161, 66, 244, 0.15); color: #c084fc;">Mobile AirPrint</span>',
-                    'photocopy': '<span style="font-size: 10px; padding: 2px 5px; border-radius: 3px; background: rgba(0, 229, 255, 0.15); color: #00e5ff;">Photocopy</span>',
-                    'id_card_copy': '<span style="font-size: 10px; padding: 2px 5px; border-radius: 3px; background: rgba(255, 105, 180, 0.15); color: #ff69b4;">ID Card</span>',
                     'maintenance': '<span style="font-size: 10px; padding: 2px 5px; border-radius: 3px; background: rgba(255, 255, 255, 0.1); color: var(--text-secondary);">Maintenance</span>'
                 };
                 data.jobs.forEach(j => {
@@ -5190,7 +5188,7 @@ def parse_cups_control_file(c_path: str) -> dict:
 
 def sync_cups_ledger():
     """
-    Scans CUPS page_log and completed queue to synchronize direct prints
+    Parses CUPS page_log and completed queue to synchronize direct prints
     (Windows IPP, Android Mopria, iOS AirPrint) into SQLite print_ledger.
     """
     try:
@@ -5449,7 +5447,7 @@ def render_counter_sign_html(server_ip: str, rate_bw: str, rate_color: str, curr
     <div class="qr-section">
       <div class="qr-box">
         <canvas id="qrPortal"></canvas>
-        <div class="qr-label">1. Scan to Print Online</div>
+        <div class="qr-label">1. Connect &amp; Print Online</div>
         <div class="qr-desc">{portal_url}</div>
       </div>
     </div>
@@ -5483,12 +5481,12 @@ def render_counter_sign_html(server_ip: str, rate_bw: str, rate_color: str, curr
         </ol>
       </div>
       <div class="guide-card">
-        <h4>🌐 Web Portal &amp; Walk-Up</h4>
+        <h4>🌐 Web Print Portal</h4>
         <ol>
-          <li>Scan the QR code above or visit <strong>{portal_url}</strong>.</li>
+          <li>Use the QR code above or visit <strong>{portal_url}</strong>.</li>
           <li>Upload your PDF or Word document.</li>
-          <li>Preview in Chromium print dialog and hit Print!</li>
-          <li>Walk up and collect your clean prints.</li>
+          <li>Preview in print dialog and hit Print!</li>
+          <li>Collect your clean prints from the output tray.</li>
         </ol>
       </div>
     </div>
@@ -6643,7 +6641,7 @@ def api_admin_action():
     elif action == 'purge_cache':
         purged = 0
         temp_dir = tempfile.gettempdir()
-        for pattern in ['webprint*', 'conv_*', 'scan_*', 'lo_*', 'pin_rel_*']:
+        for pattern in ['webprint*', 'conv_*', 'lo_*', 'pin_rel_*']:
             for item in glob.glob(os.path.join(temp_dir, pattern)):
                 try:
                     if os.path.isdir(item):

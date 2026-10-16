@@ -156,20 +156,12 @@ sudo apt-get install -y samba
 sudo systemctl restart smbd
 ```
 
-### 2. SANE Network Scanner (Optional)
-If an all-in-one USB flatbed scanner is attached:
-```bash
-sudo apt-get install -y sane sane-utils
-# Enumerate scanners
-scanimage -L
-```
-
-### 3. AdGuard Home (Optional)
+### 2. AdGuard Home (Optional)
 For appliance-level DNS caching or ad-blocking:
 - Install separately following official Armbian AdGuard instructions.
 - Ensure AdGuard does not bind to Port 80 or interfere with mDNS resolution on Port 5353.
 
-### 4. Tailscale Remote Mesh VPN (Optional)
+### 3. Tailscale Remote Mesh VPN (Optional)
 To securely access the print appliance over the internet:
 - Install Tailscale via `curl -fsSL https://tailscale.com/install.sh | sh`.
 - Authenticate: `sudo tailscale up`.

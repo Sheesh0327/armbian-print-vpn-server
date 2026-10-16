@@ -24,7 +24,7 @@ class TestInputValidation(unittest.TestCase):
     def test_validate_extension_valid(self):
         valid_files = [
             'document.pdf', 'photo.png', 'image.jpg', 'image.jpeg',
-            'graphic.webp', 'photo.heic', 'photo.heif', 'scan.tiff',
+            'graphic.webp', 'photo.heic', 'photo.heif', 'sample.tiff',
             'doc.docx', 'old.doc', 'sheet.xlsx', 'sheet.xls', 'notes.txt', 'data.csv'
         ]
         for f in valid_files:
