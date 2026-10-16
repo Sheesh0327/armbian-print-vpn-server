@@ -7,8 +7,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 from webprint.app import (
     app, init_db,
     generate_cmyk_nozzle_check_pdf, reset_usb_printer,
-    sync_cups_ledger, parse_cups_control_file,
-    acquire_scanner_image
+    sync_cups_ledger, parse_cups_control_file
 )
 
 class TestAllSixModules(unittest.TestCase):
@@ -67,34 +66,6 @@ class TestAllSixModules(unittest.TestCase):
         html = res.get_data(as_text=True)
         self.assertIn('PRINT SHOP &amp; SELF-SERVICE', html)
         self.assertIn('Direct Windows PC', html)
-
-    def test_module1_scan_status_endpoint(self):
-        res = self.client.get('/api/scan/status')
-        self.assertEqual(res.status_code, 200)
-        data = res.get_json()
-        self.assertTrue(data['success'])
-        self.assertIn('scanner', data)
-        self.assertTrue(data['scanner']['available'])
-
-    def test_module1_document_scan_and_download(self):
-        dummy_jpeg = b'\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x01\x00`\x00`\x00\x00\xff\xdb\x00C\x00\xff\xc0\x00\x0b\x08\x00\x01\x00\x01\x01\x01\x11\x00\xff\xc4\x00\x1f\x00\x00\x01\x05\x01\x01\x01\x01\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x01\x02\x03\x04\x05\x06\x07\x08\t\n\x0b\xff\xda\x00\x08\x01\x01\x00\x00?\x00\xbf\x00\xff\xd9'
-        with patch('webprint.app.acquire_scanner_image', return_value=dummy_jpeg):
-            res = self.client.post('/api/scan/document', data={'format': 'jpeg', 'resolution': '300', 'mode': 'color'})
-            self.assertEqual(res.status_code, 200)
-            data = res.get_json()
-            self.assertTrue(data['success'])
-            self.assertIn('scan_id', data)
-            scan_id = data['scan_id']
-
-            # Test preview
-            prev_res = self.client.get(f'/api/scan/preview/{scan_id}')
-            self.assertEqual(prev_res.status_code, 200)
-            self.assertEqual(prev_res.mimetype, 'image/jpeg')
-
-            # Test download
-            dl_res = self.client.get(f'/api/scan/download/{scan_id}?format=jpeg')
-            self.assertEqual(dl_res.status_code, 200)
-            self.assertEqual(dl_res.mimetype, 'image/jpeg')
 
 if __name__ == '__main__':
     unittest.main()

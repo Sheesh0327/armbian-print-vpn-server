@@ -677,9 +677,7 @@ INDEX_HTML = """<!DOCTYPE html>
                 tabs.forEach(function(c) {
                     c.classList.toggle('active', c.id === 'tab-' + tabName);
                 });
-                if (tabName === 'scan') {
-                    if (typeof loadScannerTab === 'function') loadScannerTab();
-                } else if (tabName === 'idmaker') {
+                if (tabName === 'idmaker') {
                     if (typeof initIdStudio === 'function') initIdStudio();
                 } else if (tabName === 'cups') {
                     if (typeof loadCupsOverview === 'function') loadCupsOverview();
@@ -1783,7 +1781,6 @@ INDEX_HTML = """<!DOCTYPE html>
 
     <nav class="header-nav">
         <button class="nav-btn active" data-tab="print" onclick="switchTab('print')">Print</button>
-        <button class="nav-btn" data-tab="scan" onclick="switchTab('scan')">Scanner</button>
         <button class="nav-btn" data-tab="idmaker" onclick="switchTab('idmaker')">ID Photo Maker</button>
         <button class="nav-btn" data-tab="cups" onclick="switchTab('cups')">CUPS Control</button>
         <button class="nav-btn" data-tab="pin" onclick="switchTab('pin')">PIN Release</button>
@@ -2105,76 +2102,6 @@ INDEX_HTML = """<!DOCTYPE html>
                 <div class="cr-bottom-bar">
                     <button type="button" class="cr-btn-pill cr-btn-cancel" id="btnCancelPrint">Cancel</button>
                     <button type="button" class="cr-btn-pill cr-btn-print" id="btnSubmitPrint">Print</button>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- TAB: DOCUMENT SCANNER -->
-    <div class="tab-content" id="tab-scan">
-        <div class="cr-page-container">
-            <div class="cr-card">
-                <!-- Header with Status -->
-                <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px; padding-bottom: 16px; border-bottom: 1px solid var(--border); flex-wrap: wrap; gap: 12px;">
-                    <div>
-                        <div style="display: flex; align-items: center; gap: 8px;">
-                            <h2 style="font-size: 16px; font-weight: 600; color: var(--text-primary); margin: 0;">Flatbed Document Scanner</h2>
-                            <span class="badge" id="scannerStatusBadge" style="background: rgba(30, 142, 62, 0.2); color: var(--success); font-weight: 600; padding: 2px 8px; border-radius: 12px; font-size: 11px;">Checking...</span>
-                        </div>
-                        <p style="font-size: 12px; color: var(--text-secondary); margin: 4px 0 0 0;" id="scannerDeviceName">
-                            HP Smart Tank 520 Flatbed Scanner (eSCL)
-                        </p>
-                    </div>
-                    <button type="button" class="cr-btn-pill cr-btn-cancel" onclick="loadScannerTab()" style="padding: 4px 12px; font-size: 12px;">
-                        <svg class="icon" viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg> Refresh
-                    </button>
-                </div>
-
-                <!-- Scan Parameters -->
-                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 20px;">
-                    <div>
-                        <label style="font-size: 11px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; display: block; margin-bottom: 6px;">Output Format</label>
-                        <select id="docScanFormat" class="cr-select" style="width: 100%;">
-                            <option value="pdf">PDF Document (.pdf)</option>
-                            <option value="jpeg">JPEG Image (.jpg)</option>
-                        </select>
-                    </div>
-                    <div>
-                        <label style="font-size: 11px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; display: block; margin-bottom: 6px;">Resolution</label>
-                        <select id="docScanResolution" class="cr-select" style="width: 100%;">
-                            <option value="300">300 DPI (Standard)</option>
-                            <option value="150">150 DPI (Fast)</option>
-                            <option value="600">600 DPI (High Detail)</option>
-                        </select>
-                    </div>
-                    <div>
-                        <label style="font-size: 11px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; display: block; margin-bottom: 6px;">Color Mode</label>
-                        <select id="docScanMode" class="cr-select" style="width: 100%;">
-                            <option value="color">Full Color</option>
-                            <option value="gray">Grayscale</option>
-                        </select>
-                    </div>
-                </div>
-
-                <!-- Action Bar -->
-                <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 20px; padding: 12px 16px; background: var(--surface-elevated); border-radius: var(--radius-sm); border: 1px solid var(--border);">
-                    <div id="docScanStatusText" style="font-size: 12px; color: var(--text-secondary);">
-                        Place document on scanner glass and click Scan.
-                    </div>
-                    <div style="display: flex; gap: 8px;">
-                        <button type="button" class="cr-btn-pill cr-btn-print" id="btnRunDocScan" onclick="executeDocScan()" style="padding: 6px 18px; font-size: 12px; font-weight: 600;">
-                            <svg class="icon" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg> Scan Document
-                        </button>
-                        <a id="btnDocScanDownload" href="#" download class="cr-btn-pill cr-btn-print" style="display: none; padding: 6px 18px; font-size: 12px; font-weight: 600; text-decoration: none;">
-                            <svg class="icon" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg> Download
-                        </a>
-                    </div>
-                </div>
-
-                <!-- Scanned Document Preview -->
-                <div id="docScanPreviewWrapper" style="display: none; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 16px; text-align: center;">
-                    <div style="font-size: 11px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; margin-bottom: 10px; text-align: left;">Scan Preview</div>
-                    <img id="docScanPreviewImg" src="" alt="Scan Preview" style="max-height: 480px; max-width: 100%; object-fit: contain; border-radius: 2px; box-shadow: 0 4px 16px rgba(0,0,0,0.4); background: #ffffff;">
                 </div>
             </div>
         </div>
@@ -4774,91 +4701,6 @@ INDEX_HTML = """<!DOCTYPE html>
     if (btnAdminHdr) btnAdminHdr.addEventListener('click', () => window.switchTab('settings'));
 
     // ==========================================
-    // DOCUMENT SCANNER
-    // ==========================================
-    let currentScanId = null;
-
-    async function loadScannerTab() {
-        const badge = document.getElementById('scannerStatusBadge');
-        const devName = document.getElementById('scannerDeviceName');
-        try {
-            const res = await fetch('/api/scan/status');
-            const data = await res.json();
-            if (data.success && data.scanner && data.scanner.available) {
-                if (badge) {
-                    badge.textContent = 'Ready';
-                    badge.style.background = 'rgba(30, 142, 62, 0.2)';
-                    badge.style.color = 'var(--success)';
-                }
-                if (devName) {
-                    devName.textContent = (data.scanner.model || 'HP Smart Tank 520 Flatbed Scanner') + ' (eSCL)';
-                }
-            } else {
-                if (badge) {
-                    badge.textContent = (data.scanner && data.scanner.state) || 'Offline';
-                    badge.style.background = 'rgba(217, 48, 37, 0.2)';
-                    badge.style.color = 'var(--danger)';
-                }
-            }
-        } catch (e) {
-            console.error("Scanner check error:", e);
-        }
-    }
-
-    async function executeDocScan() {
-        const btn = document.getElementById('btnRunDocScan');
-        const status = document.getElementById('docScanStatusText');
-        const fmt = document.getElementById('docScanFormat').value || 'pdf';
-        const resDpi = document.getElementById('docScanResolution').value || '300';
-        const mode = document.getElementById('docScanMode').value || 'color';
-
-        if (btn) {
-            btn.disabled = true;
-            btn.textContent = 'Scanning...';
-        }
-        if (status) status.textContent = 'Scanning platen. Please wait...';
-
-        const fd = new FormData();
-        fd.append('format', fmt);
-        fd.append('resolution', resDpi);
-        fd.append('mode', mode);
-
-        try {
-            const res = await fetch('/api/scan/document', { method: 'POST', body: fd });
-            const data = await res.json();
-            if (data.success) {
-                currentScanId = data.scan_id;
-                showToast('Document scanned successfully', 'success');
-                if (status) status.textContent = 'Scan complete. Click Download to save file.';
-
-                const dlBtn = document.getElementById('btnDocScanDownload');
-                const previewImg = document.getElementById('docScanPreviewImg');
-                const previewWrap = document.getElementById('docScanPreviewWrapper');
-
-                if (dlBtn) {
-                    dlBtn.style.display = 'inline-flex';
-                    dlBtn.href = data.download_url;
-                }
-                if (previewImg && previewWrap) {
-                    previewImg.src = data.preview_url + '?t=' + Date.now();
-                    previewWrap.style.display = 'block';
-                }
-            } else {
-                showToast('Scan failed: ' + (data.error || 'Unknown error'), 'error');
-                if (status) status.textContent = 'Error: ' + (data.error || 'Scan failed');
-            }
-        } catch (e) {
-            showToast('Network error during scan', 'error');
-            if (status) status.textContent = 'Network communication error';
-        } finally {
-            if (btn) {
-                btn.disabled = false;
-                btn.innerHTML = '<svg class="icon" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg> Scan Document';
-            }
-        }
-    }
-
-    // ==========================================
     // MODULE 3, 4, 5, 6: CUPS COMMAND CENTER EXTENSIONS
     // ==========================================
     const CUPS_PROFILES = {
@@ -5543,77 +5385,6 @@ def reset_usb_printer() -> dict:
         return {'success': False, 'error': res.stderr.strip() or 'usbreset returned non-zero code'}
     except Exception as e:
         return {'success': False, 'error': str(e)}
-
-def acquire_scanner_image(resolution: int = 200, colormodel: str = 'RGB24', source: str = 'Platen') -> bytes:
-    """
-    Acquires an image from HP Smart Tank 520 flatbed scanner via eSCL protocol (HTTP port 60000).
-    Falls back to scanimage if eSCL is unavailable, or simulation placeholder on dev hosts.
-    """
-    width = 2550 if resolution >= 300 else 1700
-    height = 3508 if resolution >= 300 else 2338
-    xml_req = f"""<?xml version="1.0" encoding="UTF-8"?>
-<scan:ScanSettings xmlns:scan="http://schemas.hp.com/imaging/escl/2011/05/03" xmlns:pwg="http://www.pwg.org/schemas/2010/12/sm">
-  <pwg:Version>2.6</pwg:Version>
-  <pwg:ScanRegions>
-    <pwg:ScanRegion>
-      <pwg:XOffset>0</pwg:XOffset><pwg:YOffset>0</pwg:YOffset>
-      <pwg:Width>{width}</pwg:Width><pwg:Height>{height}</pwg:Height>
-    </pwg:ScanRegion>
-  </pwg:ScanRegions>
-  <pwg:InputSource>{source}</pwg:InputSource>
-  <scan:ColorMode>{colormodel}</scan:ColorMode>
-  <scan:XResolution>{resolution}</scan:XResolution><scan:YResolution>{resolution}</scan:YResolution>
-  <pwg:DocumentFormat>image/jpeg</pwg:DocumentFormat>
-</scan:ScanSettings>"""
-
-    for base_url in ['http://127.0.0.1:60000', 'http://localhost:60000']:
-        try:
-            post_req = urllib.request.Request(
-                f"{base_url}/eSCL/ScanJobs",
-                data=xml_req.encode('utf-8'),
-                headers={'Content-Type': 'text/xml'},
-                method='POST'
-            )
-            with urllib.request.urlopen(post_req, timeout=15) as resp:
-                loc = resp.headers.get('Location')
-                if loc:
-                    if not loc.startswith('http'):
-                        loc = f"{base_url}{loc if loc.startswith('/') else '/' + loc}"
-                    get_req = urllib.request.Request(loc)
-                    with urllib.request.urlopen(get_req, timeout=30) as doc_resp:
-                        data = doc_resp.read()
-                        if data and len(data) > 100:
-                            return data
-        except Exception:
-            continue
-
-    if os.name != 'nt':
-        mode_arg = 'Color' if colormodel == 'RGB24' else ('Gray' if colormodel == 'Grayscale8' else 'Lineart')
-        for dev in ['airscan:e0:HP Smart Tank 520', 'escl:http://127.0.0.1:60000']:
-            try:
-                cmd = ['scanimage', '-d', dev, f'--resolution={resolution}', f'--mode={mode_arg}', '--format=jpeg']
-                res = subprocess.run(cmd, capture_output=True, timeout=40)
-                if res.returncode == 0 and res.stdout and len(res.stdout) > 100:
-                    return res.stdout
-            except Exception:
-                continue
-
-    temp_dir = tempfile.mkdtemp(prefix="sim_scan_")
-    sim_jpg = os.path.join(temp_dir, "sim.jpg")
-    try:
-        subprocess.run(['convert', '-size', f'{width}x{height}', 'xc:white',
-                        '-pointsize', '36', '-fill', '#333333',
-                        '-draw', f'text 100,200 "Scanned Document ({colormodel} {resolution}DPI)"',
-                        '-draw', f'text 100,280 "Acquired: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}"',
-                        '-draw', 'rectangle 100,320 1500,324',
-                        sim_jpg], check=True, timeout=10)
-        with open(sim_jpg, 'rb') as f:
-            data = f.read()
-        shutil.rmtree(temp_dir, ignore_errors=True)
-        return data
-    except Exception:
-        shutil.rmtree(temp_dir, ignore_errors=True)
-        return b'\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x01\x00`\x00`\x00\x00\xff\xdb\x00C\x00\x08\x06\x06\x07\x06\x05\x08\x07\x07\x07\t\t\x08\n\x0c\x14\r\x0c\x0b\x0b\x0c\x19\x12\x13\x0f\x14\x1d\x1a\x1f\x1e\x1d\x1a\x1c\x1c $.\' \",#\x1c\x1c(7),01444\x1f\'9=82<.342\xff\xc0\x00\x0b\x08\x00\x01\x00\x01\x01\x01\x11\x00\xff\xc4\x00\x1f\x00\x00\x01\x05\x01\x01\x01\x01\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x01\x02\x03\x04\x05\x06\x07\x08\t\n\x0b\xff\xda\x00\x08\x01\x01\x00\x00?\x00\xbf\x00\xff\xd9'
 
 def render_counter_sign_html(server_ip: str, rate_bw: str, rate_color: str, currency: str) -> str:
     portal_url = f"http://{server_ip}/"
@@ -6814,104 +6585,6 @@ def api_reports_counter_sign():
     currency = get_setting('currency_symbol', '₱')
     return render_counter_sign_html(server_ip, rate_bw, rate_color, currency)
 
-@app.route('/api/scan/status', methods=['GET'])
-def api_scan_status():
-    status_info = {
-        'available': False,
-        'state': 'Disconnected',
-        'model': 'HP Smart Tank 520 (Flatbed eSCL)',
-        'resolutions': [75, 150, 200, 300, 600],
-        'color_modes': ['RGB24', 'Grayscale8', 'BlackAndWhite1']
-    }
-    for base_url in ['http://127.0.0.1:60000', 'http://localhost:60000']:
-        try:
-            req = urllib.request.Request(f"{base_url}/eSCL/ScannerStatus")
-            with urllib.request.urlopen(req, timeout=3) as resp:
-                body = resp.read().decode('utf-8', errors='ignore')
-                m = re.search(r'<pwg:State>([^<]+)</pwg:State>', body)
-                if m:
-                    status_info['available'] = True
-                    status_info['state'] = m.group(1).strip()
-                    break
-        except Exception:
-            continue
-
-    if not status_info['available']:
-        if os.name == 'nt':
-            status_info['available'] = True
-            status_info['state'] = 'Idle (Simulation)'
-        else:
-            status_info['state'] = 'Offline'
-    return jsonify({'success': True, 'scanner': status_info})
-
-@app.route('/api/scan/document', methods=['POST'])
-def api_scan_document():
-    try:
-        resolution = int(request.form.get('resolution', '200'))
-    except Exception:
-        resolution = 200
-    colormodel = request.form.get('colormodel', 'RGB24')
-    fmt = request.form.get('format', 'pdf').lower()
-
-    scan_id = f"scan_{int(time.time())}_{secrets.token_hex(4)}"
-    raw_img_path = os.path.join(SPOOL_PREVIEWS_DIR, f"{scan_id}.jpg")
-    final_path = os.path.join(SPOOL_PREVIEWS_DIR, f"{scan_id}.{fmt}")
-
-    try:
-        img_bytes = acquire_scanner_image(resolution=resolution, colormodel=colormodel)
-        with open(raw_img_path, 'wb') as f:
-            f.write(img_bytes)
-
-        if fmt == 'jpeg' or fmt == 'jpg':
-            final_path = raw_img_path
-        elif fmt in ('pdf', 'png'):
-            try:
-                subprocess.run(['convert', raw_img_path, final_path], check=True, timeout=25)
-            except Exception:
-                final_path = raw_img_path
-                fmt = 'jpeg'
-
-        # Auto-save copy to Samba network share if available
-        public_scans = '/srv/shares/public/Scans'
-        if os.path.isdir(public_scans):
-            try:
-                shutil.copy2(final_path, os.path.join(public_scans, f"Scan_{scan_id}.{fmt}"))
-            except Exception:
-                pass
-
-        return jsonify({
-            'success': True,
-            'scan_id': scan_id,
-            'format': fmt,
-            'preview_url': f'/api/scan/preview/{scan_id}',
-            'download_url': f'/api/scan/download/{scan_id}?format={fmt}'
-        })
-    except Exception as e:
-        return jsonify({'success': False, 'error': f"Scan failed: {e}"}), 500
-
-@app.route('/api/scan/preview/<scan_id>', methods=['GET'])
-def api_scan_preview(scan_id):
-    if not re.match(r'^scan_[0-9]+_[a-f0-9]+$', scan_id):
-        return jsonify({'error': 'Invalid scan ID'}), 400
-    img_path = os.path.join(SPOOL_PREVIEWS_DIR, f"{scan_id}.jpg")
-    if not os.path.exists(img_path):
-        return jsonify({'error': 'Scan not found or expired'}), 404
-    return send_file(img_path, mimetype='image/jpeg')
-
-@app.route('/api/scan/download/<scan_id>', methods=['GET'])
-def api_scan_download(scan_id):
-    if not re.match(r'^scan_[0-9]+_[a-f0-9]+$', scan_id):
-        return jsonify({'error': 'Invalid scan ID'}), 400
-    fmt = request.args.get('format', 'pdf').lower()
-    file_path = os.path.join(SPOOL_PREVIEWS_DIR, f"{scan_id}.{fmt}")
-    if not os.path.exists(file_path):
-        file_path = os.path.join(SPOOL_PREVIEWS_DIR, f"{scan_id}.jpg")
-    if not os.path.exists(file_path):
-        return jsonify({'error': 'Scan file not found'}), 404
-
-    mimetypes_map = {'pdf': 'application/pdf', 'png': 'image/png', 'jpg': 'image/jpeg', 'jpeg': 'image/jpeg'}
-    mime = mimetypes_map.get(fmt, 'application/octet-stream')
-    return send_file(file_path, mimetype=mime, as_attachment=True, download_name=f"Document_Scan_{scan_id}.{fmt}")
 @app.route('/api/admin/auth', methods=['POST'])
 def api_admin_auth():
     client_ip = request.remote_addr or ''
