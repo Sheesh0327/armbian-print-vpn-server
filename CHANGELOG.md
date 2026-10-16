@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.3.0] - 2026-10-16
+
+### Added
+- **Preview Caching & Single-Pass Conversion**: Uploaded Office documents (.docx, .xlsx, .pptx) and .heic photos are converted once under concurrency control, cached at `/api/preview/<preview_id>.pdf`, rendered directly in the Chromium-style PDF.js preview desk, and printed instantly with 0ms conversion delay.
+- **Physical Millimeter ID Photo Calibration**: Recalibrated ID Photo Studio package templates (Rush Combo A & B, All 2x2, All 1x1, Passport, Wallet) to strict 300 DPI physical measurements ($2\times 2" = 600\text{ px}$, $1\times 1" = 300\text{ px}$, Passport $= 413\times 531\text{ px}$, Wallet $= 750\times 1050\text{ px}$) on both 4×6" and A4 photo paper. Added `-o print-scaling=none` flag to guarantee exact ruler dimensions without CUPS margin shrink.
+- **Real-Time CUPS Job Tracking**: Added `/api/jobs/<job_id>/status` querying CUPS `lpstat` to provide live feedback on print status (Spooling $\rightarrow$ Printing on device $\rightarrow$ Completed).
+- **Accurate Billing & Sheet Accounting**: `parse_page_ranges` (backend) and `parseClientPageRanges` (client) accurately calculate active page selections and duplex sheet counts (`ceil(pages/2)`).
+
+### Fixed
+- **Frontend/Backend Parameter Alignment**: Added `KGray` to allowed ColorModels (passing `-o ColorModel=KGray` and `-o print-color-mode=monochrome`), canonical mapping for `4x6in`, `5x7in`, `EnvelopeDL`, and media types `FastGlossy`, `CoatedMatte`, `CoatedBrochure`.
+- **Concurrency & OOM Protection**: Added `CONVERSION_SEMAPHORE` to serialize LibreOffice and ImageMagick conversions, preventing OOM on 913 MB RAM hardware.
+- **SQLite Concurrency**: Configured WAL mode (`PRAGMA journal_mode=WAL`), `PRAGMA synchronous=NORMAL`, and 20s busy timeout to eliminate `database is locked` errors.
+- **Memory Streaming**: Refactored `/api/inbox/upload` to stream file uploads to disk in 64 KB chunks rather than buffering whole files in Python heap memory.
+
 ## [2.2.0] - 2026-10-15
 
 ### Added
