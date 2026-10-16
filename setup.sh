@@ -145,6 +145,16 @@ for loc in '/' '/printers'; do
             sed -i "/<Location ${loc//\//\\/}>/,/<\/Location>/ s|^\( *\)Order allow,deny|&\n\1Allow from ${net}|" /etc/cups/cupsd.conf
         fi
     done
+# Configure face-up print queues to default to reverse order printing (Page 1 stacks on top)
+echo "Default HP_Smart_Tank_520 outputorder=reverse" > /etc/cups/lpoptions
+chmod 644 /etc/cups/lpoptions
+if lpstat -p HP_Smart_Tank_520 &>/dev/null; then
+    lpadmin -p HP_Smart_Tank_520 -o outputorder-default=reverse || true
+fi
+for ppd in /etc/cups/ppd/*.ppd; do
+    if [[ -f "$ppd" ]] && ! grep -q "DefaultOutputOrder" "$ppd"; then
+        echo -e "\n*DefaultOutputOrder: Reverse\n*PageStackOrder: Reverse" >> "$ppd"
+    fi
 done
 
 systemctl restart cups

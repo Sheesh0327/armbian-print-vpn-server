@@ -584,6 +584,10 @@ def build_lp_command(printer: str, pdf_path: str, options: dict) -> list:
         except Exception:
             pass
 
+    outputorder = options.get('outputorder', 'reverse')
+    if outputorder in ('reverse', 'normal'):
+        cmd.extend(['-o', f'outputorder={outputorder}'])
+
     cmd.append(pdf_path)
     return cmd
 

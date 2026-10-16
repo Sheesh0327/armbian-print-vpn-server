@@ -72,6 +72,11 @@ class TestMasterFeatures(unittest.TestCase):
         cmd = build_lp_command('HP_Test', '/tmp/doc.pdf', {'fitpage': True})
         self.assertIn('print-scaling=fit', cmd)
 
+        # outputorder defaults to reverse so face-up pages stack naturally
+        self.assertIn('outputorder=reverse', cmd)
+        cmd_norm = build_lp_command('HP_Test', '/tmp/doc.pdf', {'outputorder': 'normal'})
+        self.assertIn('outputorder=normal', cmd_norm)
+
     def test_preview_endpoint(self):
         # Invalid preview token regex rejected
         res = self.client.get('/api/preview/invalid_token.pdf')
