@@ -737,9 +737,7 @@ INDEX_HTML = """<!DOCTYPE html>
                 tabs.forEach(function(c) {
                     c.classList.toggle('active', c.id === 'tab-' + tabName);
                 });
-                if (tabName === 'idmaker') {
-                    if (typeof initIdStudio === 'function') initIdStudio();
-                } else if (tabName === 'cups') {
+                if (tabName === 'cups') {
                     if (typeof loadCupsOverview === 'function') loadCupsOverview();
                 } else if (tabName === 'pin') {
                     if (typeof loadPinList === 'function') loadPinList();
@@ -2084,9 +2082,7 @@ INDEX_HTML = """<!DOCTYPE html>
     <nav class="header-nav">
         <button class="nav-btn active" data-tab="print" onclick="switchTab('print')">Print</button>
         <button class="nav-btn" data-tab="storage" onclick="switchTab('storage')">Cloud Storage</button>
-        <button class="nav-btn" data-tab="idmaker" onclick="switchTab('idmaker')">ID Photo Maker</button>
         <button class="nav-btn" data-tab="cups" onclick="switchTab('cups')">CUPS Control</button>
-        <button class="nav-btn" data-tab="pin" onclick="switchTab('pin')">PIN Release</button>
         <button class="nav-btn" data-tab="history" onclick="switchTab('history')">History</button>
         <button class="nav-btn" data-tab="settings" onclick="switchTab('settings')">Settings</button>
     </nav>
@@ -4733,7 +4729,12 @@ INDEX_HTML = """<!DOCTYPE html>
                 return;
             }
             const res = await fetch('/api/inbox/list', { headers: { 'X-Admin-Token': currentAdminToken } });
-            if (res.status === 401) { bar.style.display = 'none'; return; }
+            if (res.status === 401) {
+                currentAdminToken = null;
+                try { localStorage.removeItem('adminToken'); } catch(e) {}
+                bar.style.display = 'none';
+                return;
+            }
             const data = await res.json();
             if (!data.success) return;
             bar.style.display = 'block';
@@ -4790,7 +4791,7 @@ INDEX_HTML = """<!DOCTYPE html>
 
     document.getElementById('btnInboxToggle').addEventListener('click', () => { inboxOpen = !inboxOpen; loadInbox(); });
     loadInbox();
-    inboxTimer = setInterval(loadInbox, 10000);
+    inboxTimer = setInterval(loadInbox, 60000);
 
     // ==========================================
     // CUPS HARDWARE COMMAND CENTER
@@ -5753,7 +5754,12 @@ INDEX_HTML = """<!DOCTYPE html>
                     loadCloudStorage();
                 }
             } else {
-                showToast(`Upload failed (Status ${xhr.status})`, 'error');
+                let errText = `Upload failed (Status ${xhr.status})`;
+                try {
+                    const errRes = JSON.parse(xhr.responseText);
+                    if (errRes && errRes.error) errText = errRes.error;
+                } catch (e) {}
+                showToast(errText, 'error');
             }
         };
 
@@ -6183,9 +6189,9 @@ def render_portal_with_tab(active_tab='print'):
     html = INDEX_HTML
     if active_tab != 'print':
         html = re.sub(r'class="nav-btn active" data-tab="print"', 'class="nav-btn" data-tab="print"', html)
-        html = re.sub(r'id="tab-print" class="tab-content active"', 'id="tab-print" class="tab-content"', html)
+        html = re.sub(r'<div class="tab-content active" id="tab-print">', '<div class="tab-content" id="tab-print">', html)
         html = re.sub(rf'class="nav-btn" data-tab="{active_tab}"', f'class="nav-btn active" data-tab="{active_tab}"', html)
-        html = re.sub(rf'id="tab-{active_tab}" class="tab-content"', f'id="tab-{active_tab}" class="tab-content active"', html)
+        html = re.sub(rf'<div class="tab-content" id="tab-{active_tab}">', f'<div class="tab-content active" id="tab-{active_tab}">', html)
     return render_template_string(html)
 
 @app.route('/')
@@ -8348,6 +8354,8 @@ def api_storage_list():
         } if user else None
     })
 
+MIN_FREE_DISK_BYTES = 50 * 1024 * 1024  # 50 MB safety buffer
+
 @app.route('/api/storage/upload', methods=['POST'])
 def api_storage_upload():
     scope = request.form.get('scope', 'public')
@@ -8365,22 +8373,74 @@ def api_storage_upload():
     if not uploaded_files:
         return jsonify({'success': False, 'error': 'No files provided for upload'}), 400
 
+    # Ensure target directory exists and verify disk space
+    try:
+        os.makedirs(target_dir, exist_ok=True)
+        _, _, free = shutil.disk_usage(target_dir)
+        if free < MIN_FREE_DISK_BYTES:
+            return jsonify({'success': False, 'error': f'Insufficient server disk space ({format_storage_bytes(free)} free)'}), 507
+    except Exception as e:
+        return jsonify({'success': False, 'error': f'Storage target inaccessible: {e}'}), 500
+
     uploaded_names = []
+    errors = []
     for file in uploaded_files:
         if not file or not file.filename:
             continue
-        clean_name = os.path.basename(file.filename.replace('\\', '/'))
-        clean_name = re.sub(r'[/\\:\0]', '_', clean_name).strip()
+
+        raw_name = os.path.basename(file.filename.replace('\\', '/'))
+        clean_name = re.sub(r'[\\/\0:\*\?\"<>\|]', '_', raw_name).strip('. ')
         if not clean_name:
-            continue
+            clean_name = f"upload_{int(time.time())}_{secrets.token_hex(3)}"
+        if len(clean_name) > 200:
+            name_root, name_ext = os.path.splitext(clean_name)
+            clean_name = name_root[:190] + name_ext
+
         dest_path = os.path.join(target_dir, clean_name)
+        canon_dest = os.path.realpath(dest_path)
+        canon_target = os.path.realpath(target_dir)
+        if canon_dest != canon_target and not canon_dest.startswith(canon_target + os.sep):
+            errors.append(f'{clean_name}: Path traversal detected')
+            continue
+
+        # Write safely via temporary file and atomic rename
+        temp_dest = os.path.join(target_dir, f".{clean_name}.tmp_{secrets.token_hex(4)}")
         try:
-            file.save(dest_path)
+            with open(temp_dest, 'wb') as f_out:
+                while True:
+                    chunk = file.stream.read(65536)
+                    if not chunk:
+                        break
+                    f_out.write(chunk)
+                f_out.flush()
+                try:
+                    os.fsync(f_out.fileno())
+                except OSError:
+                    pass
+
+            os.replace(temp_dest, dest_path)
+            try:
+                os.chmod(dest_path, 0o666 if scope == 'public' else 0o660)
+            except OSError:
+                pass
+
             uploaded_names.append(clean_name)
         except Exception as e:
-            return jsonify({'success': False, 'error': f'Failed saving {clean_name}: {e}'}), 500
+            if os.path.exists(temp_dest):
+                try:
+                    os.remove(temp_dest)
+                except Exception:
+                    pass
+            errors.append(f'{clean_name}: {e}')
 
-    return jsonify({'success': True, 'uploaded': uploaded_names})
+    if not uploaded_names and errors:
+        return jsonify({'success': False, 'error': '; '.join(errors)}), 500
+
+    return jsonify({
+        'success': True,
+        'uploaded': uploaded_names,
+        'warnings': errors if errors else None
+    })
 
 @app.route('/api/storage/mkdir', methods=['POST'])
 def api_storage_mkdir():
@@ -8389,7 +8449,7 @@ def api_storage_mkdir():
     folder_name = (request.form.get('folder_name') or '').strip()
     user = get_current_cloud_user()
 
-    if not folder_name or re.search(r'[\\/\0]', folder_name) or folder_name in ['.', '..']:
+    if not folder_name or re.search(r'[\\/\0:\*\?\"<>\|]', folder_name) or folder_name in ['.', '..']:
         return jsonify({'success': False, 'error': 'Invalid folder name'}), 400
 
     try:
@@ -8398,6 +8458,10 @@ def api_storage_mkdir():
         if os.path.exists(new_folder_path):
             return jsonify({'success': False, 'error': 'Folder already exists'}), 400
         os.makedirs(new_folder_path, exist_ok=True)
+        try:
+            os.chmod(new_folder_path, 0o777 if scope == 'public' else 0o770)
+        except OSError:
+            pass
         return jsonify({'success': True, 'folder': folder_name})
     except PermissionError as pe:
         return jsonify({'success': False, 'error': str(pe)}), 401
@@ -8420,8 +8484,14 @@ def api_storage_download():
     if not os.path.exists(file_path) or not os.path.isfile(file_path):
         return jsonify({'success': False, 'error': 'File not found'}), 404
 
+    if not os.access(file_path, os.R_OK):
+        return jsonify({'success': False, 'error': 'File permission denied'}), 403
+
     filename = os.path.basename(file_path)
-    return send_file(file_path, as_attachment=True, download_name=filename)
+    response = send_file(file_path, as_attachment=True, download_name=filename, conditional=True)
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    response.headers['Cache-Control'] = 'private, no-transform, max-age=3600'
+    return response
 
 @app.route('/api/storage/preview', methods=['GET'])
 def api_storage_preview():
@@ -8439,16 +8509,29 @@ def api_storage_preview():
     if not os.path.exists(file_path) or not os.path.isfile(file_path):
         return jsonify({'success': False, 'error': 'File not found'}), 404
 
+    if not os.access(file_path, os.R_OK):
+        return jsonify({'success': False, 'error': 'File permission denied'}), 403
+
     meta = get_file_type_meta(os.path.basename(file_path))
     if meta['category'] == 'text':
         try:
             with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
                 content = f.read(2 * 1024 * 1024)
-            return Response(content, mimetype='text/plain; charset=utf-8')
+            res = Response(content, mimetype='text/plain; charset=utf-8')
+            res.headers['X-Content-Type-Options'] = 'nosniff'
+            return res
         except Exception as e:
             return jsonify({'success': False, 'error': str(e)}), 500
 
-    return send_file(file_path, mimetype=meta['mime'])
+    if meta['mime'] == 'image/svg+xml':
+        res = send_file(file_path, mimetype='image/svg+xml')
+        res.headers['Content-Security-Policy'] = "default-src 'none'; style-src 'unsafe-inline'"
+        res.headers['X-Content-Type-Options'] = 'nosniff'
+        return res
+
+    res = send_file(file_path, mimetype=meta['mime'], conditional=True)
+    res.headers['X-Content-Type-Options'] = 'nosniff'
+    return res
 
 @app.route('/api/storage/rename', methods=['POST'])
 def api_storage_rename():

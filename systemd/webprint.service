@@ -7,7 +7,7 @@ Wants=cups.service
 Type=simple
 User=webprint
 Group=webprint
-SupplementaryGroups=lp lpadmin
+SupplementaryGroups=lp lpadmin mil sambashare
 WorkingDirectory=/opt/webprint
 Environment=PORT=80
 EnvironmentFile=-/etc/webprint/webprint.env
@@ -21,7 +21,7 @@ NoNewPrivileges=no
 ProtectSystem=strict
 ProtectHome=yes
 PrivateTmp=yes
-ReadWritePaths=/var/lib/webprint /var/spool/webprint /tmp /etc/cups
+ReadWritePaths=/var/lib/webprint /var/spool/webprint /tmp /etc/cups /srv/shares
 AmbientCapabilities=CAP_NET_BIND_SERVICE
 
 [Install]

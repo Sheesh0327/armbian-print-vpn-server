@@ -179,6 +179,64 @@ class TestCloudStorage(unittest.TestCase):
         after = self.client.get('/api/storage/list?scope=private', headers={'X-Storage-Token': token})
         self.assertEqual(after.status_code, 401)
 
+    def test_10_upload_hardening_and_disk_space_guard(self):
+        from unittest.mock import patch
+
+        # 1. Test insufficient disk space simulation
+        with patch('shutil.disk_usage', return_value=(1000000000, 990000000, 10000000)):  # 10MB free < 50MB
+            data = {
+                'scope': 'public',
+                'path': '',
+                'files': (io.BytesIO(b"data"), 'test_full.txt')
+            }
+            res = self.client.post('/api/storage/upload', data=data, content_type='multipart/form-data')
+            self.assertEqual(res.status_code, 507)
+            self.assertFalse(res.get_json()['success'])
+            self.assertIn('Insufficient server disk space', res.get_json()['error'])
+
+        # 2. Test sanitization of nasty filenames (traversal, colons, nulls)
+        upload_data = {
+            'scope': 'public',
+            'path': '',
+            'files': (io.BytesIO(b"Safe content"), '..\\..:nasty*file?.txt')
+        }
+        res = self.client.post('/api/storage/upload', data=upload_data, content_type='multipart/form-data')
+        self.assertEqual(res.status_code, 200)
+        uploaded = res.get_json()['uploaded']
+        self.assertEqual(len(uploaded), 1)
+        self.assertNotIn('..', uploaded[0])
+        self.assertNotIn('*', uploaded[0])
+        self.assertNotIn('?', uploaded[0])
+
+    def test_11_download_hardening_and_range_requests(self):
+        # Create test file
+        test_content = b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+        data = {
+            'scope': 'public',
+            'path': '',
+            'files': (io.BytesIO(test_content), 'range_test.txt')
+        }
+        self.client.post('/api/storage/upload', data=data, content_type='multipart/form-data')
+
+        # 1. Full download with security headers
+        dl = self.client.get('/api/storage/download?scope=public&path=range_test.txt')
+        self.assertEqual(dl.status_code, 200)
+        self.assertEqual(dl.headers.get('X-Content-Type-Options'), 'nosniff')
+        self.assertIn('private', dl.headers.get('Cache-Control', ''))
+        self.assertEqual(dl.data, test_content)
+        dl.close()
+
+        # 2. HTTP Byte Range request (first 10 bytes)
+        range_res = self.client.get('/api/storage/download?scope=public&path=range_test.txt', headers={'Range': 'bytes=0-9'})
+        self.assertEqual(range_res.status_code, 206)
+        self.assertEqual(range_res.data, b"0123456789")
+        range_res.close()
+
+        # 3. Non-existent file download returns clean 404
+        dl_404 = self.client.get('/api/storage/download?scope=public&path=does_not_exist.txt')
+        self.assertEqual(dl_404.status_code, 404)
+        self.assertFalse(dl_404.get_json()['success'])
+
 
 if __name__ == '__main__':
     unittest.main()
