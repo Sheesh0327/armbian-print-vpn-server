@@ -755,83 +755,85 @@ INDEX_HTML = """<!DOCTYPE html>
     </script>
     <style>
         :root, html[data-theme="gray"], html[data-theme="dark"] {
-            --radius-sm: 4px;
-            --radius-md: 6px;
-            --radius-lg: 8px;
+            --radius-sm: 6px;
+            --radius-md: 8px;
+            --radius-lg: 12px;
             --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-            --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+            --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
             --transition-theme: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
 
-            /* Chromium Gray Minimal Dark Palette */
-            --bg: #202124;
-            --surface: #282828;
-            --surface-elevated: #35363a;
-            --surface-hover: #3c4043;
-            --border: #3c4043;
-            --border-subtle: rgba(255, 255, 255, 0.08);
-            --border-hover: #5f6368;
-            --desk-bg: #525659;
+            /* Zinc / Obsidian Precision Palette */
+            --bg: #09090b;
+            --surface: #121215;
+            --surface-elevated: #18181c;
+            --surface-hover: #222227;
+            --border: #27272a;
+            --border-subtle: rgba(255, 255, 255, 0.05);
+            --border-hover: #3f3f46;
+            --desk-bg: #141417;
             --paper-bg: #ffffff;
-            --paper-text: #202124;
-            --paper-shadow: 0 4px 20px rgba(0, 0, 0, 0.45), 0 1px 4px rgba(0, 0, 0, 0.25);
-            --margin-line: rgba(66, 133, 244, 0.6);
-            --text-primary: #e8eaed;
-            --text-secondary: #9aa0a6;
-            --text-tertiary: #80868b;
-            --accent: #8ab4f8;
-            --accent-hover: #aecbfa;
-            --btn-print-bg: #ffffff;
-            --btn-print-text: #202124;
-            --btn-cancel-border: #5f6368;
-            --btn-cancel-text: #e8eaed;
-            --input-bg: #35363a;
-            --input-border: #4a4d51;
-            --input-focus: #8ab4f8;
+            --paper-text: #09090b;
+            --paper-shadow: 0 10px 30px rgba(0, 0, 0, 0.6), 0 2px 8px rgba(0, 0, 0, 0.4);
+            --margin-line: rgba(59, 130, 246, 0.5);
+            --text-primary: #f4f4f5;
+            --text-secondary: #a1a1aa;
+            --text-tertiary: #71717a;
+            --accent: #3b82f6;
+            --accent-hover: #60a5fa;
+            --btn-primary-bg: #f4f4f5;
+            --btn-primary-text: #09090b;
+            --btn-cancel-border: #27272a;
+            --btn-cancel-text: #f4f4f5;
+            --input-bg: #141417;
+            --input-border: #27272a;
+            --input-focus: #3b82f6;
             --row-hover: rgba(255, 255, 255, 0.03);
-            --badge-bg: #35363a;
-            --success: #81c995;
-            --danger: #f28b82;
-            --warning: #fdd663;
+            --badge-bg: #18181c;
+            --success: #10b981;
+            --danger: #ef4444;
+            --warning: #f59e0b;
+            --dot-color: rgba(255, 255, 255, 0.08);
         }
 
         html[data-theme="light"] {
-            --radius-sm: 4px;
-            --radius-md: 6px;
-            --radius-lg: 8px;
+            --radius-sm: 6px;
+            --radius-md: 8px;
+            --radius-lg: 12px;
             --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-            --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+            --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
             --transition-theme: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
 
-            /* Chromium Light Palette */
-            --bg: #f1f3f4;
+            /* Zinc Light Palette */
+            --bg: #fafafa;
             --surface: #ffffff;
-            --surface-elevated: #f8f9fa;
-            --surface-hover: #e8eaed;
-            --border: #dadce0;
-            --border-subtle: rgba(0, 0, 0, 0.06);
-            --border-hover: #bdc1c6;
-            --desk-bg: #d3d3d3;
+            --surface-elevated: #f4f4f5;
+            --surface-hover: #e4e4e7;
+            --border: #e4e4e7;
+            --border-subtle: rgba(0, 0, 0, 0.04);
+            --border-hover: #d4d4d8;
+            --desk-bg: #e4e4e7;
             --paper-bg: #ffffff;
-            --paper-text: #202124;
-            --paper-shadow: 0 4px 16px rgba(0, 0, 0, 0.15), 0 1px 3px rgba(0, 0, 0, 0.1);
-            --margin-line: rgba(26, 115, 232, 0.5);
-            --text-primary: #202124;
-            --text-secondary: #5f6368;
-            --text-tertiary: #80868b;
-            --accent: #1a73e8;
-            --accent-hover: #174ea6;
-            --btn-print-bg: #1a73e8;
-            --btn-print-text: #ffffff;
-            --btn-cancel-border: #dadce0;
-            --btn-cancel-text: #1a73e8;
+            --paper-text: #09090b;
+            --paper-shadow: 0 10px 25px rgba(0, 0, 0, 0.1), 0 2px 6px rgba(0, 0, 0, 0.05);
+            --margin-line: rgba(37, 99, 235, 0.5);
+            --text-primary: #09090b;
+            --text-secondary: #52525b;
+            --text-tertiary: #a1a1aa;
+            --accent: #2563eb;
+            --accent-hover: #1d4ed8;
+            --btn-primary-bg: #18181b;
+            --btn-primary-text: #fafafa;
+            --btn-cancel-border: #e4e4e7;
+            --btn-cancel-text: #18181b;
             --input-bg: #ffffff;
-            --input-border: #dadce0;
-            --input-focus: #1a73e8;
+            --input-border: #e4e4e7;
+            --input-focus: #2563eb;
             --row-hover: rgba(0, 0, 0, 0.02);
-            --badge-bg: #f1f3f4;
-            --success: #1e8e3e;
-            --danger: #d93025;
-            --warning: #f9ab00;
+            --badge-bg: #f4f4f5;
+            --success: #059669;
+            --danger: #dc2626;
+            --warning: #d97706;
+            --dot-color: rgba(0, 0, 0, 0.08);
         }
 
         * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -843,6 +845,7 @@ INDEX_HTML = """<!DOCTYPE html>
             font-size: 13px;
             line-height: 1.5;
             -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
             height: 100vh;
             overflow: hidden;
             display: flex;
@@ -850,9 +853,15 @@ INDEX_HTML = """<!DOCTYPE html>
             transition: var(--transition-theme);
         }
 
-        /* Top Header Bar */
+        /* Sleek Native Scrollbars */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: var(--border-hover); }
+
+        /* Precision Top Navigation Bar */
         header {
-            height: 46px;
+            height: 48px;
             border-bottom: 1px solid var(--border);
             padding: 0 18px;
             display: flex;
@@ -867,18 +876,17 @@ INDEX_HTML = """<!DOCTYPE html>
         .header-brand {
             display: flex;
             align-items: center;
-            gap: 10px;
+            gap: 12px;
         }
 
         .header-title {
             font-size: 13px;
-            font-weight: 700;
-            letter-spacing: 0.03em;
+            font-weight: 600;
+            letter-spacing: -0.01em;
             color: var(--text-primary);
             display: flex;
             align-items: center;
             gap: 6px;
-            text-transform: uppercase;
         }
 
         .header-title .tag {
@@ -886,10 +894,11 @@ INDEX_HTML = """<!DOCTYPE html>
             font-weight: 600;
             text-transform: uppercase;
             padding: 2px 6px;
-            border-radius: 3px;
+            border-radius: var(--radius-sm);
             background: var(--surface-elevated);
             color: var(--text-secondary);
             border: 1px solid var(--border);
+            letter-spacing: 0.04em;
         }
 
         .printer-select-wrapper {
@@ -904,13 +913,14 @@ INDEX_HTML = """<!DOCTYPE html>
         }
 
         .status-dot {
-            width: 8px;
-            height: 8px;
+            width: 7px;
+            height: 7px;
             border-radius: 50%;
             background: var(--success);
             flex-shrink: 0;
+            box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.2);
         }
-        .status-dot.stopped { background: var(--danger); }
+        .status-dot.stopped { background: var(--danger); box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.2); }
         .status-dot.printing { background: var(--warning); animation: pulse 1.5s infinite; }
 
         @keyframes pulse {
@@ -921,9 +931,12 @@ INDEX_HTML = """<!DOCTYPE html>
 
         .header-nav {
             display: flex;
-            gap: 3px;
+            gap: 4px;
             align-items: center;
-            overflow-x: auto;
+            background: var(--surface-elevated);
+            padding: 3px;
+            border-radius: var(--radius-md);
+            border: 1px solid var(--border);
         }
 
         .nav-btn {
@@ -936,18 +949,21 @@ INDEX_HTML = """<!DOCTYPE html>
             border-radius: var(--radius-sm);
             cursor: pointer;
             white-space: nowrap;
-            transition: all 0.12s ease;
+            transition: all 0.15s ease;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
         }
 
         .nav-btn:hover {
-            background: var(--surface-elevated);
             color: var(--text-primary);
         }
         .nav-btn.active {
-            background: var(--surface-elevated);
+            background: var(--surface);
             color: var(--text-primary);
             border-color: var(--border);
             font-weight: 600;
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
         }
 
         .header-controls {
@@ -960,14 +976,14 @@ INDEX_HTML = """<!DOCTYPE html>
             background: var(--surface-elevated);
             border: 1px solid var(--border);
             color: var(--text-secondary);
-            padding: 4px 9px;
+            padding: 5px 9px;
             border-radius: var(--radius-sm);
             cursor: pointer;
             font-size: 12px;
             display: flex;
             align-items: center;
             gap: 6px;
-            transition: all 0.12s;
+            transition: all 0.15s ease;
         }
         .btn-theme:hover, .btn-lock:hover {
             color: var(--text-primary);
@@ -988,14 +1004,14 @@ INDEX_HTML = """<!DOCTYPE html>
             flex-shrink: 0;
         }
         .icon-lg {
-            width: 44px;
-            height: 44px;
+            width: 40px;
+            height: 40px;
             stroke-width: 1.5;
-            stroke: #5f6368;
+            stroke: var(--text-tertiary);
             fill: none;
             stroke-linecap: round;
             stroke-linejoin: round;
-            margin-bottom: 6px;
+            margin-bottom: 8px;
             display: block;
         }
 
@@ -1003,7 +1019,7 @@ INDEX_HTML = """<!DOCTYPE html>
         main {
             flex: 1;
             width: 100%;
-            height: calc(100vh - 46px);
+            height: calc(100vh - 48px);
             margin: 0;
             padding: 0;
             display: flex;
@@ -1021,7 +1037,7 @@ INDEX_HTML = """<!DOCTYPE html>
             flex-direction: column;
         }
 
-        /* Chromium 2-Pane Dialog Layout */
+        /* Print Layout (Desk + Sidebar) */
         .cr-layout {
             display: flex;
             width: 100%;
@@ -1029,285 +1045,13 @@ INDEX_HTML = """<!DOCTYPE html>
             overflow: hidden;
         }
 
-        @media (max-width: 900px) {
-            .cr-layout {
-                flex-direction: column;
-                overflow-y: auto;
-                height: auto;
-            }
-            .cr-desk {
-                width: 100%;
-                min-height: 260px;
-                height: 42vh;
-                max-height: 380px;
-                padding: 12px 16px;
-            }
-            .cr-sidebar {
-                width: 100% !important;
-                max-width: 100% !important;
-                min-width: 0 !important;
-                border-left: none !important;
-                border-top: 1px solid var(--border);
-                height: auto !important;
-            }
-        }
-
-        @media (max-width: 768px) {
-            body {
-                height: auto;
-                min-height: 100dvh;
-                overflow-x: hidden;
-                overflow-y: auto;
-                -webkit-overflow-scrolling: touch;
-            }
-            main {
-                height: auto;
-                min-height: calc(100dvh - 84px);
-                overflow: visible;
-                padding-bottom: 74px;
-            }
-            .tab-content {
-                height: auto;
-                min-height: 100%;
-            }
-            .tab-content.active {
-                display: block;
-            }
-
-            /* Responsive 2-Row Header Reflow via CSS Flex Order */
-            header {
-                height: auto;
-                min-height: 80px;
-                padding: 8px 12px 6px;
-                flex-wrap: wrap;
-                gap: 8px 10px;
-            }
-            .header-brand {
-                order: 1;
-                flex: 1;
-                min-width: 0;
-                gap: 6px;
-            }
-            .header-title {
-                font-size: 12px;
-                white-space: nowrap;
-                overflow: hidden;
-                text-overflow: ellipsis;
-            }
-            .header-title .tag {
-                display: none;
-            }
-            .printer-select-wrapper {
-                padding: 2px 6px;
-                max-width: 140px;
-            }
-            #headerPrinterSelect {
-                max-width: 110px;
-                font-size: 11px !important;
-            }
-            .header-controls {
-                order: 2;
-                gap: 6px;
-                flex-shrink: 0;
-            }
-            .btn-lock, .btn-theme {
-                padding: 5px 8px;
-                font-size: 11px;
-            }
-            .btn-lock span {
-                display: none;
-            }
-            .header-nav {
-                order: 3;
-                width: 100%;
-                margin-top: 2px;
-                padding-bottom: 2px;
-                gap: 5px;
-                overflow-x: auto;
-                -webkit-overflow-scrolling: touch;
-                scrollbar-width: none;
-            }
-            .header-nav::-webkit-scrollbar {
-                display: none;
-            }
-            .nav-btn {
-                padding: 6px 12px;
-                font-size: 12px;
-                border-radius: 9999px;
-                flex-shrink: 0;
-            }
-
-            /* Desk & Preview Canvas */
-            .cr-desk {
-                width: 100%;
-                height: 36vh;
-                min-height: 220px;
-                max-height: 320px;
-                padding: 8px 10px;
-            }
-            .cr-doc-title {
-                max-width: 170px;
-                font-size: 12px;
-            }
-            .cr-empty-desk {
-                padding: 14px;
-                gap: 4px;
-            }
-            .cr-empty-desk .icon-lg {
-                width: 32px;
-                height: 32px;
-                margin-bottom: 2px;
-            }
-            .cr-empty-desk .empty-title {
-                font-size: 13px;
-            }
-            .cr-empty-desk .empty-subtitle {
-                font-size: 11px;
-                margin-bottom: 4px;
-            }
-            .cr-empty-desk .empty-btn {
-                padding: 4px 14px;
-                font-size: 11px;
-            }
-            .cr-desk-footer-pill {
-                font-size: 10px;
-                padding: 3px 10px;
-                max-width: 95%;
-                white-space: nowrap;
-                overflow: hidden;
-                text-overflow: ellipsis;
-            }
-
-            /* Settings Sidebar */
-            .cr-sidebar {
-                padding-bottom: 75px;
-            }
-            .cr-sidebar-header {
-                padding: 12px 16px 10px;
-            }
-            .cr-row {
-                padding: 9px 14px;
-                min-height: 44px;
-            }
-            .cr-row-control {
-                width: 55%;
-                max-width: 200px;
-            }
-            select, .cr-select, .cr-input {
-                font-size: 14px;
-                padding: 6px 22px 6px 8px;
-                min-height: 34px;
-            }
-            .cr-checkbox-row {
-                padding: 4px 0;
-            }
-            .cr-checkbox-row input[type="checkbox"] {
-                width: 18px;
-                height: 18px;
-            }
-
-            /* Fixed Floating Bottom Print Bar */
-            .cr-bottom-bar {
-                position: fixed;
-                bottom: 0;
-                left: 0;
-                right: 0;
-                width: 100%;
-                z-index: 100;
-                margin-top: 0;
-                padding: 10px 16px;
-                background: var(--surface);
-                border-top: 1px solid var(--border);
-                box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.25);
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-                gap: 12px;
-            }
-            .cr-btn-pill {
-                padding: 8px 18px;
-                font-size: 13px;
-                min-height: 38px;
-            }
-            .cr-btn-print {
-                flex: 1;
-                max-width: 200px;
-                font-size: 14px;
-                font-weight: 600;
-                padding: 8px 24px;
-            }
-
-            /* ID Studio Mobile */
-            #idPreviewDesk {
-                height: 36vh;
-                min-height: 220px;
-                max-height: 320px;
-                padding: 8px 10px;
-            }
-            #idSheetTitleTag {
-                max-width: 180px;
-                font-size: 11px;
-            }
-            #idEditControls .cr-row-control {
-                width: 60%;
-                max-width: 220px;
-            }
-            .id-bg-btn, .id-crop-btn {
-                padding: 4px 8px !important;
-                min-height: 28px;
-            }
-
-            /* General Tabs on Mobile */
-            .cr-page-container {
-                padding: 12px 12px 80px;
-                margin: 6px auto;
-                width: 100%;
-            }
-            .cr-card {
-                padding: 14px;
-                margin-bottom: 12px;
-            }
-            .cr-table-wrapper {
-                overflow-x: auto;
-                -webkit-overflow-scrolling: touch;
-                width: 100%;
-                margin-top: 8px;
-                border: 1px solid var(--border);
-                border-radius: var(--radius-sm);
-            }
-            .cr-table-wrapper table {
-                min-width: 580px;
-            }
-            #tab-settings div[style*="grid-template-columns"] {
-                grid-template-columns: repeat(2, 1fr) !important;
-                gap: 8px !important;
-            }
-            #adminLockedState div {
-                flex-direction: column;
-                max-width: 100% !important;
-            }
-            #adminUnlockedState div {
-                max-width: 100% !important;
-            }
-            #adminRateBw, #adminRateColor {
-                width: 100%;
-            }
-            .modal-card {
-                width: 92%;
-                max-width: 360px;
-                padding: 18px;
-            }
-            .toast {
-                bottom: 74px;
-                max-width: 90%;
-            }
-        }
-
-        /* Left Desk Canvas Area */
+        /* Left Technical Desk Canvas */
         .cr-desk {
             flex: 1;
             min-width: 0;
-            background: var(--desk-bg);
+            background-color: var(--desk-bg);
+            background-image: radial-gradient(var(--dot-color) 1.5px, transparent 1.5px);
+            background-size: 20px 20px;
             display: flex;
             flex-direction: column;
             align-items: center;
@@ -1347,44 +1091,34 @@ INDEX_HTML = """<!DOCTYPE html>
             max-width: 420px;
         }
 
-        .cr-desk-top-toolbar .cr-btn-pill.cr-btn-cancel {
-            background: var(--surface-elevated);
-            border: 1px solid var(--border);
-            color: var(--text-primary);
-        }
-        .cr-desk-top-toolbar .cr-btn-pill.cr-btn-cancel:hover {
-            background: var(--surface-hover);
-            border-color: var(--border-hover);
-        }
-
         .cr-desk-pagination {
             display: flex;
             align-items: center;
             gap: 8px;
-            background: rgba(0, 0, 0, 0.45);
-            backdrop-filter: blur(4px);
+            background: var(--surface);
+            border: 1px solid var(--border);
             padding: 3px 10px;
             border-radius: var(--radius-sm);
             font-size: 12px;
-            color: #ffffff;
+            color: var(--text-primary);
+            font-variant-numeric: tabular-nums;
         }
 
         .cr-page-btn {
             background: transparent;
             border: none;
-            color: #ffffff;
-            width: 22px;
-            height: 22px;
-            border-radius: 3px;
+            color: var(--text-primary);
+            width: 20px;
+            height: 20px;
+            border-radius: var(--radius-sm);
             cursor: pointer;
             font-size: 14px;
             display: flex;
             align-items: center;
             justify-content: center;
+            transition: background 0.15s;
         }
-        .cr-page-btn:hover {
-            background: rgba(255, 255, 255, 0.2);
-        }
+        .cr-page-btn:hover { background: var(--surface-hover); }
 
         .paper-sheet {
             background: var(--paper-bg);
@@ -1441,11 +1175,12 @@ INDEX_HTML = """<!DOCTYPE html>
             gap: 8px;
             font-size: 11px;
             font-weight: 500;
-            color: #e8eaed;
-            background: rgba(0, 0, 0, 0.45);
-            backdrop-filter: blur(4px);
+            color: var(--text-secondary);
+            background: var(--surface);
+            border: 1px solid var(--border);
             padding: 4px 14px;
             border-radius: 9999px;
+            font-variant-numeric: tabular-nums;
         }
 
         .cr-empty-desk {
@@ -1454,50 +1189,49 @@ INDEX_HTML = """<!DOCTYPE html>
             display: flex;
             flex-direction: column;
             align-items: center;
-            gap: 8px;
+            gap: 6px;
             cursor: pointer;
-            padding: 24px;
-            border-radius: var(--radius-md);
-            transition: background 0.15s;
+            padding: 32px 40px;
+            background: var(--surface);
+            border: 1px dashed var(--border);
+            border-radius: var(--radius-lg);
+            transition: all 0.15s ease;
             z-index: 5;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
         }
         .cr-empty-desk:hover {
-            background: rgba(0, 0, 0, 0.03);
+            border-color: var(--accent);
+            background: var(--surface-hover);
         }
         .cr-empty-desk .empty-title {
             font-weight: 600;
-            font-size: 15px;
-            color: #202124 !important;
+            font-size: 14px;
+            color: var(--text-primary);
         }
         .cr-empty-desk .empty-subtitle {
             font-size: 12px;
-            color: #5f6368 !important;
+            color: var(--text-secondary);
             margin-bottom: 8px;
         }
         .cr-empty-desk .empty-btn {
             font-size: 12px;
             pointer-events: none;
-            background: #ffffff !important;
-            border: 1px solid #dadce0 !important;
-            color: #1a73e8 !important;
-            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
-            border-radius: 9999px;
-            padding: 6px 18px;
+            background: var(--surface-elevated);
+            border: 1px solid var(--border);
+            color: var(--text-primary);
+            border-radius: var(--radius-sm);
+            padding: 6px 16px;
             display: inline-flex;
             align-items: center;
             justify-content: center;
             font-weight: 500;
         }
-        .cr-empty-desk:hover .empty-btn {
-            background: #f8fafd !important;
-            border-color: #aecbfa !important;
-        }
 
         /* Right Settings Sidebar */
         .cr-sidebar {
-            width: 330px;
-            min-width: 330px;
-            max-width: 340px;
+            width: 320px;
+            min-width: 320px;
+            max-width: 330px;
             background: var(--surface);
             border-left: 1px solid var(--border);
             display: flex;
@@ -1517,39 +1251,37 @@ INDEX_HTML = """<!DOCTYPE html>
         }
 
         .cr-sidebar-title {
-            font-size: 16px;
-            font-weight: 500;
+            font-size: 15px;
+            font-weight: 600;
             color: var(--text-primary);
         }
 
         .cr-sidebar-sheet-count {
             font-size: 12px;
             color: var(--text-secondary);
+            font-variant-numeric: tabular-nums;
         }
 
         .cr-row {
             display: flex;
             align-items: center;
             justify-content: space-between;
-            padding: 9px 20px;
-            min-height: 42px;
+            padding: 8px 20px;
+            min-height: 40px;
             transition: background 0.1s ease;
         }
-
-        .cr-row:hover {
-            background: var(--row-hover);
-        }
+        .cr-row:hover { background: var(--row-hover); }
 
         .cr-row-label {
-            font-size: 13px;
+            font-size: 12px;
             color: var(--text-secondary);
-            font-weight: 400;
+            font-weight: 500;
             flex: 1;
             padding-right: 8px;
         }
 
         .cr-row-control {
-            width: 175px;
+            width: 170px;
             display: flex;
             justify-content: flex-end;
             align-items: center;
@@ -1560,18 +1292,19 @@ INDEX_HTML = """<!DOCTYPE html>
             background-color: var(--input-bg);
             color: var(--text-primary);
             border: 1px solid var(--input-border);
-            border-radius: 4px;
-            padding: 5px 24px 5px 10px;
+            border-radius: var(--radius-sm);
+            padding: 5px 22px 5px 9px;
             font-size: 12px;
             outline: none;
             appearance: none;
-            background-image: url('data:image/svg+xml;charset=US-ASCII,<svg xmlns="http://www.w3.org/2000/svg" width="10" height="6" viewBox="0 0 10 6"><path fill="%239aa0a6" d="M0 0l5 5 5-5z"/></svg>');
+            background-image: url('data:image/svg+xml;charset=US-ASCII,<svg xmlns="http://www.w3.org/2000/svg" width="10" height="6" viewBox="0 0 10 6"><path fill="%23a1a1aa" d="M0 0l5 5 5-5z"/></svg>');
             background-repeat: no-repeat;
             background-position: right 8px center;
             cursor: pointer;
             text-overflow: ellipsis;
             white-space: nowrap;
             overflow: hidden;
+            transition: border-color 0.15s ease;
         }
         select option, .cr-select option {
             background-color: var(--surface);
@@ -1586,46 +1319,42 @@ INDEX_HTML = """<!DOCTYPE html>
             background-color: var(--input-bg);
             color: var(--text-primary);
             border: 1px solid var(--input-border);
-            border-radius: 4px;
+            border-radius: var(--radius-sm);
             padding: 5px 8px;
             font-size: 12px;
             outline: none;
+            transition: border-color 0.15s ease;
         }
-        ::placeholder {
-            color: var(--text-tertiary);
-            opacity: 1;
-        }
-
         .cr-input-number {
             width: 70px;
             text-align: left;
+            font-variant-numeric: tabular-nums;
         }
 
         .cr-checkbox-row {
             display: flex;
             align-items: center;
-            gap: 10px;
-            font-size: 13px;
+            gap: 8px;
+            font-size: 12px;
             color: var(--text-primary);
             cursor: pointer;
             width: 100%;
         }
-
         .cr-checkbox-row input[type="checkbox"] {
             width: 15px;
             height: 15px;
             accent-color: var(--accent);
             cursor: pointer;
+            border-radius: 3px;
         }
 
-        /* More Settings Accordion */
         .cr-more-toggle {
             display: flex;
             align-items: center;
             justify-content: space-between;
-            padding: 12px 20px;
+            padding: 10px 20px;
             color: var(--accent);
-            font-size: 13px;
+            font-size: 12px;
             font-weight: 500;
             cursor: pointer;
             user-select: none;
@@ -1633,49 +1362,45 @@ INDEX_HTML = """<!DOCTYPE html>
             margin-top: 4px;
             border-top: 1px solid var(--border-subtle);
         }
-
-        .cr-more-toggle:hover {
-            background: var(--row-hover);
-        }
+        .cr-more-toggle:hover { background: var(--row-hover); }
 
         .cr-more-content {
             display: none;
             flex-direction: column;
         }
-
-        .cr-more-content.open {
-            display: flex;
-        }
+        .cr-more-content.open { display: flex; }
 
         .cr-system-hint {
             padding: 10px 20px 4px;
-            font-size: 12px;
+            font-size: 11px;
             color: var(--text-tertiary);
             display: flex;
             align-items: center;
             justify-content: space-between;
+            font-variant-numeric: tabular-nums;
         }
 
         /* Bottom Actions Bar */
         .cr-bottom-bar {
             margin-top: auto;
-            padding: 14px 20px;
+            padding: 12px 20px;
             border-top: 1px solid var(--border);
             display: flex;
             align-items: center;
             justify-content: flex-end;
-            gap: 10px;
+            gap: 8px;
             background: var(--surface);
             position: sticky;
             bottom: 0;
             z-index: 10;
         }
 
-        .cr-btn-pill {
-            border-radius: 9999px;
-            font-size: 13px;
+        /* Unified Modern Buttons */
+        .btn, .cr-btn-pill {
+            border-radius: var(--radius-sm);
+            font-size: 12px;
             font-weight: 500;
-            padding: 6px 18px;
+            padding: 6px 14px;
             cursor: pointer;
             display: inline-flex;
             align-items: center;
@@ -1683,53 +1408,52 @@ INDEX_HTML = """<!DOCTYPE html>
             gap: 6px;
             transition: all 0.15s ease;
             outline: none;
+            text-decoration: none;
         }
 
-        .cr-btn-cancel {
-            background: transparent;
-            border: 1px solid var(--btn-cancel-border);
-            color: var(--btn-cancel-text);
-        }
-
-        .cr-btn-cancel:hover {
-            background: var(--surface-hover);
-        }
-
-        .id-bg-btn[data-bg="blue"] {
-            color: var(--accent) !important;
-        }
-        .id-bg-btn[data-bg="red"] {
-            color: var(--danger) !important;
-        }
-        .id-crop-btn.active, .id-bg-btn.active {
-            background: var(--surface-hover);
-            border-color: var(--accent);
-            color: var(--accent);
+        .btn-primary, .cr-btn-print {
+            background: var(--btn-primary-bg);
+            color: var(--btn-primary-text);
+            border: 1px solid transparent;
             font-weight: 600;
         }
-
-        .cr-btn-print {
-            background: var(--btn-print-bg);
-            color: var(--btn-print-text);
-            border: none;
-            font-weight: 600;
-            padding: 6px 22px;
+        .btn-primary:hover, .cr-btn-print:hover {
+            opacity: 0.92;
+            transform: translateY(-1px);
         }
-
-        .cr-btn-print:hover {
-            filter: brightness(0.92);
-        }
-        .cr-btn-print:disabled {
-            opacity: 0.5;
+        .btn-primary:active, .cr-btn-print:active { transform: translateY(0); }
+        .btn-primary:disabled, .cr-btn-print:disabled {
+            opacity: 0.4;
             cursor: not-allowed;
+            transform: none;
         }
 
-        /* Generic Center Page Container for PIN, History, Settings */
+        .btn-secondary, .cr-btn-cancel {
+            background: var(--surface-elevated);
+            border: 1px solid var(--border);
+            color: var(--text-primary);
+        }
+        .btn-secondary:hover, .cr-btn-cancel:hover {
+            background: var(--surface-hover);
+            border-color: var(--border-hover);
+        }
+
+        .btn-ghost {
+            background: transparent;
+            border: 1px solid transparent;
+            color: var(--text-secondary);
+        }
+        .btn-ghost:hover {
+            color: var(--text-primary);
+            background: var(--surface-hover);
+        }
+
+        /* Page Container (CUPS, History, Settings) */
         .cr-page-container {
-            max-width: 1200px;
+            max-width: 1240px;
             width: 100%;
-            margin: 20px auto;
-            padding: 0 20px 40px;
+            margin: 0 auto;
+            padding: 20px 24px 40px;
             overflow-y: auto;
             flex: 1;
         }
@@ -1739,8 +1463,7 @@ INDEX_HTML = """<!DOCTYPE html>
             border: 1px solid var(--border);
             border-radius: var(--radius-md);
             padding: 20px;
-            margin-bottom: 20px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            margin-bottom: 16px;
         }
 
         .cr-table-wrapper {
@@ -1753,7 +1476,7 @@ INDEX_HTML = """<!DOCTYPE html>
         table {
             width: 100%;
             border-collapse: collapse;
-            font-size: 13px;
+            font-size: 12px;
             text-align: left;
         }
 
@@ -1763,225 +1486,251 @@ INDEX_HTML = """<!DOCTYPE html>
             font-size: 11px;
             font-weight: 600;
             text-transform: uppercase;
+            letter-spacing: 0.04em;
             color: var(--text-secondary);
             border-bottom: 1px solid var(--border);
         }
 
         td {
             padding: 10px 14px;
-            border-bottom: 1px solid var(--border);
+            border-bottom: 1px solid var(--border-subtle);
             color: var(--text-primary);
+            font-variant-numeric: tabular-nums;
         }
-
         tr:last-child td { border-bottom: none; }
         tr:hover td { background: var(--row-hover); }
 
-        /* Toast & Modal */
+        /* Toast Notifications */
         .toast {
             position: fixed;
             bottom: 24px;
             right: 24px;
-            background: var(--surface-elevated);
+            background: var(--surface);
             border: 1px solid var(--border);
             color: var(--text-primary);
-            box-shadow: 0 10px 25px rgba(0,0,0,0.3);
-            border-radius: var(--radius-sm);
-            padding: 10px 18px;
-            font-size: 13px;
+            box-shadow: 0 12px 32px rgba(0,0,0,0.4);
+            border-radius: var(--radius-md);
+            padding: 10px 16px;
+            font-size: 12px;
             font-weight: 500;
             display: flex;
             align-items: center;
             gap: 10px;
             z-index: 100;
             transform: translateY(150%);
-            transition: transform 0.2s ease;
+            transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
         }
         .toast.show { transform: translateY(0); }
         .toast.success { border-color: var(--success); }
         .toast.error { border-color: var(--danger); }
 
+        /* Modal Overlays with Backdrop Blur */
         .modal-overlay {
             position: fixed;
             inset: 0;
-            background: rgba(0,0,0,0.65);
-            backdrop-filter: blur(4px);
+            background: rgba(0, 0, 0, 0.7);
+            backdrop-filter: blur(8px);
             display: none;
             align-items: center;
             justify-content: center;
             z-index: 90;
+            padding: 16px;
         }
         .modal-overlay.show { display: flex; }
         .modal-card {
             background: var(--surface);
             border: 1px solid var(--border);
             color: var(--text-primary);
-            border-radius: var(--radius-md);
+            border-radius: var(--radius-lg);
             padding: 24px;
-            max-width: 400px;
-            width: 90%;
-            box-shadow: 0 20px 40px rgba(0,0,0,0.5);
+            max-width: 420px;
+            width: 100%;
+            box-shadow: 0 24px 48px rgba(0, 0, 0, 0.5);
+            animation: modalPop 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        @keyframes modalPop {
+            0% { opacity: 0; transform: scale(0.96); }
+            100% { opacity: 1; transform: scale(1); }
         }
 
-        /* Cloud Storage Component Styles */
+        /* ========================================================
+           CLOUD STORAGE WORKSPACE (FULL-HEIGHT DESKTOP FLEX VIEWPORT)
+           ======================================================== */
+        #tab-storage {
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
         .storage-container {
             display: flex;
             flex-direction: column;
-            gap: 14px;
-            max-width: 1240px;
+            height: 100%;
+            width: 100%;
+            max-width: 1400px;
             margin: 0 auto;
-            padding: 8px 0 32px;
+            padding: 14px 20px;
+            gap: 10px;
+            overflow: hidden;
         }
-        .storage-top-bar {
+
+        /* Consolidated Single Command Toolbar */
+        .storage-toolbar {
             display: flex;
             justify-content: space-between;
             align-items: center;
             background: var(--surface);
             border: 1px solid var(--border);
-            border-radius: var(--radius-lg);
-            padding: 12px 18px;
-            gap: 16px;
+            border-radius: var(--radius-md);
+            padding: 6px 12px;
+            gap: 12px;
+            flex-shrink: 0;
             flex-wrap: wrap;
         }
+
+        .storage-toolbar-left {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex: 1;
+            min-width: 240px;
+        }
+
         .storage-scope-pills {
             display: flex;
-            gap: 6px;
-            background: var(--bg);
-            padding: 4px;
-            border-radius: var(--radius-md);
+            gap: 2px;
+            background: var(--surface-elevated);
+            padding: 2px;
+            border-radius: var(--radius-sm);
             border: 1px solid var(--border);
         }
         .storage-scope-btn {
             display: inline-flex;
             align-items: center;
-            gap: 8px;
-            padding: 7px 16px;
-            font-size: 13px;
+            gap: 6px;
+            padding: 5px 12px;
+            font-size: 12px;
             font-weight: 500;
             color: var(--text-secondary);
             background: transparent;
             border: none;
-            border-radius: var(--radius-sm);
+            border-radius: 4px;
             cursor: pointer;
             transition: all 0.15s ease;
         }
         .storage-scope-btn:hover { color: var(--text-primary); }
         .storage-scope-btn.active {
-            background: var(--surface-elevated);
-            color: var(--accent);
-            box-shadow: 0 1px 3px rgba(0,0,0,0.25);
+            background: var(--surface);
+            color: var(--text-primary);
+            font-weight: 600;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.15);
         }
-        .storage-user-bar {
-            display: flex;
-            align-items: center;
-            gap: 16px;
-            flex-wrap: wrap;
-        }
-        .storage-disk-info {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            font-size: 12px;
-            color: var(--text-secondary);
-        }
-        .storage-disk-bar {
-            width: 90px;
-            height: 6px;
-            background: var(--bg);
-            border-radius: 3px;
-            overflow: hidden;
-            display: inline-block;
-            border: 1px solid var(--border);
-        }
-        .storage-disk-bar-fill {
-            height: 100%;
-            background: var(--accent);
-            border-radius: 3px;
-            transition: width 0.3s ease;
-        }
-        .storage-action-bar {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            gap: 12px;
-            flex-wrap: wrap;
-        }
+
         .storage-breadcrumbs {
             display: flex;
             align-items: center;
             gap: 6px;
-            font-size: 13px;
+            font-size: 12px;
             color: var(--text-secondary);
-            background: var(--surface);
-            border: 1px solid var(--border);
-            border-radius: var(--radius-md);
-            padding: 8px 14px;
-            flex: 1;
-            min-width: 200px;
             overflow-x: auto;
+            white-space: nowrap;
         }
         .storage-crumb-link {
-            color: var(--accent);
+            color: var(--text-secondary);
             text-decoration: none;
             cursor: pointer;
-            white-space: nowrap;
             font-weight: 500;
+            transition: color 0.15s;
         }
-        .storage-crumb-link:hover { text-decoration: underline; }
+        .storage-crumb-link:hover { color: var(--text-primary); }
         .storage-crumb-sep { color: var(--text-tertiary); }
-        .storage-btn-group {
+
+        .storage-toolbar-right {
             display: flex;
-            gap: 8px;
             align-items: center;
-            flex-wrap: wrap;
+            gap: 8px;
         }
+
         .storage-search-input {
-            background: var(--surface);
+            background: var(--input-bg);
             border: 1px solid var(--border);
             color: var(--text-primary);
-            padding: 6px 12px;
-            font-size: 13px;
-            border-radius: var(--radius-md);
+            padding: 5px 10px;
+            font-size: 12px;
+            border-radius: var(--radius-sm);
             outline: none;
-            width: 170px;
+            width: 160px;
             transition: border-color 0.15s ease;
         }
         .storage-search-input:focus { border-color: var(--accent); }
-        .storage-dropzone {
+
+        .storage-view-toggle {
+            display: flex;
+            background: var(--surface-elevated);
             border: 1px solid var(--border);
-            border-radius: var(--radius-lg);
-            background: var(--surface);
-            min-height: 420px;
-            position: relative;
-            transition: all 0.2s ease;
+            border-radius: var(--radius-sm);
             overflow: hidden;
+        }
+        .storage-action-icon-btn {
+            background: transparent;
+            border: none;
+            color: var(--text-secondary);
+            padding: 5px 7px;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.15s ease;
+        }
+        .storage-action-icon-btn:hover { color: var(--text-primary); background: var(--surface-hover); }
+        .storage-action-icon-btn.active { color: var(--text-primary); background: var(--surface); }
+        .storage-action-icon-btn.danger:hover { color: var(--danger); }
+
+        /* Scrollable File Viewport */
+        .storage-dropzone {
+            flex: 1;
+            min-height: 0;
+            border: 1px solid var(--border);
+            border-radius: var(--radius-md);
+            background: var(--surface);
+            position: relative;
+            overflow-y: auto;
+            transition: border-color 0.15s ease;
         }
         .storage-dropzone.dragover {
             border-color: var(--accent);
             background: var(--surface-hover);
         }
+
         .storage-table {
             width: 100%;
             border-collapse: collapse;
-            font-size: 13px;
+            font-size: 12px;
         }
         .storage-table th {
             text-align: left;
-            padding: 10px 16px;
+            padding: 9px 14px;
             color: var(--text-secondary);
-            font-weight: 500;
+            font-weight: 600;
             font-size: 11px;
             text-transform: uppercase;
-            letter-spacing: 0.05em;
+            letter-spacing: 0.04em;
             border-bottom: 1px solid var(--border);
-            background: var(--surface);
+            background: var(--surface-elevated);
+            position: sticky;
+            top: 0;
+            z-index: 5;
         }
         .storage-table td {
-            padding: 10px 16px;
+            padding: 9px 14px;
             border-bottom: 1px solid var(--border-subtle);
             color: var(--text-primary);
             vertical-align: middle;
+            font-variant-numeric: tabular-nums;
         }
         .storage-row:hover td { background: var(--row-hover); }
+
         .storage-item-name {
             display: inline-flex;
             align-items: center;
@@ -1991,34 +1740,35 @@ INDEX_HTML = """<!DOCTYPE html>
             color: var(--text-primary);
         }
         .storage-item-name:hover { color: var(--accent); }
+
         .storage-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-            gap: 12px;
-            padding: 16px;
+            grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+            gap: 10px;
+            padding: 14px;
         }
         .storage-card {
             background: var(--surface-elevated);
             border: 1px solid var(--border);
-            border-radius: var(--radius-md);
-            padding: 14px 10px;
+            border-radius: var(--radius-sm);
+            padding: 12px 10px;
             display: flex;
             flex-direction: column;
             align-items: center;
             text-align: center;
-            gap: 8px;
+            gap: 6px;
             cursor: pointer;
             position: relative;
-            transition: transform 0.15s ease, border-color 0.15s ease;
+            transition: all 0.15s ease;
         }
         .storage-card:hover {
-            transform: translateY(-2px);
             border-color: var(--border-hover);
             background: var(--surface-hover);
+            transform: translateY(-1px);
         }
         .storage-card-icon {
-            width: 44px;
-            height: 44px;
+            width: 36px;
+            height: 36px;
             display: flex;
             align-items: center;
             justify-content: center;
@@ -2035,31 +1785,118 @@ INDEX_HTML = """<!DOCTYPE html>
         .storage-card-meta {
             font-size: 11px;
             color: var(--text-secondary);
+            font-variant-numeric: tabular-nums;
         }
         .storage-item-actions {
             display: flex;
-            gap: 4px;
+            gap: 2px;
             align-items: center;
             justify-content: flex-end;
         }
-        .storage-action-icon-btn {
-            background: transparent;
-            border: none;
-            color: var(--text-secondary);
-            padding: 5px;
-            border-radius: 4px;
-            cursor: pointer;
-            display: inline-flex;
+
+        /* Sleek Bottom Status Bar */
+        .storage-status-bar {
+            display: flex;
+            justify-content: space-between;
             align-items: center;
-            justify-content: center;
-            transition: all 0.15s ease;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-md);
+            padding: 6px 14px;
+            font-size: 11px;
+            color: var(--text-secondary);
+            flex-shrink: 0;
+            gap: 12px;
+            flex-wrap: wrap;
         }
-        .storage-action-icon-btn:hover {
+        .storage-status-bar code {
+            font-family: var(--font-mono);
             color: var(--text-primary);
             background: var(--surface-elevated);
+            padding: 2px 6px;
+            border-radius: 4px;
+            border: 1px solid var(--border-subtle);
         }
-        .storage-action-icon-btn.danger:hover {
-            color: var(--danger);
+        .storage-disk-meter {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-variant-numeric: tabular-nums;
+        }
+        .storage-disk-track {
+            width: 80px;
+            height: 5px;
+            background: var(--surface-elevated);
+            border-radius: 3px;
+            overflow: hidden;
+            border: 1px solid var(--border);
+        }
+        .storage-disk-fill {
+            height: 100%;
+            background: var(--accent);
+            border-radius: 3px;
+            transition: width 0.3s ease;
+        }
+
+        /* Mobile Adjustments */
+        @media (max-width: 900px) {
+            .cr-layout {
+                flex-direction: column;
+                overflow-y: auto;
+                height: auto;
+            }
+            .cr-desk {
+                width: 100%;
+                min-height: 260px;
+                height: 40vh;
+                max-height: 360px;
+                padding: 12px 16px;
+            }
+            .cr-sidebar {
+                width: 100% !important;
+                max-width: 100% !important;
+                border-left: none !important;
+                border-top: 1px solid var(--border);
+                height: auto !important;
+            }
+        }
+
+        @media (max-width: 768px) {
+            body {
+                height: auto;
+                min-height: 100dvh;
+                overflow-x: hidden;
+                overflow-y: auto;
+            }
+            main {
+                height: auto;
+                min-height: calc(100dvh - 84px);
+                overflow: visible;
+                padding-bottom: 74px;
+            }
+            .tab-content { height: auto; min-height: 100%; }
+            .tab-content.active { display: block; }
+            header {
+                height: auto;
+                padding: 8px 12px;
+                flex-wrap: wrap;
+            }
+            .header-nav {
+                order: 3;
+                width: 100%;
+                overflow-x: auto;
+            }
+            #tab-storage {
+                height: auto;
+                min-height: calc(100vh - 90px);
+            }
+            .storage-container {
+                height: auto;
+                padding: 10px;
+            }
+            .storage-dropzone {
+                min-height: 380px;
+            }
         }
     </style>
 </head>
@@ -2068,8 +1905,8 @@ INDEX_HTML = """<!DOCTYPE html>
 <header>
     <div class="header-brand">
         <div class="header-title">
-            PRINTSERVER
-            <span class="tag">APPLIANCE</span>
+            Print &amp; Storage Server
+            <span class="tag">Armbian</span>
         </div>
         <div class="printer-select-wrapper">
             <span class="status-dot" id="headerStatusDot"></span>
@@ -2373,25 +2210,7 @@ INDEX_HTML = """<!DOCTYPE html>
                         </div>
                     </div>
 
-                    <!-- Confidential PIN Queue -->
-                    <div class="cr-row">
-                        <span class="cr-row-label">Confidential</span>
-                        <div class="cr-row-control" style="justify-content: flex-start;">
-                            <label class="cr-checkbox-row">
-                                <input type="checkbox" id="chkPinHold">
-                                <span style="font-size: 13px;">Hold in PIN Queue</span>
-                            </label>
-                        </div>
-                    </div>
-                    <div class="cr-row" id="pinInputWrapper" style="display: none; padding-top: 0;">
-                        <span class="cr-row-label" style="font-size: 11px; color: var(--text-tertiary);">6-Digit PIN</span>
-                        <div class="cr-row-control">
-                            <input type="password" id="printPin" class="cr-input" maxlength="6" placeholder="••••••" style="text-align: center; font-size: 16px; letter-spacing: 0.25em; font-family: var(--font-mono); width: 110px;">
-                        </div>
-                    </div>
-                </div>
-
-                <!-- System / Spool Hint -->
+                    <!-- System / Spool Hint -->
                 <div class="cr-system-hint">
                     <span id="costDetails">0 pages @ ₱2.00/pg</span>
                     <span style="font-size: 11px; color: var(--text-tertiary);">CUPS IPP 2.0</span>
@@ -2401,175 +2220,6 @@ INDEX_HTML = """<!DOCTYPE html>
                 <div class="cr-bottom-bar">
                     <button type="button" class="cr-btn-pill cr-btn-cancel" id="btnCancelPrint">Cancel</button>
                     <button type="button" class="cr-btn-pill cr-btn-print" id="btnSubmitPrint">Print</button>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- TAB 2: ID PHOTO MAKER (MATCHING CHROMIUM WORKFLOW) -->
-    <div class="tab-content" id="tab-idmaker">
-        <div class="cr-layout">
-            <!-- Left: ID Virtual Desk Live Sheet Preview -->
-            <div class="cr-desk" id="idPreviewDesk">
-                <div class="cr-desk-top-toolbar" style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
-                    <div class="cr-doc-title" id="idSheetTitleTag">4×6" Glossy Sheet • Combo Rush (2 pcs 2×2" + 16 pcs 1×1")</div>
-                    <div style="display: flex; gap: 8px;">
-                        <button type="button" class="cr-btn-pill cr-btn-cancel" id="btnIdDownload" style="padding: 3px 10px; font-size: 11px;"><svg class="icon" viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg> Save PNG</button>
-                        <button type="button" class="cr-btn-pill cr-btn-print" id="btnIdDirectPrint" style="padding: 3px 14px; font-size: 11px;"><svg class="icon" viewBox="0 0 24 24"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg> Print ID Sheet</button>
-                    </div>
-                </div>
-
-                <div class="cr-desk-viewport">
-                    <div class="paper-sheet" id="idPaperSheet" style="display: flex; align-items: center; justify-content: center; background: #ffffff; border-radius: 2px; overflow: hidden; position: relative;">
-                        <canvas id="idSheetCanvas" style="width: 100%; height: 100%; object-fit: contain; display: none;"></canvas>
-                    </div>
-                    <div id="idEmptyState" class="cr-empty-desk" onclick="document.getElementById('idFileInput').click()">
-                        <svg class="icon-lg" viewBox="0 0 24 24"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path><circle cx="12" cy="13" r="4"></circle></svg>
-                        <div class="empty-title">Print Shop ID Studio Ready</div>
-                        <div class="empty-subtitle">Upload portrait photo on right to auto-generate packages</div>
-                        <button type="button" class="empty-btn">Choose Portrait...</button>
-                    </div>
-                </div>
-
-                <div class="cr-desk-footer-pill">
-                    <span id="idSheetSpecTag">4 × 6 in Photo Paper (101.6 × 152.4 mm)</span>
-                    <span>•</span>
-                    <span>300 DPI High Resolution</span>
-                    <span>•</span>
-                    <span id="idCutGuideTag">With Cutting Guides</span>
-                </div>
-            </div>
-
-            <!-- Right: ID Controls Sidebar -->
-            <div class="cr-sidebar">
-                <div class="cr-sidebar-header">
-                    <span class="cr-sidebar-title">ID Studio</span>
-                    <span class="cr-sidebar-sheet-count">High-Res 300 DPI</span>
-                </div>
-
-                <!-- Portrait Photo Ingestion -->
-                <input type="file" id="idFileInput" accept="image/*" style="display: none;">
-                <div class="cr-row" style="border-bottom: 1px solid var(--border-subtle);">
-                    <span class="cr-row-label">Portrait Photo</span>
-                    <div class="cr-row-control">
-                        <button type="button" class="cr-btn-pill cr-btn-cancel" id="btnSelectIdPhoto" style="padding: 4px 10px; font-size: 11px; width: 100%; text-overflow: ellipsis; overflow: hidden; white-space: nowrap;" onclick="document.getElementById('idFileInput').click()">
-                            <span id="idFileName">Choose portrait...</span>
-                        </button>
-                    </div>
-                </div>
-
-                <!-- Crop & Adjustments (Visible when photo is loaded) -->
-                <div id="idEditControls" style="display: none;">
-                    <div class="cr-row">
-                        <span class="cr-row-label">Aspect ratio</span>
-                        <div class="cr-row-control" style="gap: 4px;">
-                            <button type="button" class="cr-btn-pill cr-btn-cancel id-crop-btn active" data-aspect="1:1" style="padding: 3px 8px; font-size: 11px;">1:1</button>
-                            <button type="button" class="cr-btn-pill cr-btn-cancel id-crop-btn" data-aspect="35:45" style="padding: 3px 8px; font-size: 11px;">35:45</button>
-                            <button type="button" class="cr-btn-pill cr-btn-cancel" id="btnIdRotate" style="padding: 3px 8px; font-size: 11px;" title="Rotate 90°"><svg class="icon" viewBox="0 0 24 24" style="width: 12px; height: 12px;"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"></path></svg></button>
-                        </div>
-                    </div>
-
-                    <div class="cr-row">
-                        <span class="cr-row-label">Face Zoom (<span id="lblIdZoom">100%</span>)</span>
-                        <div class="cr-row-control">
-                            <input type="range" id="idZoomRange" min="50" max="300" value="100" style="width: 100%; accent-color: var(--accent);">
-                        </div>
-                    </div>
-
-                    <div class="cr-row">
-                        <span class="cr-row-label">Vertical Align</span>
-                        <div class="cr-row-control">
-                            <input type="range" id="idOffsetYRange" min="-100" max="100" value="0" style="width: 100%; accent-color: var(--accent);">
-                        </div>
-                    </div>
-
-                    <div class="cr-row">
-                        <span class="cr-row-label">Brightness (<span id="lblIdBright">0</span>)</span>
-                        <div class="cr-row-control">
-                            <input type="range" id="idBrightRange" min="-50" max="50" value="0" style="width: 100%; accent-color: var(--accent);">
-                        </div>
-                    </div>
-
-                    <div class="cr-row">
-                        <span class="cr-row-label">Contrast (<span id="lblIdContrast">0</span>)</span>
-                        <div class="cr-row-control">
-                            <input type="range" id="idContrastRange" min="-50" max="50" value="0" style="width: 100%; accent-color: var(--accent);">
-                        </div>
-                    </div>
-
-                    <div class="cr-row">
-                        <span class="cr-row-label">Background</span>
-                        <div class="cr-row-control" style="gap: 3px;">
-                            <button type="button" class="cr-btn-pill cr-btn-cancel id-bg-btn active" data-bg="original" style="padding: 2px 6px; font-size: 10px;">Orig</button>
-                            <button type="button" class="cr-btn-pill cr-btn-cancel id-bg-btn" data-bg="white" style="padding: 2px 6px; font-size: 10px;">White</button>
-                            <button type="button" class="cr-btn-pill cr-btn-cancel id-bg-btn" data-bg="blue" style="padding: 2px 6px; font-size: 10px;">Blue</button>
-                            <button type="button" class="cr-btn-pill cr-btn-cancel id-bg-btn" data-bg="red" style="padding: 2px 6px; font-size: 10px;">Red</button>
-                        </div>
-                    </div>
-
-                    <div class="cr-row">
-                        <span class="cr-row-label">Formal Name Tag</span>
-                        <div class="cr-row-control" style="justify-content: flex-start;">
-                            <label class="cr-checkbox-row">
-                                <input type="checkbox" id="chkIdNameTag">
-                                <span style="font-size: 12px;">Add Banner</span>
-                            </label>
-                        </div>
-                    </div>
-                    <div class="cr-row" id="idNameTagBox" style="display: none; padding-top: 0;">
-                        <span class="cr-row-label" style="font-size: 11px; color: var(--text-tertiary);">Name (Uppercase)</span>
-                        <div class="cr-row-control">
-                            <input type="text" id="idNameTagText" class="cr-input" placeholder="DELA CRUZ, JUAN P." style="text-transform: uppercase; font-size: 11px;">
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Package & Sheet Options -->
-                <div class="cr-row" style="border-top: 1px solid var(--border-subtle); margin-top: 4px;">
-                    <span class="cr-row-label">Package</span>
-                    <div class="cr-row-control">
-                        <select id="idPackageSelect" class="cr-select">
-                            <option value="rush_combo_a" selected>Combo Rush: 2 pcs 2×2" + 16 pcs 1×1"</option>
-                            <option value="rush_combo_b">Combo All: 2 pcs 2×2" + 6 Passport + 4 1×1"</option>
-                            <option value="all_2x2">All 2 × 2 in (6 pcs)</option>
-                            <option value="all_1x1">All 1 × 1 in (24 pcs)</option>
-                            <option value="all_passport">All Passport (12 pcs)</option>
-                            <option value="wallet">Wallet 2.5 × 3.5 in (4 pcs)</option>
-                        </select>
-                    </div>
-                </div>
-
-                <div class="cr-row">
-                    <span class="cr-row-label">Paper size</span>
-                    <div class="cr-row-control">
-                        <select id="idSheetPaperSize" class="cr-select">
-                            <option value="4x6in" selected>4 × 6 in Photo Card</option>
-                            <option value="A4">A4 Photo Sheet</option>
-                        </select>
-                    </div>
-                </div>
-
-                <div class="cr-row">
-                    <span class="cr-row-label">Copies</span>
-                    <div class="cr-row-control">
-                        <input type="number" id="idCopies" class="cr-input cr-input-number" min="1" max="50" value="1">
-                    </div>
-                </div>
-
-                <div class="cr-row">
-                    <span class="cr-row-label">Cutting Guides</span>
-                    <div class="cr-row-control" style="justify-content: flex-start;">
-                        <label class="cr-checkbox-row">
-                            <input type="checkbox" id="chkIdCutLines" checked>
-                            <span style="font-size: 12px;">Dashed lines</span>
-                        </label>
-                    </div>
-                </div>
-
-                <!-- Bottom Actions Bar -->
-                <div class="cr-bottom-bar">
-                    <button type="button" class="cr-btn-pill cr-btn-cancel" id="btnIdDownloadBottom">Save PNG</button>
-                    <button type="button" class="cr-btn-pill cr-btn-print" id="btnIdGeneratePrint">Print Sheet</button>
                 </div>
             </div>
         </div>
@@ -2651,32 +2301,32 @@ INDEX_HTML = """<!DOCTYPE html>
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; flex-wrap: wrap; gap: 8px;">
                     <div style="display: flex; align-items: center; gap: 8px;">
                         <svg class="icon" viewBox="0 0 24 24" style="stroke: var(--accent);"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>
-                        <strong style="font-size: 13px; color: var(--text-primary);">1-Click Print Shop Profiles</strong>
+                        <strong style="font-size: 13px; color: var(--text-primary);">Hardware Output Presets</strong>
                     </div>
                     <span style="font-size: 11px; color: var(--text-secondary);">Click a profile to preset hardware defaults for all connected devices.</span>
                 </div>
                 <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px;">
                     <button type="button" class="cr-btn-pill cr-btn-cancel cups-admin-req" onclick="applyCupsProfile('standard_docs')" style="justify-content: flex-start; padding: 8px 12px; height: auto;">
                         <div>
-                            <div style="font-weight: 600; color: var(--text-primary); font-size: 12px;">📄 Standard Documents</div>
+                            <div style="font-weight: 600; color: var(--text-primary); font-size: 12px;">Standard Documents</div>
                             <div style="font-size: 10px; color: var(--text-secondary);">A4 • Plain • Normal • B&W • Reverse</div>
                         </div>
                     </button>
                     <button type="button" class="cr-btn-pill cr-btn-cancel cups-admin-req" onclick="applyCupsProfile('eco_draft')" style="justify-content: flex-start; padding: 8px 12px; height: auto;">
                         <div>
-                            <div style="font-weight: 600; color: var(--text-primary); font-size: 12px;">⚡ Eco Draft (Fast)</div>
+                            <div style="font-weight: 600; color: var(--text-primary); font-size: 12px;">Eco Draft (Fast)</div>
                             <div style="font-size: 10px; color: var(--text-secondary);">A4 • Plain • Draft • B&W • 300 DPI</div>
                         </div>
                     </button>
                     <button type="button" class="cr-btn-pill cr-btn-cancel cups-admin-req" onclick="applyCupsProfile('glossy_photo')" style="justify-content: flex-start; padding: 8px 12px; height: auto;">
                         <div>
-                            <div style="font-weight: 600; color: var(--text-primary); font-size: 12px;">🖼️ Glossy Photo (4×6")</div>
+                            <div style="font-weight: 600; color: var(--text-primary); font-size: 12px;">Glossy Photo (4×6")</div>
                             <div style="font-size: 10px; color: var(--text-secondary);">4×6 • Glossy • Photo • RGB • 1200 DPI</div>
                         </div>
                     </button>
                     <button type="button" class="cr-btn-pill cr-btn-cancel cups-admin-req" onclick="applyCupsProfile('certificate')" style="justify-content: flex-start; padding: 8px 12px; height: auto;">
                         <div>
-                            <div style="font-weight: 600; color: var(--text-primary); font-size: 12px;">📜 Certificate / Heavy</div>
+                            <div style="font-weight: 600; color: var(--text-primary); font-size: 12px;">Certificate / Heavy</div>
                             <div style="font-size: 10px; color: var(--text-secondary);">A4 • CoatedMatte • Best • RGB • 600 DPI</div>
                         </div>
                     </button>
@@ -2969,9 +2619,7 @@ INDEX_HTML = """<!DOCTYPE html>
                             Monitor background services powering Windows file shares, AirPrint discovery, and remote mesh access.
                         </p>
                     </div>
-                    <a href="/api/reports/counter-sign" target="_blank" class="cr-btn-pill cr-btn-print" style="padding: 6px 14px; text-decoration: none; font-size: 12px;">
-                        <svg class="icon" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="9" y1="3" x2="9" y2="21"></line></svg> 🪧 Print Shop Counter QR Sign (A4)
-                    </a>
+                    
                 </div>
 
                 <div id="networkServicesGrid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px;">
@@ -3003,50 +2651,6 @@ INDEX_HTML = """<!DOCTYPE html>
                             Apply Advanced PPD Settings
                         </button>
                     </div>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- TAB 3: CONFIDENTIAL PIN RELEASE -->
-    <div class="tab-content" id="tab-pin">
-        <div class="cr-page-container">
-            <div class="cr-card" style="margin-bottom: 16px;">
-                <h3 style="font-size: 15px; font-weight: 600; color: var(--text-primary); margin-bottom: 6px;">Direct Job Release</h3>
-                <p style="font-size: 12px; color: var(--text-secondary); margin-bottom: 12px;">Walk-up release: enter your Job ID and 6-digit release PIN to send your held document directly to the printer.</p>
-                <div style="display: flex; gap: 10px; flex-wrap: wrap; align-items: center;">
-                    <input type="text" id="directJobId" class="cr-input" placeholder="Job ID (e.g. pin_...)" style="flex: 1; min-width: 180px;">
-                    <input type="password" id="directJobPin" class="cr-input" maxlength="6" placeholder="••••••" style="width: 110px; text-align: center; font-family: var(--font-mono); letter-spacing: 0.25em;">
-                    <button type="button" class="cr-btn-pill cr-btn-print" id="btnDirectPinRelease" style="padding: 6px 16px;">Release to Printer</button>
-                </div>
-            </div>
-
-            <div class="cr-card">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
-                    <div>
-                        <h2 style="font-size: 16px; font-weight: 600; color: var(--text-primary);">Confidential Print Queue</h2>
-                        <p style="font-size: 12px; color: var(--text-secondary);">Encrypted queue • Administrator authenticated view</p>
-                    </div>
-                    <button class="cr-btn-pill cr-btn-cancel" id="btnRefreshPinList" style="font-size: 12px;"><svg class="icon" viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg> Refresh</button>
-                </div>
-
-                <div class="cr-table-wrapper">
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>Time Held</th>
-                                <th>Document Title</th>
-                                <th>Pages</th>
-                                <th>Copies</th>
-                                <th>Color</th>
-                                <th>Est. Cost</th>
-                                <th>Action</th>
-                            </tr>
-                        </thead>
-                        <tbody id="pinTableBody">
-                            <tr><td colspan="7" style="text-align: center; color: var(--text-tertiary);">Loading queue...</td></tr>
-                        </tbody>
-                    </table>
                 </div>
             </div>
         </div>
@@ -3173,99 +2777,86 @@ INDEX_HTML = """<!DOCTYPE html>
     <!-- TAB: CLOUD STORAGE -->
     <div class="tab-content" id="tab-storage">
         <div class="storage-container">
-            <!-- Top Bar: Scope Selector, User Status, Disk Stats -->
-            <div class="storage-top-bar">
-                <div class="storage-scope-pills">
-                    <button class="storage-scope-btn active" id="btnScopePublic" onclick="setStorageScope('public')">
-                        <svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>
-                        <span>Public Files</span>
-                    </button>
-                    <button class="storage-scope-btn" id="btnScopePrivate" onclick="setStorageScope('private')">
-                        <svg class="icon" viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
-                        <span id="privateScopeLabel">Private Vault</span>
-                    </button>
-                </div>
-
-                <div class="storage-user-bar">
-                    <div class="storage-disk-info" id="storageDiskInfo">
-                        <span id="storageDiskText">Storage</span>
-                        <div class="storage-disk-bar"><div class="storage-disk-bar-fill" id="storageDiskBarFill" style="width: 0%;"></div></div>
+            <!-- Consolidated Command Toolbar -->
+            <div class="storage-toolbar">
+                <div class="storage-toolbar-left">
+                    <div class="storage-scope-pills">
+                        <button class="storage-scope-btn active" id="btnScopePublic" onclick="setStorageScope('public')">
+                            <svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>
+                            <span>Public Share</span>
+                        </button>
+                        <button class="storage-scope-btn" id="btnScopePrivate" onclick="setStorageScope('private')">
+                            <svg class="icon" viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+                            <span id="privateScopeLabel">Private Vault</span>
+                        </button>
                     </div>
-                    <div id="storageUserSection"></div>
-                </div>
-            </div>
 
-            <!-- Action Bar: Breadcrumbs, Search, Actions, View Toggle -->
-            <div class="storage-action-bar">
-                <div class="storage-breadcrumbs" id="storageBreadcrumbs">
-                    <span class="storage-crumb-link" onclick="navigateStoragePath('')">Home</span>
+                    <div class="storage-breadcrumbs" id="storageBreadcrumbs">
+                        <span class="storage-crumb-link" onclick="navigateStoragePath('')">Home</span>
+                    </div>
                 </div>
 
-                <div class="storage-btn-group">
+                <div class="storage-toolbar-right">
                     <input type="text" class="storage-search-input" id="storageSearchInput" placeholder="Filter files..." oninput="filterStorageView()">
-                    <button class="cr-btn-pill cr-btn-print" id="btnStorageUpload" onclick="triggerStorageUpload()">
+                    <div class="storage-view-toggle">
+                        <button class="storage-action-icon-btn active" id="btnStorageViewList" onclick="setStorageViewMode('list')" title="List View">
+                            <svg class="icon" viewBox="0 0 24 24"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg>
+                        </button>
+                        <button class="storage-action-icon-btn" id="btnStorageViewGrid" onclick="setStorageViewMode('grid')" title="Grid View">
+                            <svg class="icon" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
+                        </button>
+                    </div>
+                    <button class="btn btn-secondary" onclick="openNewFolderModal()">
+                        <svg class="icon" viewBox="0 0 24 24"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path><line x1="12" y1="11" x2="12" y2="17"></line><line x1="9" y1="14" x2="15" y2="14"></line></svg>
+                        <span>New Folder</span>
+                    </button>
+                    <button class="btn btn-primary" id="btnStorageUpload" onclick="triggerStorageUpload()">
                         <svg class="icon" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
                         <span>Upload</span>
                     </button>
                     <input type="file" id="storageFileInput" multiple style="display: none;" onchange="handleStorageFilesSelected(event)">
-                    <button class="cr-btn-pill cr-btn-cancel" onclick="openNewFolderModal()">
-                        <svg class="icon" viewBox="0 0 24 24"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path><line x1="12" y1="11" x2="12" y2="17"></line><line x1="9" y1="14" x2="15" y2="14"></line></svg>
-                        <span>New Folder</span>
-                    </button>
-                    <button class="cr-btn-pill cr-btn-cancel" onclick="loadCloudStorage(true)" title="Refresh">
-                        <svg class="icon" viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
-                    </button>
-                    <div style="display: flex; border: 1px solid var(--border); border-radius: var(--radius-sm); overflow: hidden;">
-                        <button class="storage-action-icon-btn active" id="btnStorageViewList" onclick="setStorageViewMode('list')" title="List View" style="padding: 6px 8px;">
-                            <svg class="icon" viewBox="0 0 24 24"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg>
-                        </button>
-                        <button class="storage-action-icon-btn" id="btnStorageViewGrid" onclick="setStorageViewMode('grid')" title="Grid View" style="padding: 6px 8px;">
-                            <svg class="icon" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
-                        </button>
-                    </div>
                 </div>
             </div>
 
             <!-- Upload progress bar -->
-            <div id="storageUploadProgressContainer" style="display: none; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 10px 14px;">
-                <div style="display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 6px;">
+            <div id="storageUploadProgressContainer" style="display: none; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 8px 12px;">
+                <div style="display: flex; justify-content: space-between; font-size: 11px; margin-bottom: 4px;">
                     <span id="storageUploadStatusText">Uploading files...</span>
-                    <span id="storageUploadPercentText">0%</span>
+                    <span id="storageUploadPercentText" style="font-variant-numeric: tabular-nums;">0%</span>
                 </div>
-                <div style="background: var(--bg); height: 6px; border-radius: 3px; overflow: hidden; border: 1px solid var(--border);">
+                <div style="background: var(--surface-elevated); height: 4px; border-radius: 2px; overflow: hidden; border: 1px solid var(--border);">
                     <div id="storageUploadProgressBar" style="width: 0%; height: 100%; background: var(--accent); transition: width 0.1s ease;"></div>
                 </div>
             </div>
 
-            <!-- Drag & Drop Explorer Area -->
+            <!-- Full-Height Scrollable Dropzone & File Explorer -->
             <div class="storage-dropzone" id="storageDropzone">
                 <div id="storageExplorerContent"></div>
                 <div id="storageEmptyState" style="display: none; text-align: center; padding: 60px 20px; color: var(--text-secondary);">
-                    <svg class="icon" viewBox="0 0 24 24" style="width: 48px; height: 48px; stroke: var(--border-hover); margin-bottom: 12px;"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
-                    <div style="font-size: 15px; font-weight: 500; color: var(--text-primary); margin-bottom: 4px;">This folder is empty</div>
-                    <div style="font-size: 12px;">Drag and drop files here, or click "Upload" above.</div>
+                    <svg class="icon-lg" viewBox="0 0 24 24" style="margin: 0 auto 12px; stroke: var(--text-tertiary);"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
+                    <div style="font-size: 14px; font-weight: 600; color: var(--text-primary); margin-bottom: 4px;">This folder is empty</div>
+                    <div style="font-size: 12px; color: var(--text-secondary);">Drag and drop files here, or click "Upload" above.</div>
                 </div>
-                <div id="storageDragOverlay" style="display: none; position: absolute; inset: 0; background: rgba(32,33,36,0.92); border: 2px dashed var(--accent); border-radius: var(--radius-lg); align-items: center; justify-content: center; z-index: 10;">
+                <div id="storageDragOverlay" style="display: none; position: absolute; inset: 0; background: rgba(9,9,11,0.92); border: 2px dashed var(--accent); border-radius: var(--radius-md); align-items: center; justify-content: center; z-index: 10;">
                     <div style="text-align: center; color: var(--accent);">
-                        <svg class="icon" viewBox="0 0 24 24" style="width: 48px; height: 48px; stroke: var(--accent); margin-bottom: 8px;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
-                        <div style="font-size: 16px; font-weight: 600;">Drop files here to upload</div>
+                        <svg class="icon-lg" viewBox="0 0 24 24" style="margin: 0 auto 8px; stroke: var(--accent);"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+                        <div style="font-size: 14px; font-weight: 600;">Drop files here to upload</div>
                     </div>
                 </div>
             </div>
 
-            <!-- Samba Access Guide Card -->
-            <div style="background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 14px 18px; font-size: 12px; color: var(--text-secondary); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
-                <div>
-                    <strong style="color: var(--text-primary);">Samba Network Share:</strong>
-                    <span>Connect directly from Windows File Explorer at </span>
-                    <code style="background: var(--surface-elevated); padding: 2px 6px; border-radius: 4px; font-family: var(--font-mono); color: var(--accent);">\\\\10.0.0.95\\Public</code>
-                    <span> or </span>
-                    <code style="background: var(--surface-elevated); padding: 2px 6px; border-radius: 4px; font-family: var(--font-mono); color: var(--accent);">\\\\10.0.0.95\\Private</code>
-                    <span> (User: <strong style="color: var(--text-primary);">mil</strong>)</span>
+            <!-- Sleek Status Footer Bar -->
+            <div class="storage-status-bar">
+                <div style="display: flex; align-items: center; gap: 12px;">
+                    <div>
+                        <span>Samba UNC: </span>
+                        <code id="storageSambaPath">\\\\10.0.0.95\\Public</code>
+                    </div>
+                    <div id="storageUserSection"></div>
                 </div>
-                <div>
-                    <span>Browser Quick Link: </span>
-                    <a href="/Public" style="color: var(--accent); text-decoration: none;">http://10.0.0.95/Public</a>
+                <div class="storage-disk-meter" id="storageDiskInfo">
+                    <span id="storageDiskText">Disk: -- free</span>
+                    <div class="storage-disk-track"><div class="storage-disk-fill" id="storageDiskBarFill" style="width: 0%;"></div></div>
                 </div>
             </div>
         </div>
@@ -3857,7 +3448,7 @@ INDEX_HTML = """<!DOCTYPE html>
     document.getElementById('btnClearPreview').addEventListener('click', clearPreviewState);
     document.getElementById('btnCancelPrint').addEventListener('click', clearPreviewState);
 
-    document.getElementById('chkPinHold').addEventListener('change', (e) => {
+    if (document.getElementById('chkPinHold')) document.getElementById('chkPinHold').addEventListener('change', (e) => {
         document.getElementById('pinInputWrapper').style.display = e.target.checked ? 'flex' : 'none';
         document.getElementById('btnSubmitPrint').textContent = e.target.checked ? 'Hold in PIN' : 'Print';
     });
@@ -3899,8 +3490,8 @@ INDEX_HTML = """<!DOCTYPE html>
             return;
         }
 
-        const isPin = document.getElementById('chkPinHold').checked;
-        const pin = document.getElementById('printPin').value.trim();
+        const isPin = document.getElementById('chkPinHold') ? document.getElementById('chkPinHold').checked : false;
+        const pin = document.getElementById('printPin') ? document.getElementById('printPin').value.trim() : '';
         if (isPin && (!pin || pin.length !== 6 || !/^[0-9]{6}$/.test(pin))) {
             showToast('Please enter a 6-digit PIN', 'error');
             return;
@@ -5431,6 +5022,7 @@ INDEX_HTML = """<!DOCTYPE html>
             return;
         }
         storageCurrentScope = scope;
+        const sPath = document.getElementById('storageSambaPath'); if (sPath) sPath.textContent = scope === 'private' ? '\\\\10.0.0.95\\Private' : '\\\\10.0.0.95\\Public';
         storageCurrentPath = '';
         document.getElementById('btnScopePublic').classList.toggle('active', scope === 'public');
         document.getElementById('btnScopePrivate').classList.toggle('active', scope === 'private');
@@ -6077,13 +5669,32 @@ INDEX_HTML = """<!DOCTYPE html>
 
     function openStorageModal(id) {
         const m = document.getElementById(id);
-        if (m) m.classList.add('show');
+        if (m) {
+            m.classList.add('show');
+            const inp = m.querySelector('input:not([type="hidden"])');
+            if (inp) setTimeout(() => inp.focus(), 60);
+        }
     }
 
     function closeStorageModal(id) {
         const m = document.getElementById(id);
         if (m) m.classList.remove('show');
     }
+
+    // Modern light-dismiss: close modal on backdrop click or Escape key
+    document.querySelectorAll('.modal-overlay').forEach(overlay => {
+        overlay.addEventListener('click', (e) => {
+            if (e.target === overlay) {
+                overlay.classList.remove('show');
+            }
+        });
+    });
+
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            document.querySelectorAll('.modal-overlay.show').forEach(m => m.classList.remove('show'));
+        }
+    });
 
     // Initial boot
     if (currentAdminToken) {
